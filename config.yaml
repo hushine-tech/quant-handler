@@ -1,0 +1,37 @@
+server:
+  http_addr: ":8090"
+
+dependencies:
+  account_service_grpc: "127.0.0.1:50051"
+  strategy_service_grpc: "127.0.0.1:50053"
+  order_service_grpc: "127.0.0.1:50051"
+  # control-panel-service owns hosted runtime routing, self-hosted proxying,
+  # runtime credentials, and market-data control-plane RPCs.
+  control_panel_service_grpc: "127.0.0.1:50054"
+  # Notification Management REST only proxies account-service notification RPCs.
+  # Kafka/Telegram delivery is owned by account-service, not quant-handler.
+
+features:
+  # When true, strategy run/preview/stop/status use control-panel runtime
+  # routing and the RuntimeChannel proxy for both hosted and self_hosted.
+  control_panel_route_resolution: false
+
+auth:
+  # 生产环境推荐用 env var AUTH_JWT_SECRET 覆盖
+  jwt_secret: "dev-secret-change-me"
+  cors_origins:
+    - "http://localhost:5173"
+
+log:
+  output_dir: "./logs"
+  local_file:
+    enabled: true
+  kafka:
+    enabled: true
+    brokers: ["192.168.88.10:19092"]
+    topic: "app-logs"
+    topic_prefix: "app-logs"
+  tracing:
+    enabled: true
+    endpoint: "http://192.168.88.10:4318"
+    service_name: "quant-handler"

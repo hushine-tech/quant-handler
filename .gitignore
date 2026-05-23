@@ -1,0 +1,15 @@
+/bin/
+/dist/
+/logs
+/.run.pid
+/quant-handler
+config.local.yaml
+.DS_Store
+.pytest_cache/
+.claude/
+.cursor/
+.idea/
+.opencode/
+
+# Local process documents live outside the code repository.
+/openspec/
