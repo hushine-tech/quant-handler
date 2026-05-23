@@ -14,7 +14,7 @@ dependencies:
 features:
   # When true, strategy run/preview/stop/status use control-panel runtime
   # routing and the RuntimeChannel proxy for both hosted and self_hosted.
-  control_panel_route_resolution: false
+  control_panel_route_resolution: true
 
 auth:
   # 生产环境推荐用 env var AUTH_JWT_SECRET 覆盖
