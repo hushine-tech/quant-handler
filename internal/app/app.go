@@ -11,13 +11,13 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	controlpanelv1 "github.com/hushine-tech/control-panel-service/gen/controlpanelv1"
+	mdv1 "github.com/hushine-tech/control-panel-service/gen/marketdatav1"
+	"github.com/hushine-tech/core-service/gen/accountv1"
+	orderv1 "github.com/hushine-tech/core-service/gen/orderv1"
 	grpcclientmw "github.com/hushine-tech/golang-lib/middleware/grpcclient"
 	httpmw "github.com/hushine-tech/golang-lib/middleware/httpserver"
 	cerrors "github.com/hushine-tech/golang-lib/pkg/errors"
-	"github.com/hushine-tech/core-service/gen/accountv1"
-	orderv1 "github.com/hushine-tech/core-service/gen/orderv1"
-	controlpanelv1 "github.com/hushine-tech/control-panel-service/gen/controlpanelv1"
-	mdv1 "github.com/hushine-tech/control-panel-service/gen/marketdatav1"
 	"github.com/hushine-tech/quant-handler/internal/config"
 	"github.com/hushine-tech/quant-handler/internal/controlpanel"
 	"github.com/hushine-tech/quant-handler/internal/logger"
@@ -432,10 +432,11 @@ func (s *server) handleAccountsByID() http.Handler {
 }
 
 type accountJSON struct {
-	AccountID int64  `json:"account_id"`
-	Name      string `json:"name"`
-	Mode      int32  `json:"mode"`
-	CreatedAt string `json:"created_at"`
+	AccountID   int64  `json:"account_id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Mode        int32  `json:"mode"`
+	CreatedAt   string `json:"created_at"`
 }
 
 func (s *server) listAccounts(w http.ResponseWriter, r *http.Request) {
@@ -444,8 +445,15 @@ func (s *server) listAccounts(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnauthorized, "missing user context")
 		return
 	}
+	limit, offset := parseCollectionPaging(r)
+	page := collectionPageRequested(r)
 	ctx := r.Context()
-	resp, err := s.accounts.ListAccounts(ctx, &accountv1.ListAccountsRequest{UserId: uid})
+	req := &accountv1.ListAccountsRequest{UserId: uid}
+	if page {
+		req.Limit = limit
+		req.Offset = offset
+	}
+	resp, err := s.accounts.ListAccounts(ctx, req)
 	if err != nil {
 		code, msg := grpcToHTTP(err)
 		writeErr(w, code, msg)
@@ -454,6 +462,15 @@ func (s *server) listAccounts(w http.ResponseWriter, r *http.Request) {
 	out := make([]accountJSON, 0, len(resp.GetAccounts()))
 	for _, a := range resp.GetAccounts() {
 		out = append(out, registryEntryToJSON(a))
+	}
+	if page {
+		writeJSON(w, http.StatusOK, pagedResponse{
+			Items:      out,
+			NextOffset: offset + int32(len(out)),
+			HasMore:    resp.GetHasMore(),
+			Total:      resp.GetTotal(),
+		})
+		return
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -480,10 +497,11 @@ func (s *server) getAccount(w http.ResponseWriter, r *http.Request, id int64) {
 
 func registryEntryToJSON(e *accountv1.AccountRegistryEntry) accountJSON {
 	return accountJSON{
-		AccountID: e.GetAccountId(),
-		Name:      e.GetName(),
-		Mode:      e.GetMode(),
-		CreatedAt: e.GetCreatedAt().AsTime().UTC().Format(time.RFC3339Nano),
+		AccountID:   e.GetAccountId(),
+		Name:        e.GetName(),
+		Description: e.GetDescription(),
+		Mode:        e.GetMode(),
+		CreatedAt:   e.GetCreatedAt().AsTime().UTC().Format(time.RFC3339Nano),
 	}
 }
 

@@ -42,6 +42,7 @@ type futIn struct {
 
 type createAccountBodyExt struct {
 	Name           string  `json:"name"`
+	Description    string  `json:"description"`
 	Mode           int32   `json:"mode"`
 	APIKey         string  `json:"api_key"`
 	APISecret      string  `json:"api_secret"`
@@ -363,6 +364,7 @@ func (s *server) createAccountWithBootstrap(w http.ResponseWriter, r *http.Reque
 	}
 	resp, err := s.accounts.CreateAccount(ctx, &accountv1.CreateAccountRequest{
 		Name:           body.Name,
+		Description:    body.Description,
 		Mode:           body.Mode,
 		ApiKey:         body.APIKey,
 		ApiSecret:      body.APISecret,
@@ -405,9 +407,10 @@ func (s *server) createAccountWithBootstrap(w http.ResponseWriter, r *http.Reque
 	}
 
 	writeJSON(w, http.StatusCreated, accountJSON{
-		AccountID: resp.GetAccountId(),
-		Name:      resp.GetName(),
-		Mode:      resp.GetMode(),
-		CreatedAt: resp.GetCreatedAt().AsTime().UTC().Format(time.RFC3339Nano),
+		AccountID:   resp.GetAccountId(),
+		Name:        resp.GetName(),
+		Description: resp.GetDescription(),
+		Mode:        resp.GetMode(),
+		CreatedAt:   resp.GetCreatedAt().AsTime().UTC().Format(time.RFC3339Nano),
 	})
 }

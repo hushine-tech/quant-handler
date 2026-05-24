@@ -519,7 +519,14 @@ func (s *server) listMarketDataRequests(w http.ResponseWriter, r *http.Request) 
 		writeErr(w, http.StatusUnauthorized, "missing user context")
 		return
 	}
-	resp, err := s.marketData.ListMarketDataRequests(r.Context(), &mdv1.ListMarketDataRequestsRequest{UserId: uid})
+	limit, offset := parseCollectionPaging(r)
+	page := collectionPageRequested(r)
+	req := &mdv1.ListMarketDataRequestsRequest{UserId: uid}
+	if page {
+		req.Limit = limit
+		req.Offset = offset
+	}
+	resp, err := s.marketData.ListMarketDataRequests(r.Context(), req)
 	if err != nil {
 		code, msg := grpcToHTTP(err)
 		writeErr(w, code, msg)
@@ -531,6 +538,15 @@ func (s *server) listMarketDataRequests(w http.ResponseWriter, r *http.Request) 
 			Request: requestToJSON(e.GetRequest()),
 			Stream:  streamToJSON(e.GetStream()),
 		})
+	}
+	if page {
+		writeJSON(w, http.StatusOK, pagedResponse{
+			Items:      out,
+			NextOffset: offset + int32(len(out)),
+			HasMore:    resp.GetHasMore(),
+			Total:      resp.GetTotal(),
+		})
+		return
 	}
 	writeJSON(w, http.StatusOK, out)
 }

@@ -158,17 +158,24 @@ func (s *server) listStrategies(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	namePrefix := q.Get("name_prefix")
 	activeOnly := q.Get("active_only") == "true"
+	limit, offset := parseCollectionPaging(r)
+	page := collectionPageRequested(r)
 	uid, ok := userIDFromRequest(r)
 	if !ok {
 		writeErr(w, http.StatusUnauthorized, "missing user context")
 		return
 	}
 
-	resp, err := s.accounts.ListStrategies(r.Context(), &accountv1.ListStrategiesRequest{
+	req := &accountv1.ListStrategiesRequest{
 		NamePrefix: namePrefix,
 		ActiveOnly: activeOnly,
 		UserId:     uid,
-	})
+	}
+	if page {
+		req.Limit = limit
+		req.Offset = offset
+	}
+	resp, err := s.accounts.ListStrategies(r.Context(), req)
 	if err != nil {
 		code, msg := grpcToHTTP(err)
 		writeErr(w, code, msg)
@@ -177,6 +184,15 @@ func (s *server) listStrategies(w http.ResponseWriter, r *http.Request) {
 	out := make([]strategyJSON, 0, len(resp.GetStrategies()))
 	for _, st := range resp.GetStrategies() {
 		out = append(out, protoStrategyToJSON(st, false))
+	}
+	if page {
+		writeJSON(w, http.StatusOK, pagedResponse{
+			Items:      out,
+			NextOffset: offset + int32(len(out)),
+			HasMore:    resp.GetHasMore(),
+			Total:      resp.GetTotal(),
+		})
+		return
 	}
 	writeJSON(w, http.StatusOK, out)
 }

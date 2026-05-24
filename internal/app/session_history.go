@@ -34,6 +34,30 @@ type pagedResponse struct {
 	Total      int64 `json:"total"`
 }
 
+func collectionPageRequested(r *http.Request) bool {
+	return r.URL.Query().Get("page") == "true"
+}
+
+func parseCollectionPaging(r *http.Request) (limit, offset int32) {
+	limit = 50
+	offset = 0
+	q := r.URL.Query()
+	if v := q.Get("limit"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 32); err == nil && n > 0 {
+			if n > auditListMaxLimit {
+				n = auditListMaxLimit
+			}
+			limit = int32(n)
+		}
+	}
+	if v := q.Get("offset"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 32); err == nil && n >= 0 {
+			offset = int32(n)
+		}
+	}
+	return limit, offset
+}
+
 // parseAuditListPaging extracts `limit` + `offset` from the query string,
 // applying the shared audit-list paging contract.
 func parseAuditListPaging(r *http.Request) (limit, offset int32) {
@@ -115,34 +139,67 @@ func (s *server) listSessionsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	q := r.URL.Query()
 	aidStr := q.Get("account_id")
-	if aidStr == "" {
+	page := collectionPageRequested(r)
+	if aidStr == "" && !page {
 		writeErr(w, http.StatusBadRequest, "account_id is required")
 		return
 	}
-	aid, err := strconv.ParseInt(aidStr, 10, 64)
-	if err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid account_id")
-		return
-	}
-	var limit int32 = 20
-	if v := q.Get("limit"); v != "" {
-		if n, err := strconv.ParseInt(v, 10, 32); err == nil && n > 0 {
-			limit = int32(n)
+	var aid int64
+	if aidStr != "" {
+		var err error
+		aid, err = strconv.ParseInt(aidStr, 10, 64)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "invalid account_id")
+			return
 		}
 	}
-	var offset int32
-	if v := q.Get("offset"); v != "" {
-		if n, err := strconv.ParseInt(v, 10, 32); err == nil && n >= 0 {
-			offset = int32(n)
+	limit, offset := parseCollectionPaging(r)
+	if !page {
+		limit = 20
+		if v := q.Get("limit"); v != "" {
+			if n, err := strconv.ParseInt(v, 10, 32); err == nil && n > 0 {
+				limit = int32(n)
+			}
 		}
 	}
 
-	resp, err := s.accounts.ListSessions(r.Context(), &accountv1.ListSessionsRequest{
+	req := &accountv1.ListSessionsRequest{
 		AccountId: aid,
 		Limit:     limit,
 		Offset:    offset,
 		UserId:    uid,
-	})
+	}
+	if v := strings.TrimSpace(q.Get("runtime_id")); v != "" {
+		req.RuntimeId = v
+	}
+	if v := strings.TrimSpace(q.Get("strategy_id")); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+			req.StrategyId = n
+		}
+	}
+	if v := strings.TrimSpace(q.Get("mode")); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 32); err == nil {
+			req.Mode = int32(n)
+			req.ModeSet = true
+		}
+	}
+	if v := strings.TrimSpace(q.Get("status")); v != "" {
+		req.Status = v
+	}
+	if v := strings.TrimSpace(q.Get("session_id")); v != "" {
+		req.SessionIdContains = v
+	}
+	if v := strings.TrimSpace(q.Get("started_after_ms")); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+			req.StartedAfterMs = n
+		}
+	}
+	if v := strings.TrimSpace(q.Get("started_before_ms")); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+			req.StartedBeforeMs = n
+		}
+	}
+	resp, err := s.accounts.ListSessions(r.Context(), req)
 	if err != nil {
 		code, msg := grpcToHTTP(err)
 		writeErr(w, code, msg)
@@ -152,6 +209,15 @@ func (s *server) listSessionsHandler(w http.ResponseWriter, r *http.Request) {
 	out := make([]sessionJSON, 0, len(resp.GetSessions()))
 	for _, se := range resp.GetSessions() {
 		out = append(out, protoSessionToJSON(se))
+	}
+	if page {
+		writeJSON(w, http.StatusOK, pagedResponse{
+			Items:      out,
+			NextOffset: offset + int32(len(out)),
+			HasMore:    resp.GetHasMore(),
+			Total:      resp.GetTotal(),
+		})
+		return
 	}
 	writeJSON(w, http.StatusOK, out)
 }

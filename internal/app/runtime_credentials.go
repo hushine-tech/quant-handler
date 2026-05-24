@@ -179,11 +179,18 @@ func (s *server) listRuntimeCredentials(w http.ResponseWriter, r *http.Request) 
 	}
 	includeRevoked := r.URL.Query().Get("include_revoked") == "true"
 	includeInactive := r.URL.Query().Get("include_inactive") == "true"
-	resp, err := s.cpRuntime.ListRuntimeCredentials(r.Context(), &controlpanelv1.ListRuntimeCredentialsRequest{
+	limit, offset := parseCollectionPaging(r)
+	page := collectionPageRequested(r)
+	req := &controlpanelv1.ListRuntimeCredentialsRequest{
 		UserId:          uid,
 		IncludeRevoked:  includeRevoked,
 		IncludeInactive: includeInactive,
-	})
+	}
+	if page {
+		req.Limit = limit
+		req.Offset = offset
+	}
+	resp, err := s.cpRuntime.ListRuntimeCredentials(r.Context(), req)
 	if err != nil {
 		code, msg := grpcToHTTP(err)
 		writeErr(w, code, msg)
@@ -192,6 +199,15 @@ func (s *server) listRuntimeCredentials(w http.ResponseWriter, r *http.Request) 
 	out := make([]runtimeCredentialJSON, 0, len(resp.GetCredentials()))
 	for _, c := range resp.GetCredentials() {
 		out = append(out, runtimeCredentialToJSON(c))
+	}
+	if page {
+		writeJSON(w, http.StatusOK, pagedResponse{
+			Items:      out,
+			NextOffset: offset + int32(len(out)),
+			HasMore:    resp.GetHasMore(),
+			Total:      resp.GetTotal(),
+		})
+		return
 	}
 	writeJSON(w, http.StatusOK, out)
 }
