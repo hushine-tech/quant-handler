@@ -73,7 +73,7 @@ func Run(cfg *config.Config) error {
 		}
 	}
 
-	// order.v1 API（可选，当前由 account-service gRPC 端口提供）
+	// order.v1 API（可选，当前由 core-service gRPC 端口提供）
 	var orderCli orderv1.OrderServiceClient
 	if orderAddr := cfg.Dependencies.OrderServiceGRPC; orderAddr != "" {
 		orderConn, err := grpc.DialContext(ctx, orderAddr, dialOpts...)

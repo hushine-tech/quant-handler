@@ -88,7 +88,11 @@ func (c *Config) ApplyEnvOverrides() {
 		c.Server.HTTPAddr = v
 	}
 
-	if v := os.Getenv("DEPENDENCIES_ACCOUNT_SERVICE_GRPC"); v != "" {
+	if v := os.Getenv("DEPENDENCIES_CORE_SERVICE_GRPC"); v != "" {
+		c.Dependencies.AccountServiceGRPC = v
+	} else if v := os.Getenv("CORE_SERVICE_GRPC_ADDR"); v != "" {
+		c.Dependencies.AccountServiceGRPC = v
+	} else if v := os.Getenv("DEPENDENCIES_ACCOUNT_SERVICE_GRPC"); v != "" {
 		c.Dependencies.AccountServiceGRPC = v
 	} else if v := os.Getenv("ACCOUNT_SERVICE_GRPC_ADDR"); v != "" {
 		c.Dependencies.AccountServiceGRPC = v

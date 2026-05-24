@@ -55,7 +55,7 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260406210006-6f92a3bedf2d // indirect
 )
 
-replace github.com/hushine-tech/core-service => ../../account-service
+replace github.com/hushine-tech/core-service => ../../core-service
 
 replace github.com/hushine-tech/control-panel-service => ../../control-panel-service
 

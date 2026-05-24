@@ -8,8 +8,8 @@ dependencies:
   # control-panel-service owns hosted runtime routing, self-hosted proxying,
   # runtime credentials, and market-data control-plane RPCs.
   control_panel_service_grpc: "127.0.0.1:50054"
-  # Notification Management REST only proxies account-service notification RPCs.
-  # Kafka/Telegram delivery is owned by account-service, not quant-handler.
+  # Notification Management REST only proxies core-service notification RPCs.
+  # Kafka/Telegram delivery is owned by core-service, not quant-handler.
 
 features:
   # When true, strategy run/preview/stop/status use control-panel runtime

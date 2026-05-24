@@ -406,7 +406,7 @@ func (s *server) handleStopStrategy(w http.ResponseWriter, r *http.Request, sess
 
 func (s *server) loadSessionForRuntimeRoute(w http.ResponseWriter, r *http.Request, sessionID string, userID int64) (*accountv1.StrategySessionEntry, bool) {
 	if s.accounts == nil {
-		writeErr(w, http.StatusServiceUnavailable, "account-service not configured")
+		writeErr(w, http.StatusServiceUnavailable, "core-service not configured")
 		return nil, false
 	}
 	resp, err := s.accounts.GetSession(r.Context(), &accountv1.GetSessionRequest{

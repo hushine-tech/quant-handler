@@ -59,7 +59,7 @@ func spotAssetMark(a *accountv1.SpotAsset) float64 {
 }
 
 // FuturesPositionEquity approximates the account-level futures equity directly
-// from the protobuf wallet fields exposed by account-service.
+// from the protobuf wallet fields exposed by core-service.
 func FuturesPositionEquity(fw *accountv1.FuturesWallet) float64 {
 	if fw == nil {
 		return 0

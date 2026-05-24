@@ -192,7 +192,7 @@ func (s *server) getWallet(w http.ResponseWriter, r *http.Request, id int64) {
 	// wallet_balance and available_balance live on the FuturesWallet
 	// sub-message in the canonical (post-Phase-B) proto layout. The older
 	// shape that stored them at AccountWalletState top level was retired
-	// when strategy-service ↔ account-service moved to the canonical
+	// when strategy-service ↔ core-service moved to the canonical
 	// contract. GetFutures() is nil-safe; the protobuf-generated getters
 	// return 0 when the receiver is nil.
 	fw := wal.GetFutures()
