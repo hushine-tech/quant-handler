@@ -411,6 +411,10 @@ func (s *server) handleAccountsByID() http.Handler {
 			s.handleAccountDebugDataset(w, r, id)
 			return
 		}
+		if len(parts) == 2 && parts[1] == "debug-package" {
+			s.handleAccountDebugPackage(w, r, id)
+			return
+		}
 		if len(parts) == 3 && parts[1] == "strategy" && parts[2] == "coverage-preview" {
 			s.handleCoveragePreview(w, r, id)
 			return
