@@ -136,6 +136,8 @@ func Run(cfg *config.Config) error {
 	mux.Handle("/api/symbols", s.cors(s.auth(http.HandlerFunc(s.handleSymbols))))
 	mux.Handle("/api/accounts", s.cors(s.auth(s.handleAccountsCollection())))
 	mux.HandleFunc("/api/accounts/", s.cors(s.auth(s.handleAccountsByID())).ServeHTTP)
+	mux.HandleFunc("/api/venues", s.cors(s.auth(http.HandlerFunc(s.handleVenues))).ServeHTTP)
+	mux.HandleFunc("/api/venues/", s.cors(s.auth(http.HandlerFunc(s.handleVenueByID))).ServeHTTP)
 	mux.HandleFunc("/api/strategy-sessions/", s.cors(s.auth(http.HandlerFunc(s.handleStrategySession))).ServeHTTP)
 	mux.HandleFunc("/api/strategy/download-and-run-jobs/", s.cors(s.auth(http.HandlerFunc(s.handleDownloadRunJobStatus))).ServeHTTP)
 	mux.HandleFunc("/api/strategies", s.cors(s.auth(http.HandlerFunc(s.handleStrategiesCollection))).ServeHTTP)
@@ -397,6 +399,10 @@ func (s *server) handleAccountsByID() http.Handler {
 				return
 			}
 			s.getWallet(w, r, id)
+			return
+		}
+		if len(parts) == 2 && parts[1] == "venues" {
+			s.handleAccountVenues(w, r, id)
 			return
 		}
 		if len(parts) == 2 && parts[1] == "run-strategy" {
