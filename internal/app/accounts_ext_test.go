@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -21,6 +22,76 @@ type fakeWalletAccountsClient struct {
 
 func (f *fakeWalletAccountsClient) GetOnlineAccountInfo(_ context.Context, _ *accountv1.GetOnlineAccountInfoRequest, _ ...grpc.CallOption) (*accountv1.GetOnlineAccountInfoResponse, error) {
 	return f.resp, f.err
+}
+
+type fakeCreateAccountClient struct {
+	accountv1.AccountServiceClient
+
+	createAccountReq *accountv1.CreateAccountRequest
+	createVenueReq   *accountv1.CreateVenueRequest
+}
+
+func (f *fakeCreateAccountClient) CreateAccount(_ context.Context, req *accountv1.CreateAccountRequest, _ ...grpc.CallOption) (*accountv1.CreateAccountResponse, error) {
+	f.createAccountReq = req
+	return &accountv1.CreateAccountResponse{
+		AccountId:   42,
+		Name:        req.GetName(),
+		Description: req.GetDescription(),
+		Environment: req.GetEnvironment(),
+		CreatedAt:   timestamppb.Now(),
+	}, nil
+}
+
+func (f *fakeCreateAccountClient) CreateVenue(_ context.Context, req *accountv1.CreateVenueRequest, _ ...grpc.CallOption) (*accountv1.CreateVenueResponse, error) {
+	f.createVenueReq = req
+	return &accountv1.CreateVenueResponse{Venue: &accountv1.VenueEntry{VenueId: 88}}, nil
+}
+
+func TestCreateAccountWithBootstrapCreatesVenueFromLegacyCredentials(t *testing.T) {
+	fake := &fakeCreateAccountClient{}
+	s := &server{accounts: fake, jwtSecret: []byte("secret"), corsOrigins: []string{"*"}}
+	body := []byte(`{
+		"name":"demo-account",
+		"description":"legacy form",
+		"mode":2,
+		"api_key":"demo-key",
+		"api_secret":"demo-secret",
+		"futures":{"margin_mode":"cross","position_mode":"one_way"}
+	}`)
+	req := withUID(httptest.NewRequest(http.MethodPost, "/api/accounts", bytes.NewReader(body)), 7)
+	rec := httptest.NewRecorder()
+
+	s.createAccountWithBootstrap(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", rec.Code, rec.Body.String())
+	}
+	if fake.createAccountReq == nil {
+		t.Fatal("CreateAccount was not called")
+	}
+	if fake.createVenueReq == nil {
+		t.Fatal("CreateVenue was not called for legacy exchange credentials")
+	}
+	if fake.createVenueReq.GetUserId() != 7 || fake.createVenueReq.GetAccountId() != 42 {
+		t.Fatalf("venue owner/account mismatch: %+v", fake.createVenueReq)
+	}
+	if fake.createVenueReq.GetExchange() != 1 || fake.createVenueReq.GetMarket() != 2 || fake.createVenueReq.GetEnvironment() != 1 {
+		t.Fatalf("venue route mismatch: exchange=%d market=%d environment=%d",
+			fake.createVenueReq.GetExchange(), fake.createVenueReq.GetMarket(), fake.createVenueReq.GetEnvironment())
+	}
+	if fake.createVenueReq.GetApiKey() != "demo-key" {
+		t.Fatalf("api_key = %q", fake.createVenueReq.GetApiKey())
+	}
+	var credential map[string]string
+	if err := json.Unmarshal([]byte(fake.createVenueReq.GetCredentialJson()), &credential); err != nil {
+		t.Fatalf("credential_json invalid: %v", err)
+	}
+	if credential["api_key"] != "demo-key" || credential["api_secret"] != "demo-secret" {
+		t.Fatalf("credential_json = %+v", credential)
+	}
+	if fake.createVenueReq.GetMarginMode() != 1 || fake.createVenueReq.GetPositionMode() != 1 {
+		t.Fatalf("venue modes = margin:%d position:%d", fake.createVenueReq.GetMarginMode(), fake.createVenueReq.GetPositionMode())
+	}
 }
 
 func TestGetWalletIncludesMarginBalanceFields(t *testing.T) {

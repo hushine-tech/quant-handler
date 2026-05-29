@@ -343,6 +343,20 @@ func decodeCreateAccountBody(r *http.Request) (createAccountBodyExt, error) {
 	return body, nil
 }
 
+func legacyVenueMarginMode(f *futIn) int32 {
+	if f != nil && strings.ToLower(strings.TrimSpace(f.MarginMode)) == "isolated" {
+		return 2
+	}
+	return 1
+}
+
+func legacyVenuePositionMode(f *futIn) int32 {
+	if f != nil && normPositionMode(f.PositionMode) == "hedge" {
+		return 2
+	}
+	return 1
+}
+
 func (s *server) createAccountWithBootstrap(w http.ResponseWriter, r *http.Request) {
 	body, err := decodeCreateAccountBody(r)
 	if err != nil {
@@ -375,6 +389,34 @@ func (s *server) createAccountWithBootstrap(w http.ResponseWriter, r *http.Reque
 		code, msg := grpcToHTTP(err)
 		writeErr(w, code, msg)
 		return
+	}
+	if environment != 0 && strings.TrimSpace(body.APIKey) != "" && strings.TrimSpace(body.APISecret) != "" {
+		credentialJSON, err := json.Marshal(map[string]string{
+			"api_key":    strings.TrimSpace(body.APIKey),
+			"api_secret": strings.TrimSpace(body.APISecret),
+		})
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "encode credential")
+			return
+		}
+		if _, err := s.accounts.CreateVenue(ctx, &accountv1.CreateVenueRequest{
+			UserId:         uid,
+			AccountId:      resp.GetAccountId(),
+			Exchange:       1, // binance
+			Market:         2, // perpetual_futures
+			Environment:    environment,
+			Status:         1, // active
+			DisplayName:    strings.TrimSpace(body.Name) + " binance perpetual",
+			Description:    "created from account credentials",
+			ApiKey:         strings.TrimSpace(body.APIKey),
+			CredentialJson: string(credentialJSON),
+			MarginMode:     legacyVenueMarginMode(body.Futures),
+			PositionMode:   legacyVenuePositionMode(body.Futures),
+		}); err != nil {
+			code, msg := grpcToHTTP(err)
+			writeErr(w, code, "create account ok but venue creation failed: "+msg)
+			return
+		}
 	}
 
 	if shouldApplyWalletBootstrap(body) {
