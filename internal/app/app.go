@@ -440,6 +440,7 @@ type accountJSON struct {
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
 	Mode        int32  `json:"mode"`
+	Environment int32  `json:"environment"`
 	CreatedAt   string `json:"created_at"`
 }
 
@@ -504,7 +505,8 @@ func registryEntryToJSON(e *accountv1.AccountRegistryEntry) accountJSON {
 		AccountID:   e.GetAccountId(),
 		Name:        e.GetName(),
 		Description: e.GetDescription(),
-		Mode:        e.GetMode(),
+		Mode:        legacyAccountModeFromEnvironment(e.GetEnvironment()),
+		Environment: e.GetEnvironment(),
 		CreatedAt:   e.GetCreatedAt().AsTime().UTC().Format(time.RFC3339Nano),
 	}
 }

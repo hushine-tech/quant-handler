@@ -22,7 +22,7 @@ func effectiveFuturesPayload(f *futIn) bool {
 }
 
 func shouldApplyWalletBootstrap(body createAccountBodyExt) bool {
-	if body.Mode != 0 {
+	if accountEnvironmentFromBody(body) != 0 {
 		return false
 	}
 	return effectiveSpotPayload(body.Spot) || effectiveFuturesPayload(body.Futures)

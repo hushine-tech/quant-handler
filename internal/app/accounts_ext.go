@@ -44,6 +44,7 @@ type createAccountBodyExt struct {
 	Name           string  `json:"name"`
 	Description    string  `json:"description"`
 	Mode           int32   `json:"mode"`
+	Environment    int32   `json:"environment"`
 	APIKey         string  `json:"api_key"`
 	APISecret      string  `json:"api_secret"`
 	InitialBalance float64 `json:"initial_balance"`
@@ -362,12 +363,11 @@ func (s *server) createAccountWithBootstrap(w http.ResponseWriter, r *http.Reque
 		writeErr(w, http.StatusUnauthorized, "missing user context")
 		return
 	}
+	environment := accountEnvironmentFromBody(body)
 	resp, err := s.accounts.CreateAccount(ctx, &accountv1.CreateAccountRequest{
 		Name:           body.Name,
 		Description:    body.Description,
-		Mode:           body.Mode,
-		ApiKey:         body.APIKey,
-		ApiSecret:      body.APISecret,
+		Environment:    environment,
 		InitialBalance: body.InitialBalance,
 		UserId:         uid,
 	})
@@ -410,7 +410,8 @@ func (s *server) createAccountWithBootstrap(w http.ResponseWriter, r *http.Reque
 		AccountID:   resp.GetAccountId(),
 		Name:        resp.GetName(),
 		Description: resp.GetDescription(),
-		Mode:        resp.GetMode(),
+		Mode:        legacyAccountModeFromEnvironment(resp.GetEnvironment()),
+		Environment: resp.GetEnvironment(),
 		CreatedAt:   resp.GetCreatedAt().AsTime().UTC().Format(time.RFC3339Nano),
 	})
 }

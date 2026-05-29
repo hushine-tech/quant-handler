@@ -82,7 +82,7 @@ func (s *server) handleOrderIntents(w http.ResponseWriter, r *http.Request) {
 			RequestedQty:   it.GetRequestedQty(),
 			RequestedPrice: it.GetRequestedPrice(),
 			StrategyID:     it.GetStrategyId(),
-			Market:         it.GetMarket(),
+			Market:         orderMarketLabel(it.GetMarket()),
 			SessionID:      it.GetSessionId(),
 		})
 	}
@@ -154,7 +154,7 @@ func (s *server) handleOrderHistory(w http.ResponseWriter, r *http.Request) {
 			AvgPrice:        o.GetAvgPrice(),
 			Price:           o.GetPrice(),
 			Status:          o.GetStatus(),
-			Market:          o.GetMarket(),
+			Market:          orderMarketLabel(o.GetMarket()),
 			StrategyID:      o.GetStrategyId(),
 			SessionID:       o.GetSessionId(),
 			ErrorMessage:    o.GetErrorMessage(),
@@ -224,7 +224,7 @@ func (s *server) handleOrderAttempts(w http.ResponseWriter, r *http.Request) {
 			RequestedPrice:  a.GetRequestedPrice(),
 			MarkPrice:       a.GetMarkPrice(),
 			Status:          a.GetStatus(),
-			Market:          a.GetMarket(),
+			Market:          orderMarketLabel(a.GetMarket()),
 			StrategyID:      a.GetStrategyId(),
 			SessionID:       a.GetSessionId(),
 			ErrorMessage:    a.GetErrorMessage(),
@@ -297,7 +297,7 @@ func (s *server) handleOrderFills(w http.ResponseWriter, r *http.Request) {
 			FillPrice:       f.GetFillPrice(),
 			Fee:             f.GetFee(),
 			Status:          f.GetStatus(),
-			Market:          f.GetMarket(),
+			Market:          orderMarketLabel(f.GetMarket()),
 			StrategyID:      f.GetStrategyId(),
 			SessionID:       f.GetSessionId(),
 		})

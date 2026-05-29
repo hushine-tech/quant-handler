@@ -343,7 +343,7 @@ func (s *server) getSessionIntents(w http.ResponseWriter, r *http.Request, sessi
 			RequestedQty:   it.GetRequestedQty(),
 			RequestedPrice: it.GetRequestedPrice(),
 			StrategyID:     it.GetStrategyId(),
-			Market:         it.GetMarket(),
+			Market:         orderMarketLabel(it.GetMarket()),
 			SessionID:      it.GetSessionId(),
 		})
 	}
@@ -422,7 +422,7 @@ func (s *server) getSessionOrders(w http.ResponseWriter, r *http.Request, sessio
 			AvgPrice:        o.GetAvgPrice(),
 			Price:           o.GetPrice(),
 			Status:          o.GetStatus(),
-			Market:          o.GetMarket(),
+			Market:          orderMarketLabel(o.GetMarket()),
 			StrategyID:      o.GetStrategyId(),
 			ErrorMessage:    o.GetErrorMessage(),
 		})
@@ -500,7 +500,7 @@ func (s *server) getSessionAttempts(w http.ResponseWriter, r *http.Request, sess
 			RequestedPrice:  a.GetRequestedPrice(),
 			MarkPrice:       a.GetMarkPrice(),
 			Status:          a.GetStatus(),
-			Market:          a.GetMarket(),
+			Market:          orderMarketLabel(a.GetMarket()),
 			StrategyID:      a.GetStrategyId(),
 			ErrorMessage:    a.GetErrorMessage(),
 			RecoveryError:   a.GetRecoveryError(),
@@ -579,7 +579,7 @@ func (s *server) getSessionFills(w http.ResponseWriter, r *http.Request, session
 			FillPrice:       f.GetFillPrice(),
 			Fee:             f.GetFee(),
 			Status:          f.GetStatus(),
-			Market:          f.GetMarket(),
+			Market:          orderMarketLabel(f.GetMarket()),
 			StrategyID:      f.GetStrategyId(),
 		})
 	}

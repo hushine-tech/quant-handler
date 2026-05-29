@@ -49,9 +49,9 @@ func (f *fakeSessionAccountsClient) GetAccount(_ context.Context, in *accountv1.
 		return f.getAccountResp, nil
 	}
 	return &accountv1.GetAccountResponse{Account: &accountv1.AccountRegistryEntry{
-		AccountId: in.GetAccountId(),
-		UserId:    in.GetUserId(),
-		Mode:      f.accountMode,
+		AccountId:   in.GetAccountId(),
+		UserId:      in.GetUserId(),
+		Environment: accountEnvironmentFromLegacyMode(f.accountMode),
 	}}, nil
 }
 

@@ -345,7 +345,7 @@ func TestOrderIntents_envelopeShape(t *testing.T) {
 		intentsResp: &orderv1.QueryOrderIntentsResponse{
 			Total: 3,
 			Intents: []*orderv1.OrderIntentEntry{
-				{IntentId: "i1", AccountId: 9, Symbol: "BTCUSDT", Side: "BUY", RequestedQty: 0.1, RequestedPrice: 50000, StrategyId: 5, Market: "futures"},
+				{IntentId: "i1", AccountId: 9, Symbol: "BTCUSDT", Side: "BUY", RequestedQty: 0.1, RequestedPrice: 50000, StrategyId: 5, Market: 2},
 			},
 		},
 	}
@@ -392,7 +392,7 @@ func TestOrderIntents_envelopeShape(t *testing.T) {
 	if got.IntentID != "i1" || got.AccountID != 9 || got.Symbol != "BTCUSDT" || got.Side != "BUY" {
 		t.Errorf("unexpected item identity: %+v", got)
 	}
-	if got.RequestedQty != 0.1 || got.RequestedPrice != 50000 || got.StrategyID != 5 || got.Market != "futures" {
+	if got.RequestedQty != 0.1 || got.RequestedPrice != 50000 || got.StrategyID != 5 || got.Market != "perpetual_futures" {
 		t.Errorf("unexpected item fields: %+v", got)
 	}
 }

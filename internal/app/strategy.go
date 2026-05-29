@@ -79,7 +79,7 @@ func (s *server) strategyRoutePolicyForAccount(ctx context.Context, w http.Respo
 			writeErr(w, http.StatusNotFound, "account not found")
 			return strategyRoutePolicy{}, false
 		}
-		mode = account.GetMode()
+		mode = legacyAccountModeFromEnvironment(account.GetEnvironment())
 	}
 	return s.strategyRoutePolicyForSelectedRuntime(ctx, w, userID, runtimeID, mode)
 }
