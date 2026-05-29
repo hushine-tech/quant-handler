@@ -68,6 +68,11 @@ func (s *server) handleOrderIntents(w http.ResponseWriter, r *http.Request) {
 		RequestedPrice float64 `json:"requested_price"`
 		StrategyID     int64   `json:"strategy_id"`
 		Market         string  `json:"market"`
+		MarketLabel    string  `json:"market_label"`
+		VenueID        int64   `json:"venue_id,omitempty"`
+		Exchange       int32   `json:"exchange"`
+		ExchangeLabel  string  `json:"exchange_label"`
+		PositionSide   string  `json:"position_side"`
 		SessionID      string  `json:"session_id,omitempty"`
 	}
 
@@ -83,6 +88,11 @@ func (s *server) handleOrderIntents(w http.ResponseWriter, r *http.Request) {
 			RequestedPrice: it.GetRequestedPrice(),
 			StrategyID:     it.GetStrategyId(),
 			Market:         orderMarketLabel(it.GetMarket()),
+			MarketLabel:    orderMarketLabel(it.GetMarket()),
+			VenueID:        it.GetVenueId(),
+			Exchange:       it.GetExchange(),
+			ExchangeLabel:  orderExchangeLabel(it.GetExchange()),
+			PositionSide:   orderPositionSideLabel(it.GetPositionSide()),
 			SessionID:      it.GetSessionId(),
 		})
 	}
@@ -131,6 +141,11 @@ func (s *server) handleOrderHistory(w http.ResponseWriter, r *http.Request) {
 		Price           float64 `json:"price"`
 		Status          string  `json:"status"`
 		Market          string  `json:"market"`
+		MarketLabel     string  `json:"market_label"`
+		VenueID         int64   `json:"venue_id,omitempty"`
+		Exchange        int32   `json:"exchange"`
+		ExchangeLabel   string  `json:"exchange_label"`
+		PositionSide    string  `json:"position_side"`
 		StrategyID      int64   `json:"strategy_id"`
 		SessionID       string  `json:"session_id,omitempty"`
 		ErrorMessage    string  `json:"error_message,omitempty"`
@@ -155,6 +170,11 @@ func (s *server) handleOrderHistory(w http.ResponseWriter, r *http.Request) {
 			Price:           o.GetPrice(),
 			Status:          o.GetStatus(),
 			Market:          orderMarketLabel(o.GetMarket()),
+			MarketLabel:     orderMarketLabel(o.GetMarket()),
+			VenueID:         o.GetVenueId(),
+			Exchange:        o.GetExchange(),
+			ExchangeLabel:   orderExchangeLabel(o.GetExchange()),
+			PositionSide:    orderPositionSideLabel(o.GetPositionSide()),
 			StrategyID:      o.GetStrategyId(),
 			SessionID:       o.GetSessionId(),
 			ErrorMessage:    o.GetErrorMessage(),
@@ -202,6 +222,11 @@ func (s *server) handleOrderAttempts(w http.ResponseWriter, r *http.Request) {
 		MarkPrice       float64 `json:"mark_price"`
 		Status          string  `json:"status"`
 		Market          string  `json:"market"`
+		MarketLabel     string  `json:"market_label"`
+		VenueID         int64   `json:"venue_id,omitempty"`
+		Exchange        int32   `json:"exchange"`
+		ExchangeLabel   string  `json:"exchange_label"`
+		PositionSide    string  `json:"position_side"`
 		StrategyID      int64   `json:"strategy_id"`
 		SessionID       string  `json:"session_id,omitempty"`
 		ErrorMessage    string  `json:"error_message,omitempty"`
@@ -225,6 +250,11 @@ func (s *server) handleOrderAttempts(w http.ResponseWriter, r *http.Request) {
 			MarkPrice:       a.GetMarkPrice(),
 			Status:          a.GetStatus(),
 			Market:          orderMarketLabel(a.GetMarket()),
+			MarketLabel:     orderMarketLabel(a.GetMarket()),
+			VenueID:         a.GetVenueId(),
+			Exchange:        a.GetExchange(),
+			ExchangeLabel:   orderExchangeLabel(a.GetExchange()),
+			PositionSide:    orderPositionSideLabel(a.GetPositionSide()),
 			StrategyID:      a.GetStrategyId(),
 			SessionID:       a.GetSessionId(),
 			ErrorMessage:    a.GetErrorMessage(),
@@ -276,6 +306,11 @@ func (s *server) handleOrderFills(w http.ResponseWriter, r *http.Request) {
 		Fee             float64 `json:"fee"`
 		Status          string  `json:"status"`
 		Market          string  `json:"market"`
+		MarketLabel     string  `json:"market_label"`
+		VenueID         int64   `json:"venue_id,omitempty"`
+		Exchange        int32   `json:"exchange"`
+		ExchangeLabel   string  `json:"exchange_label"`
+		PositionSide    string  `json:"position_side"`
 		StrategyID      int64   `json:"strategy_id"`
 		SessionID       string  `json:"session_id,omitempty"`
 	}
@@ -298,6 +333,11 @@ func (s *server) handleOrderFills(w http.ResponseWriter, r *http.Request) {
 			Fee:             f.GetFee(),
 			Status:          f.GetStatus(),
 			Market:          orderMarketLabel(f.GetMarket()),
+			MarketLabel:     orderMarketLabel(f.GetMarket()),
+			VenueID:         f.GetVenueId(),
+			Exchange:        f.GetExchange(),
+			ExchangeLabel:   orderExchangeLabel(f.GetExchange()),
+			PositionSide:    orderPositionSideLabel(f.GetPositionSide()),
 			StrategyID:      f.GetStrategyId(),
 			SessionID:       f.GetSessionId(),
 		})

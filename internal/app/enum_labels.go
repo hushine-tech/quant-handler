@@ -41,3 +41,25 @@ func orderMarketLabel(market int32) string {
 		return "unknown"
 	}
 }
+
+func orderExchangeLabel(exchange int32) string {
+	switch exchange {
+	case 1:
+		return "binance"
+	case 2:
+		return "okx"
+	default:
+		return "unknown"
+	}
+}
+
+func orderPositionSideLabel(positionSide int32) string {
+	switch positionSide {
+	case 1:
+		return "LONG"
+	case 2:
+		return "SHORT"
+	default:
+		return "BOTH"
+	}
+}
