@@ -15,7 +15,9 @@ type fakeVenueAccountsClient struct {
 	accountv1.AccountServiceClient
 
 	createReq  *accountv1.CreateVenueRequest
+	listReq    *accountv1.ListVenuesRequest
 	createResp *accountv1.CreateVenueResponse
+	listResp   *accountv1.ListVenuesResponse
 }
 
 func (f *fakeVenueAccountsClient) CreateVenue(_ context.Context, req *accountv1.CreateVenueRequest, _ ...grpc.CallOption) (*accountv1.CreateVenueResponse, error) {
@@ -24,6 +26,14 @@ func (f *fakeVenueAccountsClient) CreateVenue(_ context.Context, req *accountv1.
 		return f.createResp, nil
 	}
 	return &accountv1.CreateVenueResponse{Venue: &accountv1.VenueEntry{VenueId: 88}}, nil
+}
+
+func (f *fakeVenueAccountsClient) ListVenues(_ context.Context, req *accountv1.ListVenuesRequest, _ ...grpc.CallOption) (*accountv1.ListVenuesResponse, error) {
+	f.listReq = req
+	if f.listResp != nil {
+		return f.listResp, nil
+	}
+	return &accountv1.ListVenuesResponse{}, nil
 }
 
 func TestCreateVenueForwardsCredentialJSON(t *testing.T) {
@@ -56,5 +66,26 @@ func TestCreateVenueForwardsCredentialJSON(t *testing.T) {
 	}
 	if !strings.Contains(fake.createReq.GetCredentialJson(), `"api_secret":"s1"`) {
 		t.Fatalf("credential_json not forwarded: %s", fake.createReq.GetCredentialJson())
+	}
+}
+
+func TestListAccountVenuesUsesAccountScope(t *testing.T) {
+	fake := &fakeVenueAccountsClient{
+		listResp: &accountv1.ListVenuesResponse{Total: 0},
+	}
+	s := &server{accounts: fake, jwtSecret: []byte("secret"), corsOrigins: []string{"*"}}
+	req := withUID(httptest.NewRequest(http.MethodGet, "/api/accounts/42/venues?include_unbound=true&limit=25&offset=50", nil), 7)
+	rec := httptest.NewRecorder()
+
+	s.handleAccountVenues(rec, req, 42)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if fake.listReq.GetUserId() != 7 || fake.listReq.GetAccountId() != 42 {
+		t.Fatalf("list scope mismatch: %+v", fake.listReq)
+	}
+	if !fake.listReq.GetIncludeUnbound() || fake.listReq.GetLimit() != 25 || fake.listReq.GetOffset() != 50 {
+		t.Fatalf("list options mismatch: %+v", fake.listReq)
 	}
 }
