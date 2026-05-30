@@ -96,10 +96,10 @@ func (f *fakePortfolioSnapshotClient) GetPortfolioSnapshot(_ context.Context, re
 type fakeCreateAccountClient struct {
 	accountv1.AccountServiceClient
 
-	createAccountReq    *accountv1.CreateAccountRequest
-	createVenueReq      *accountv1.CreateVenueRequest
-	updateSnapshotReq   *accountv1.UpdatePortfolioSnapshotRequest
-	legacyWalletUpdates int
+	createAccountReq  *accountv1.CreateAccountRequest
+	createVenueReq    *accountv1.CreateVenueRequest
+	updateSnapshotReq *accountv1.UpdatePortfolioSnapshotRequest
+	updateWalletReq   *accountv1.UpdateAccountWalletStateRequest
 }
 
 func (f *fakeCreateAccountClient) CreateAccount(_ context.Context, req *accountv1.CreateAccountRequest, _ ...grpc.CallOption) (*accountv1.CreateAccountResponse, error) {
@@ -123,9 +123,9 @@ func (f *fakeCreateAccountClient) UpdatePortfolioSnapshot(_ context.Context, req
 	return &accountv1.UpdatePortfolioSnapshotResponse{Snapshot: &accountv1.PortfolioSnapshot{AccountId: req.GetAccountId(), UserId: req.GetUserId()}}, nil
 }
 
-func (f *fakeCreateAccountClient) UpdateAccountWalletState(_ context.Context, _ *accountv1.UpdateAccountWalletStateRequest, _ ...grpc.CallOption) (*accountv1.UpdateAccountWalletStateResponse, error) {
-	f.legacyWalletUpdates++
-	return nil, status.Error(codes.Internal, "legacy UpdateAccountWalletState must not be used for account creation")
+func (f *fakeCreateAccountClient) UpdateAccountWalletState(_ context.Context, req *accountv1.UpdateAccountWalletStateRequest, _ ...grpc.CallOption) (*accountv1.UpdateAccountWalletStateResponse, error) {
+	f.updateWalletReq = req
+	return &accountv1.UpdateAccountWalletStateResponse{Wallet: &accountv1.AccountWalletState{}}, nil
 }
 
 func TestCreateAccountWithBootstrapCreatesVenueFromLegacyCredentials(t *testing.T) {
@@ -176,19 +176,19 @@ func TestCreateAccountWithBootstrapCreatesVenueFromLegacyCredentials(t *testing.
 	if fake.updateSnapshotReq != nil {
 		t.Fatalf("portfolio snapshot refresh request = %+v, want nil for exchange-backed venue creation", fake.updateSnapshotReq)
 	}
-	if fake.legacyWalletUpdates != 0 {
-		t.Fatalf("legacy wallet updates = %d, want 0", fake.legacyWalletUpdates)
+	if fake.updateWalletReq != nil {
+		t.Fatalf("wallet bootstrap request = %+v, want nil for exchange-backed venue creation", fake.updateWalletReq)
 	}
 }
 
-func TestCreateAccountWithBootstrapRefreshesPortfolioSnapshot(t *testing.T) {
+func TestCreateAccountWithBootstrapWritesBacktestWalletBootstrap(t *testing.T) {
 	fake := &fakeCreateAccountClient{}
 	s := &server{accounts: fake, jwtSecret: []byte("secret"), corsOrigins: []string{"*"}}
 	body := []byte(`{
 		"name":"backtest-account",
 		"environment":0,
-		"initial_balance":1000,
-		"spot":{"free":1000}
+		"spot":{"free":250},
+		"futures":{"margin_mode":"cross","position_mode":"one_way","initial_balance":1000}
 	}`)
 	req := withUID(httptest.NewRequest(http.MethodPost, "/api/accounts", bytes.NewReader(body)), 7)
 	rec := httptest.NewRecorder()
@@ -198,11 +198,23 @@ func TestCreateAccountWithBootstrapRefreshesPortfolioSnapshot(t *testing.T) {
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want 201; body=%s", rec.Code, rec.Body.String())
 	}
-	if fake.updateSnapshotReq == nil || fake.updateSnapshotReq.GetAccountId() != 42 || fake.updateSnapshotReq.GetUserId() != 7 {
-		t.Fatalf("portfolio snapshot refresh request = %+v", fake.updateSnapshotReq)
+	if fake.updateSnapshotReq != nil {
+		t.Fatalf("portfolio snapshot refresh request = %+v, want nil", fake.updateSnapshotReq)
 	}
-	if fake.legacyWalletUpdates != 0 {
-		t.Fatalf("legacy wallet updates = %d, want 0", fake.legacyWalletUpdates)
+	if fake.updateWalletReq == nil {
+		t.Fatal("wallet bootstrap request was not sent")
+	}
+	if fake.updateWalletReq.GetAccountId() != 42 {
+		t.Fatalf("wallet account_id = %d, want 42", fake.updateWalletReq.GetAccountId())
+	}
+	if got := fake.updateWalletReq.GetFutures().GetWalletBalance(); got != 1000 {
+		t.Fatalf("futures wallet_balance = %v, want 1000", got)
+	}
+	if got := fake.updateWalletReq.GetFutures().GetAvailableBalance(); got != 1000 {
+		t.Fatalf("futures available_balance = %v, want 1000", got)
+	}
+	if got := fake.updateWalletReq.GetSpot().GetFree(); got != 250 {
+		t.Fatalf("spot free = %v, want 250", got)
 	}
 }
 

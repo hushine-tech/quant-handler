@@ -107,6 +107,13 @@ func buildFuturesWallet(in *futIn) *accountv1.FuturesWallet {
 	fw := &accountv1.FuturesWallet{
 		MarginMode: mm, PositionMode: pm, InitialBalance: in.InitialBalance,
 	}
+	if mm == "cross" && in.InitialBalance > 0 {
+		fw.WalletBalance = in.InitialBalance
+		fw.AvailableBalance = in.InitialBalance
+		fw.MarginBalance = in.InitialBalance
+		fw.TotalMarginBalance = in.InitialBalance
+		fw.TotalCrossWalletBalance = in.InitialBalance
+	}
 	for _, p := range in.Positions {
 		sym := strings.ToUpper(strings.TrimSpace(p.Symbol))
 		if sym == "" {
@@ -129,6 +136,67 @@ func buildFuturesWallet(in *futIn) *accountv1.FuturesWallet {
 		})
 	}
 	return fw
+}
+
+func spotBootstrapValue(s *accountv1.SpotWallet) float64 {
+	if s == nil {
+		return 0
+	}
+	total := s.GetFree() + s.GetLocked()
+	for _, asset := range s.GetAssets() {
+		price := asset.GetAvgEntryPrice()
+		if asset.Price != nil {
+			price = asset.GetPrice()
+		}
+		if price > 0 {
+			total += (asset.GetQty() + asset.GetLocked()) * price
+		}
+	}
+	return total
+}
+
+func futuresBootstrapValue(f *accountv1.FuturesWallet) float64 {
+	if f == nil {
+		return 0
+	}
+	if f.GetMarginBalance() != 0 {
+		return f.GetMarginBalance()
+	}
+	if f.GetWalletBalance() != 0 {
+		return f.GetWalletBalance()
+	}
+	if f.GetInitialBalance() != 0 {
+		return f.GetInitialBalance()
+	}
+	var total float64
+	for _, p := range f.GetPositions() {
+		total += p.GetInitialBalance()
+	}
+	return total
+}
+
+func buildBacktestWalletBootstrapRequest(accountID int64, body createAccountBodyExt) *accountv1.UpdateAccountWalletStateRequest {
+	spot := buildSpotWallet(body.Spot, body.InitialBalance)
+	futures := buildFuturesWallet(body.Futures)
+	spotValue := spotBootstrapValue(spot)
+	futuresValue := futuresBootstrapValue(futures)
+	totalValue := spotValue + futuresValue
+	walletBalance := futuresValue
+	availableBalance := futuresValue
+	if futures == nil {
+		walletBalance = spotValue
+		if spot != nil {
+			availableBalance = spot.GetFree()
+		}
+	}
+	return &accountv1.UpdateAccountWalletStateRequest{
+		AccountId:        accountID,
+		Futures:          futures,
+		Spot:             spot,
+		TotalValue:       totalValue,
+		WalletBalance:    walletBalance,
+		AvailableBalance: availableBalance,
+	}
 }
 
 func (s *server) handleSymbols(w http.ResponseWriter, r *http.Request) {
@@ -762,13 +830,10 @@ func (s *server) createAccountWithBootstrap(w http.ResponseWriter, r *http.Reque
 	}
 
 	if shouldApplyWalletBootstrap(body) {
-		_, err = s.accounts.UpdatePortfolioSnapshot(ctx, &accountv1.UpdatePortfolioSnapshotRequest{
-			AccountId: resp.GetAccountId(),
-			UserId:    uid,
-		})
+		_, err = s.accounts.UpdateAccountWalletState(ctx, buildBacktestWalletBootstrapRequest(resp.GetAccountId(), body))
 		if err != nil {
 			code, msg := grpcToHTTP(err)
-			writeErr(w, code, "create ok but portfolio snapshot refresh failed: "+msg)
+			writeErr(w, code, "create ok but wallet bootstrap failed: "+msg)
 			return
 		}
 	}
