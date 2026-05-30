@@ -445,6 +445,108 @@ func TestGetSessionFills_HasMoreComputedFromTotal(t *testing.T) {
 	}
 }
 
+func TestSessionOrderAuditHandlersExposeVenueRouteFacts(t *testing.T) {
+	tests := []struct {
+		name    string
+		handler func(*server, http.ResponseWriter, *http.Request, string)
+		orders  *fakeOrdersClient
+		path    string
+	}{
+		{
+			name: "intents",
+			handler: func(s *server, w http.ResponseWriter, r *http.Request, sessionID string) {
+				s.getSessionIntents(w, r, sessionID)
+			},
+			orders: &fakeOrdersClient{intentsResp: &orderv1.QueryOrderIntentsResponse{
+				Intents: []*orderv1.OrderIntentEntry{{
+					IntentId: "intent-1", Symbol: "ETHUSDT", Market: 3,
+					VenueId: 77, Exchange: 2, PositionSide: 2,
+				}},
+				Total: 1,
+			}},
+			path: "/api/sessions/s-route/intents",
+		},
+		{
+			name: "attempts",
+			handler: func(s *server, w http.ResponseWriter, r *http.Request, sessionID string) {
+				s.getSessionAttempts(w, r, sessionID)
+			},
+			orders: &fakeOrdersClient{attemptsResp: &orderv1.QueryOrderAttemptsResponse{
+				Attempts: []*orderv1.OrderAttemptEntry{{
+					AttemptId: "attempt-1", Symbol: "ETHUSDT", Market: 3,
+					VenueId: 77, Exchange: 2, PositionSide: 2,
+				}},
+				Total: 1,
+			}},
+			path: "/api/sessions/s-route/attempts",
+		},
+		{
+			name: "orders",
+			handler: func(s *server, w http.ResponseWriter, r *http.Request, sessionID string) {
+				s.getSessionOrders(w, r, sessionID)
+			},
+			orders: &fakeOrdersClient{ordersResp: &orderv1.QueryOrdersResponse{
+				Orders: []*orderv1.ExchangeOrderEntry{{
+					OrderId: "order-1", Symbol: "ETHUSDT", Market: 3,
+					VenueId: 77, Exchange: 2, PositionSide: 2,
+				}},
+				Total: 1,
+			}},
+			path: "/api/sessions/s-route/orders",
+		},
+		{
+			name: "fills",
+			handler: func(s *server, w http.ResponseWriter, r *http.Request, sessionID string) {
+				s.getSessionFills(w, r, sessionID)
+			},
+			orders: &fakeOrdersClient{fillsResp: &orderv1.QueryOrderFillsResponse{
+				Fills: []*orderv1.OrderFillEntry{{
+					FillId: "fill-1", OrderId: "order-1", Symbol: "ETHUSDT", Market: 3,
+					VenueId: 77, Exchange: 2, PositionSide: 2,
+				}},
+				Total: 1,
+			}},
+			path: "/api/sessions/s-route/fills",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &server{orders: tt.orders, jwtSecret: []byte("s"), corsOrigins: []string{"*"}}
+			req := withUID(httptest.NewRequest(http.MethodGet, tt.path, nil), 7)
+			rec := httptest.NewRecorder()
+
+			tt.handler(s, rec, req, "s-route")
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+			}
+			var body struct {
+				Items []struct {
+					VenueID       int64  `json:"venue_id"`
+					Exchange      int32  `json:"exchange"`
+					ExchangeLabel string `json:"exchange_label"`
+					Market        string `json:"market"`
+					MarketLabel   string `json:"market_label"`
+					PositionSide  string `json:"position_side"`
+				} `json:"items"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+				t.Fatalf("decode: %v; body=%s", err, rec.Body.String())
+			}
+			if len(body.Items) != 1 {
+				t.Fatalf("items len=%d, want 1", len(body.Items))
+			}
+			got := body.Items[0]
+			if got.VenueID != 77 || got.Exchange != 2 || got.ExchangeLabel != "okx" ||
+				got.Market != "delivery_futures" || got.MarketLabel != "delivery_futures" ||
+				got.PositionSide != "SHORT" {
+				t.Fatalf("route facts not exposed: %+v", got)
+			}
+		})
+	}
+}
+
 // ── response shape invariant (spec §Paginated response SHALL be structurally distinguishable) ──
 
 func TestAuditListHandlers_ReturnJSONObjectNotArray(t *testing.T) {

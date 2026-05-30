@@ -401,6 +401,14 @@ func (s *server) handleAccountsByID() http.Handler {
 			s.getWallet(w, r, id)
 			return
 		}
+		if len(parts) == 2 && parts[1] == "venue-wallets" {
+			if r.Method != http.MethodGet {
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			s.getAccountVenueWallets(w, r, id)
+			return
+		}
 		if len(parts) == 2 && parts[1] == "venues" {
 			s.handleAccountVenues(w, r, id)
 			return

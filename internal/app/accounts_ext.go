@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -186,6 +187,102 @@ func (s *server) getWallet(w http.ResponseWriter, r *http.Request, id int64) {
 		writeErr(w, http.StatusNotFound, "no wallet")
 		return
 	}
+	writeJSON(w, http.StatusOK, accountWalletStateToJSON(wal))
+}
+
+type accountVenueWalletItemJSON struct {
+	Venue  venueJSON      `json:"venue"`
+	Wallet map[string]any `json:"wallet,omitempty"`
+	Error  string         `json:"error,omitempty"`
+}
+
+const accountVenueWalletTimeout = 5 * time.Second
+
+func (s *server) getAccountVenueWallets(w http.ResponseWriter, r *http.Request, accountID int64) {
+	uid, ok := userIDFromRequest(r)
+	if !ok {
+		writeErr(w, http.StatusUnauthorized, "missing user context")
+		return
+	}
+	ctx := r.Context()
+	var venues []*accountv1.VenueEntry
+	var offset int32
+	const limit int32 = 100
+	for {
+		resp, err := s.accounts.ListVenues(ctx, &accountv1.ListVenuesRequest{
+			UserId:          uid,
+			AccountId:       accountID,
+			IncludeInactive: false,
+			Limit:           limit,
+			Offset:          offset,
+		})
+		if err != nil {
+			code, msg := grpcToHTTP(err)
+			writeErr(w, code, msg)
+			return
+		}
+		page := resp.GetVenues()
+		venues = append(venues, page...)
+		if !resp.GetHasMore() || len(page) == 0 {
+			break
+		}
+		offset += int32(len(page))
+	}
+
+	items := make([]accountVenueWalletItemJSON, 0, len(venues))
+	var totalValue float64
+	var successful int
+	var failed int
+	var latest time.Time
+	for _, venue := range venues {
+		item := accountVenueWalletItemJSON{Venue: venueToJSON(venue)}
+		venueCtx, cancel := context.WithTimeout(ctx, accountVenueWalletTimeout)
+		resp, err := s.accounts.GetVenueOnlineInfo(venueCtx, &accountv1.GetVenueOnlineInfoRequest{
+			UserId:  uid,
+			VenueId: venue.GetVenueId(),
+		})
+		cancel()
+		if err != nil {
+			_, msg := grpcToHTTP(err)
+			item.Error = msg
+			failed++
+			items = append(items, item)
+			continue
+		}
+		wallet := resp.GetWallet()
+		if wallet == nil {
+			item.Error = "no venue wallet"
+			failed++
+			items = append(items, item)
+			continue
+		}
+		item.Wallet = accountWalletStateToJSON(wallet)
+		totalValue += wallet.GetTotalValue()
+		if ts := wallet.GetUpdatedAt(); ts != nil {
+			t := ts.AsTime().UTC()
+			if latest.IsZero() || t.After(latest) {
+				latest = t
+			}
+		}
+		successful++
+		items = append(items, item)
+	}
+
+	updatedAt := ""
+	if !latest.IsZero() {
+		updatedAt = latest.Format(time.RFC3339Nano)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items":       items,
+		"venue_count": len(items),
+		"successful":  successful,
+		"failed":      failed,
+		"total_value": totalValue,
+		"updated_at":  updatedAt,
+	})
+}
+
+func accountWalletStateToJSON(wal *accountv1.AccountWalletState) map[string]any {
 	updatedAt := ""
 	if ts := wal.GetUpdatedAt(); ts != nil {
 		updatedAt = ts.AsTime().UTC().Format(time.RFC3339Nano)
@@ -218,7 +315,7 @@ func (s *server) getWallet(w http.ResponseWriter, r *http.Request, id int64) {
 		"futures_display_usd":     protoFuturesDisplayUSDToJSON(wal.GetMode(), fw),
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
+	return map[string]any{
 		// ── canonical runtime fields (authoritative for trading/risk) ──
 		"mode":                 wal.GetMode(),
 		"updated_at":           updatedAt,
@@ -240,7 +337,7 @@ func (s *server) getWallet(w http.ResponseWriter, r *http.Request, id int64) {
 		"futures_position_equity": feq,
 		"metrics_authoritative":   auth,
 		"futures_display_usd":     protoFuturesDisplayUSDToJSON(wal.GetMode(), fw),
-	})
+	}
 }
 
 func protoFuturesDisplayUSDToJSON(mode int32, fw *accountv1.FuturesWallet) any {

@@ -89,6 +89,9 @@ func (s *server) handleVenueByID(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(parts) == 2 {
 		switch parts[1] {
+		case "wallet":
+			s.getVenueWallet(w, r, venueID)
+			return
 		case "bind":
 			s.bindVenue(w, r, venueID)
 			return
@@ -185,6 +188,16 @@ func (s *server) listVenues(w http.ResponseWriter, r *http.Request, accountID in
 		writeErr(w, http.StatusUnauthorized, "missing user context")
 		return
 	}
+	if accountID == 0 {
+		if raw := strings.TrimSpace(r.URL.Query().Get("account_id")); raw != "" {
+			n, err := strconv.ParseInt(raw, 10, 64)
+			if err != nil || n <= 0 {
+				writeErr(w, http.StatusBadRequest, "account_id must be a positive integer")
+				return
+			}
+			accountID = n
+		}
+	}
 	limit, offset := parseCollectionPaging(r)
 	resp, err := s.accounts.ListVenues(r.Context(), &accountv1.ListVenuesRequest{
 		UserId:          uid,
@@ -225,6 +238,36 @@ func (s *server) getVenue(w http.ResponseWriter, r *http.Request, venueID int64)
 		return
 	}
 	writeJSON(w, http.StatusOK, venueToJSON(resp.GetVenue()))
+}
+
+func (s *server) getVenueWallet(w http.ResponseWriter, r *http.Request, venueID int64) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	uid, ok := userIDFromRequest(r)
+	if !ok {
+		writeErr(w, http.StatusUnauthorized, "missing user context")
+		return
+	}
+	resp, err := s.accounts.GetVenueOnlineInfo(r.Context(), &accountv1.GetVenueOnlineInfoRequest{
+		UserId:  uid,
+		VenueId: venueID,
+	})
+	if err != nil {
+		code, msg := grpcToHTTP(err)
+		writeErr(w, code, msg)
+		return
+	}
+	wallet := resp.GetWallet()
+	if wallet == nil {
+		writeErr(w, http.StatusNotFound, "no venue wallet")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"venue":  venueToJSON(resp.GetVenue()),
+		"wallet": accountWalletStateToJSON(wallet),
+	})
 }
 
 func (s *server) bindVenue(w http.ResponseWriter, r *http.Request, venueID int64) {

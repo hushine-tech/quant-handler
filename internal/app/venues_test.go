@@ -89,3 +89,24 @@ func TestListAccountVenuesUsesAccountScope(t *testing.T) {
 		t.Fatalf("list options mismatch: %+v", fake.listReq)
 	}
 }
+
+func TestListVenuesQueryAccountIDUsesAccountScope(t *testing.T) {
+	fake := &fakeVenueAccountsClient{
+		listResp: &accountv1.ListVenuesResponse{Total: 0},
+	}
+	s := &server{accounts: fake, jwtSecret: []byte("secret"), corsOrigins: []string{"*"}}
+	req := withUID(httptest.NewRequest(http.MethodGet, "/api/venues?account_id=42&include_unbound=true", nil), 7)
+	rec := httptest.NewRecorder()
+
+	s.handleVenues(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if fake.listReq.GetUserId() != 7 || fake.listReq.GetAccountId() != 42 {
+		t.Fatalf("list scope mismatch: %+v", fake.listReq)
+	}
+	if !fake.listReq.GetIncludeUnbound() {
+		t.Fatalf("include_unbound not forwarded: %+v", fake.listReq)
+	}
+}

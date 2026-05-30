@@ -10,6 +10,8 @@ import (
 
 	"github.com/hushine-tech/core-service/gen/accountv1"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -22,6 +24,48 @@ type fakeWalletAccountsClient struct {
 
 func (f *fakeWalletAccountsClient) GetOnlineAccountInfo(_ context.Context, _ *accountv1.GetOnlineAccountInfoRequest, _ ...grpc.CallOption) (*accountv1.GetOnlineAccountInfoResponse, error) {
 	return f.resp, f.err
+}
+
+type fakeAccountVenueWalletClient struct {
+	accountv1.AccountServiceClient
+
+	listReqs   []*accountv1.ListVenuesRequest
+	walletReqs []*accountv1.GetVenueOnlineInfoRequest
+}
+
+func (f *fakeAccountVenueWalletClient) ListVenues(_ context.Context, req *accountv1.ListVenuesRequest, _ ...grpc.CallOption) (*accountv1.ListVenuesResponse, error) {
+	f.listReqs = append(f.listReqs, req)
+	return &accountv1.ListVenuesResponse{
+		Venues: []*accountv1.VenueEntry{
+			{VenueId: 10, UserId: req.GetUserId(), AccountId: req.GetAccountId(), Exchange: 1, Market: 2, Environment: 1, Status: 1, DisplayName: "ok venue"},
+			{VenueId: 11, UserId: req.GetUserId(), AccountId: req.GetAccountId(), Exchange: 1, Market: 2, Environment: 1, Status: 1, DisplayName: "bad venue"},
+		},
+		HasMore: false,
+		Total:   2,
+	}, nil
+}
+
+func (f *fakeAccountVenueWalletClient) GetVenueOnlineInfo(_ context.Context, req *accountv1.GetVenueOnlineInfoRequest, _ ...grpc.CallOption) (*accountv1.GetVenueOnlineInfoResponse, error) {
+	f.walletReqs = append(f.walletReqs, req)
+	if req.GetVenueId() == 11 {
+		return nil, status.Error(codes.PermissionDenied, "invalid api key")
+	}
+	return &accountv1.GetVenueOnlineInfoResponse{
+		Venue: &accountv1.VenueEntry{VenueId: req.GetVenueId(), UserId: req.GetUserId(), AccountId: 42, Exchange: 1, Market: 2, Environment: 1, Status: 1, DisplayName: "ok venue"},
+		Wallet: &accountv1.AccountWalletState{
+			Mode:                  2,
+			UpdatedAt:             timestamppb.Now(),
+			TotalValue:            123.45,
+			SpotEstimatedValue:    0,
+			FuturesPositionEquity: 123.45,
+			MetricsAuthoritative:  true,
+			Futures: &accountv1.FuturesWallet{
+				WalletBalance:    120,
+				MarginBalance:    123.45,
+				AvailableBalance: 100,
+			},
+		},
+	}, nil
 }
 
 type fakeCreateAccountClient struct {
@@ -91,6 +135,43 @@ func TestCreateAccountWithBootstrapCreatesVenueFromLegacyCredentials(t *testing.
 	}
 	if fake.createVenueReq.GetMarginMode() != 1 || fake.createVenueReq.GetPositionMode() != 1 {
 		t.Fatalf("venue modes = margin:%d position:%d", fake.createVenueReq.GetMarginMode(), fake.createVenueReq.GetPositionMode())
+	}
+}
+
+func TestGetAccountVenueWalletsAggregatesPartialFailures(t *testing.T) {
+	fake := &fakeAccountVenueWalletClient{}
+	s := &server{accounts: fake, jwtSecret: []byte("secret"), corsOrigins: []string{"*"}}
+	req := withUID(httptest.NewRequest(http.MethodGet, "/api/accounts/42/venue-wallets", nil), 7)
+	rec := httptest.NewRecorder()
+
+	s.getAccountVenueWallets(rec, req, 42)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if len(fake.listReqs) != 1 || fake.listReqs[0].GetAccountId() != 42 || fake.listReqs[0].GetUserId() != 7 {
+		t.Fatalf("list reqs = %+v", fake.listReqs)
+	}
+	if len(fake.walletReqs) != 2 {
+		t.Fatalf("wallet req count = %d, want 2", len(fake.walletReqs))
+	}
+	var body struct {
+		TotalValue float64 `json:"total_value"`
+		Successful int     `json:"successful"`
+		Failed     int     `json:"failed"`
+		Items      []struct {
+			Error  string `json:"error"`
+			Wallet any    `json:"wallet"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.TotalValue != 123.45 || body.Successful != 1 || body.Failed != 1 {
+		t.Fatalf("summary = total:%v successful:%d failed:%d", body.TotalValue, body.Successful, body.Failed)
+	}
+	if len(body.Items) != 2 || body.Items[1].Error != "invalid api key" {
+		t.Fatalf("items = %+v", body.Items)
 	}
 }
 
