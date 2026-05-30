@@ -173,7 +173,7 @@ func (s *server) getWallet(w http.ResponseWriter, r *http.Request, id int64) {
 		return
 	}
 	ctx := r.Context()
-	resp, err := s.accounts.GetOnlineAccountInfo(ctx, &accountv1.GetOnlineAccountInfoRequest{
+	resp, err := s.accounts.GetPortfolioSnapshot(ctx, &accountv1.GetPortfolioSnapshotRequest{
 		AccountId: id,
 		UserId:    uid,
 	})
@@ -182,7 +182,12 @@ func (s *server) getWallet(w http.ResponseWriter, r *http.Request, id int64) {
 		writeErr(w, code, msg)
 		return
 	}
-	wal := resp.GetWallet()
+	snapshot := resp.GetSnapshot()
+	if snapshot == nil {
+		writeErr(w, http.StatusNotFound, "no portfolio snapshot")
+		return
+	}
+	wal := portfolioSnapshotWalletToAccountWallet(snapshot)
 	if wal == nil {
 		writeErr(w, http.StatusNotFound, "no wallet")
 		return
@@ -424,6 +429,83 @@ func venueSnapshotWalletToAccountWallet(snap *accountv1.VenueSnapshot) *accountv
 			Positions:        venueSnapshotPositionsToFutures(snap.GetPositions()),
 		},
 	}
+}
+
+func portfolioSnapshotWalletToAccountWallet(snapshot *accountv1.PortfolioSnapshot) *accountv1.AccountWalletState {
+	if snapshot == nil {
+		return nil
+	}
+	if wal := snapshot.GetWallet(); wal != nil {
+		return wal
+	}
+	wal := &accountv1.AccountWalletState{
+		Mode:       portfolioSnapshotMode(snapshot),
+		UpdatedAt:  snapshot.GetUpdatedAt(),
+		TotalValue: snapshot.GetTotalValue(),
+		Futures: &accountv1.FuturesWallet{
+			WalletBalance:    snapshot.GetWalletBalance(),
+			AvailableBalance: snapshot.GetAvailableBalance(),
+		},
+	}
+	var spotAssets []*accountv1.SpotAsset
+	for _, venue := range snapshot.GetVenues() {
+		if venueWallet := venue.GetWallet(); venueWallet != nil {
+			if spot := venueWallet.GetSpot(); spot != nil {
+				if wal.Spot == nil {
+					wal.Spot = &accountv1.SpotWallet{}
+				}
+				wal.Spot.Free += spot.GetFree()
+				wal.Spot.Locked += spot.GetLocked()
+				wal.Spot.Assets = append(wal.Spot.Assets, spot.GetAssets()...)
+			}
+			if futures := venueWallet.GetFutures(); futures != nil {
+				wal.Futures.MarginMode = futures.GetMarginMode()
+				wal.Futures.PositionMode = futures.GetPositionMode()
+				wal.Futures.MarginBalance += futures.GetMarginBalance()
+				wal.Futures.TotalMarginBalance += futures.GetTotalMarginBalance()
+				wal.Futures.UnrealizedPnl += futures.GetUnrealizedPnl()
+				wal.Futures.TotalUnrealizedPnl += futures.GetTotalUnrealizedPnl()
+				wal.Futures.Positions = append(wal.Futures.Positions, futures.GetPositions()...)
+			}
+			continue
+		}
+		switch venue.GetMarket() {
+		case 1: // spot
+			for _, balance := range venue.GetBalances() {
+				if strings.EqualFold(balance.GetAsset(), "USDT") {
+					continue
+				}
+				price := float64(0)
+				if balance.GetWalletBalance() != 0 {
+					price = balance.GetValueUsdt() / balance.GetWalletBalance()
+				}
+				spotAssets = append(spotAssets, &accountv1.SpotAsset{
+					Symbol: strings.ToUpper(balance.GetAsset()),
+					Qty:    balance.GetWalletBalance(),
+					Locked: balance.GetLocked(),
+					Price:  &price,
+				})
+			}
+		case 2, 3: // futures
+			wal.Futures.Positions = append(wal.Futures.Positions, venueSnapshotPositionsToFutures(venue.GetPositions())...)
+		}
+	}
+	if len(spotAssets) > 0 {
+		if wal.Spot == nil {
+			wal.Spot = &accountv1.SpotWallet{}
+		}
+		wal.Spot.Assets = append(wal.Spot.Assets, spotAssets...)
+	}
+	return wal
+}
+
+func portfolioSnapshotMode(snapshot *accountv1.PortfolioSnapshot) int32 {
+	for _, venue := range snapshot.GetVenues() {
+		if venue.GetEnvironment() != 0 {
+			return legacyAccountModeFromEnvironment(venue.GetEnvironment())
+		}
+	}
+	return legacyAccountModeFromEnvironment(0)
 }
 
 func venueSnapshotPositionsToFutures(positions []*accountv1.PositionEntry) []*accountv1.FuturesPosition {
@@ -680,30 +762,13 @@ func (s *server) createAccountWithBootstrap(w http.ResponseWriter, r *http.Reque
 	}
 
 	if shouldApplyWalletBootstrap(body) {
-		sw := buildSpotWallet(body.Spot, body.InitialBalance)
-		fw := buildFuturesWallet(body.Futures)
-		if sw == nil {
-			sw = &accountv1.SpotWallet{}
-		}
-		if fw == nil {
-			fw = &accountv1.FuturesWallet{MarginMode: "isolated", PositionMode: "one_way"}
-		}
-		tv := walletagg.TotalValue(fw, sw)
-		wb, av := walletagg.FuturesWalletBalanceAndAvailable(fw)
-		if tv > 0 && wb == 0 && av == 0 {
-			wb, av = tv, tv
-		}
-		_, err = s.accounts.UpdateAccountWalletState(ctx, &accountv1.UpdateAccountWalletStateRequest{
-			AccountId:        resp.GetAccountId(),
-			Futures:          fw,
-			Spot:             sw,
-			TotalValue:       tv,
-			WalletBalance:    wb,
-			AvailableBalance: av,
+		_, err = s.accounts.UpdatePortfolioSnapshot(ctx, &accountv1.UpdatePortfolioSnapshotRequest{
+			AccountId: resp.GetAccountId(),
+			UserId:    uid,
 		})
 		if err != nil {
 			code, msg := grpcToHTTP(err)
-			writeErr(w, code, "create ok but wallet bootstrap failed: "+msg)
+			writeErr(w, code, "create ok but portfolio snapshot refresh failed: "+msg)
 			return
 		}
 	}

@@ -18,12 +18,21 @@ import (
 type fakeWalletAccountsClient struct {
 	accountv1.AccountServiceClient
 
-	resp *accountv1.GetOnlineAccountInfoResponse
-	err  error
+	resp              *accountv1.GetPortfolioSnapshotResponse
+	err               error
+	legacyOnlineCalls int
 }
 
 func (f *fakeWalletAccountsClient) GetOnlineAccountInfo(_ context.Context, _ *accountv1.GetOnlineAccountInfoRequest, _ ...grpc.CallOption) (*accountv1.GetOnlineAccountInfoResponse, error) {
-	return f.resp, f.err
+	f.legacyOnlineCalls++
+	return nil, status.Error(codes.Internal, "legacy GetOnlineAccountInfo must not be used for account wallet display")
+}
+
+func (f *fakeWalletAccountsClient) GetPortfolioSnapshot(_ context.Context, _ *accountv1.GetPortfolioSnapshotRequest, _ ...grpc.CallOption) (*accountv1.GetPortfolioSnapshotResponse, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.resp, nil
 }
 
 type fakeAccountVenueWalletClient struct {
@@ -87,8 +96,10 @@ func (f *fakePortfolioSnapshotClient) GetPortfolioSnapshot(_ context.Context, re
 type fakeCreateAccountClient struct {
 	accountv1.AccountServiceClient
 
-	createAccountReq *accountv1.CreateAccountRequest
-	createVenueReq   *accountv1.CreateVenueRequest
+	createAccountReq    *accountv1.CreateAccountRequest
+	createVenueReq      *accountv1.CreateVenueRequest
+	updateSnapshotReq   *accountv1.UpdatePortfolioSnapshotRequest
+	legacyWalletUpdates int
 }
 
 func (f *fakeCreateAccountClient) CreateAccount(_ context.Context, req *accountv1.CreateAccountRequest, _ ...grpc.CallOption) (*accountv1.CreateAccountResponse, error) {
@@ -105,6 +116,16 @@ func (f *fakeCreateAccountClient) CreateAccount(_ context.Context, req *accountv
 func (f *fakeCreateAccountClient) CreateVenue(_ context.Context, req *accountv1.CreateVenueRequest, _ ...grpc.CallOption) (*accountv1.CreateVenueResponse, error) {
 	f.createVenueReq = req
 	return &accountv1.CreateVenueResponse{Venue: &accountv1.VenueEntry{VenueId: 88}}, nil
+}
+
+func (f *fakeCreateAccountClient) UpdatePortfolioSnapshot(_ context.Context, req *accountv1.UpdatePortfolioSnapshotRequest, _ ...grpc.CallOption) (*accountv1.UpdatePortfolioSnapshotResponse, error) {
+	f.updateSnapshotReq = req
+	return &accountv1.UpdatePortfolioSnapshotResponse{Snapshot: &accountv1.PortfolioSnapshot{AccountId: req.GetAccountId(), UserId: req.GetUserId()}}, nil
+}
+
+func (f *fakeCreateAccountClient) UpdateAccountWalletState(_ context.Context, _ *accountv1.UpdateAccountWalletStateRequest, _ ...grpc.CallOption) (*accountv1.UpdateAccountWalletStateResponse, error) {
+	f.legacyWalletUpdates++
+	return nil, status.Error(codes.Internal, "legacy UpdateAccountWalletState must not be used for account creation")
 }
 
 func TestCreateAccountWithBootstrapCreatesVenueFromLegacyCredentials(t *testing.T) {
@@ -151,6 +172,37 @@ func TestCreateAccountWithBootstrapCreatesVenueFromLegacyCredentials(t *testing.
 	}
 	if fake.createVenueReq.GetMarginMode() != 1 || fake.createVenueReq.GetPositionMode() != 1 {
 		t.Fatalf("venue modes = margin:%d position:%d", fake.createVenueReq.GetMarginMode(), fake.createVenueReq.GetPositionMode())
+	}
+	if fake.updateSnapshotReq != nil {
+		t.Fatalf("portfolio snapshot refresh request = %+v, want nil for exchange-backed venue creation", fake.updateSnapshotReq)
+	}
+	if fake.legacyWalletUpdates != 0 {
+		t.Fatalf("legacy wallet updates = %d, want 0", fake.legacyWalletUpdates)
+	}
+}
+
+func TestCreateAccountWithBootstrapRefreshesPortfolioSnapshot(t *testing.T) {
+	fake := &fakeCreateAccountClient{}
+	s := &server{accounts: fake, jwtSecret: []byte("secret"), corsOrigins: []string{"*"}}
+	body := []byte(`{
+		"name":"backtest-account",
+		"environment":0,
+		"initial_balance":1000,
+		"spot":{"free":1000}
+	}`)
+	req := withUID(httptest.NewRequest(http.MethodPost, "/api/accounts", bytes.NewReader(body)), 7)
+	rec := httptest.NewRecorder()
+
+	s.createAccountWithBootstrap(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", rec.Code, rec.Body.String())
+	}
+	if fake.updateSnapshotReq == nil || fake.updateSnapshotReq.GetAccountId() != 42 || fake.updateSnapshotReq.GetUserId() != 7 {
+		t.Fatalf("portfolio snapshot refresh request = %+v", fake.updateSnapshotReq)
+	}
+	if fake.legacyWalletUpdates != 0 {
+		t.Fatalf("legacy wallet updates = %d, want 0", fake.legacyWalletUpdates)
 	}
 }
 
@@ -288,39 +340,44 @@ func TestPortfolioSnapshotEndpointReturnsVenues(t *testing.T) {
 }
 
 func TestGetWalletIncludesMarginBalanceFields(t *testing.T) {
+	now := timestamppb.Now()
 	fake := &fakeWalletAccountsClient{
-		resp: &accountv1.GetOnlineAccountInfoResponse{
-			Wallet: &accountv1.AccountWalletState{
-				TotalValue:            20759.4682,
-				Mode:                  2,
-				UpdatedAt:             timestamppb.Now(),
-				SpotEstimatedValue:    9997.9,
-				FuturesPositionEquity: 10761.5682,
-				MetricsAuthoritative:  true,
-				Spot: &accountv1.SpotWallet{
-					Free: 5000,
-					Assets: []*accountv1.SpotAsset{
-						{Symbol: "USDC", Qty: 5000, Price: float64Ptr(1)},
+		resp: &accountv1.GetPortfolioSnapshotResponse{
+			Snapshot: &accountv1.PortfolioSnapshot{
+				AccountId: 42,
+				UserId:    7,
+				Wallet: &accountv1.AccountWalletState{
+					TotalValue:            20759.4682,
+					Mode:                  2,
+					UpdatedAt:             now,
+					SpotEstimatedValue:    9997.9,
+					FuturesPositionEquity: 10761.5682,
+					MetricsAuthoritative:  true,
+					Spot: &accountv1.SpotWallet{
+						Free: 5000,
+						Assets: []*accountv1.SpotAsset{
+							{Symbol: "USDC", Qty: 5000, Price: float64Ptr(1)},
+						},
 					},
-				},
-				Futures: &accountv1.FuturesWallet{
-					MarginMode:                 "cross",
-					PositionMode:               "one_way",
-					WalletBalance:              10000,
-					MarginBalance:              10000,
-					TotalMarginBalance:         10000,
-					AvailableBalance:           9000,
-					UnrealizedPnl:              0,
-					TotalUnrealizedPnl:         0,
-					TotalCrossWalletBalance:    10000,
-					TotalCrossUnPnl:            0,
-					MultiAssetsMode:            false,
-					TotalPositionInitialMargin: 123.4,
-					DisplayWalletBalanceUsd:    10000,
-					DisplayMarginBalanceUsd:    10761.5682,
-					DisplayUnrealizedPnlUsd:    761.5682,
-					Positions: []*accountv1.FuturesPosition{
-						{Symbol: "ETHUSDT", PositionSide: "BOTH", PositionQty: -0.021, Qty: -0.021, Leverage: 20},
+					Futures: &accountv1.FuturesWallet{
+						MarginMode:                 "cross",
+						PositionMode:               "one_way",
+						WalletBalance:              10000,
+						MarginBalance:              10000,
+						TotalMarginBalance:         10000,
+						AvailableBalance:           9000,
+						UnrealizedPnl:              0,
+						TotalUnrealizedPnl:         0,
+						TotalCrossWalletBalance:    10000,
+						TotalCrossUnPnl:            0,
+						MultiAssetsMode:            false,
+						TotalPositionInitialMargin: 123.4,
+						DisplayWalletBalanceUsd:    10000,
+						DisplayMarginBalanceUsd:    10761.5682,
+						DisplayUnrealizedPnlUsd:    761.5682,
+						Positions: []*accountv1.FuturesPosition{
+							{Symbol: "ETHUSDT", PositionSide: "BOTH", PositionQty: -0.021, Qty: -0.021, Leverage: 20},
+						},
 					},
 				},
 			},
@@ -339,6 +396,9 @@ func TestGetWalletIncludesMarginBalanceFields(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if fake.legacyOnlineCalls != 0 {
+		t.Fatalf("GetOnlineAccountInfo calls = %d, want 0", fake.legacyOnlineCalls)
 	}
 
 	var body struct {
@@ -400,26 +460,31 @@ func float64Ptr(v float64) *float64 {
 // back together trips this test.
 
 func TestGetWallet_StructurallySeparatesCanonicalFromDisplay(t *testing.T) {
+	now := timestamppb.Now()
 	fake := &fakeWalletAccountsClient{
-		resp: &accountv1.GetOnlineAccountInfoResponse{
-			Wallet: &accountv1.AccountWalletState{
-				TotalValue:            20759.4682,
-				Mode:                  2,
-				UpdatedAt:             timestamppb.Now(),
-				SpotEstimatedValue:    9997.9,
-				FuturesPositionEquity: 10761.5682,
-				MetricsAuthoritative:  true,
-				Spot:                  &accountv1.SpotWallet{Free: 0, Assets: nil},
-				Futures: &accountv1.FuturesWallet{
-					MarginMode:              "cross",
-					PositionMode:            "one_way",
-					WalletBalance:           10000,
-					MarginBalance:           10000,
-					TotalMarginBalance:      10000,
-					AvailableBalance:        9000,
-					DisplayWalletBalanceUsd: 10100.12,
-					DisplayMarginBalanceUsd: 10300.45,
-					DisplayUnrealizedPnlUsd: 200.33,
+		resp: &accountv1.GetPortfolioSnapshotResponse{
+			Snapshot: &accountv1.PortfolioSnapshot{
+				AccountId: 42,
+				UserId:    7,
+				Wallet: &accountv1.AccountWalletState{
+					TotalValue:            20759.4682,
+					Mode:                  2,
+					UpdatedAt:             now,
+					SpotEstimatedValue:    9997.9,
+					FuturesPositionEquity: 10761.5682,
+					MetricsAuthoritative:  true,
+					Spot:                  &accountv1.SpotWallet{Free: 0, Assets: nil},
+					Futures: &accountv1.FuturesWallet{
+						MarginMode:              "cross",
+						PositionMode:            "one_way",
+						WalletBalance:           10000,
+						MarginBalance:           10000,
+						TotalMarginBalance:      10000,
+						AvailableBalance:        9000,
+						DisplayWalletBalanceUsd: 10100.12,
+						DisplayMarginBalanceUsd: 10300.45,
+						DisplayUnrealizedPnlUsd: 200.33,
+					},
 				},
 			},
 		},
@@ -432,6 +497,9 @@ func TestGetWallet_StructurallySeparatesCanonicalFromDisplay(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if fake.legacyOnlineCalls != 0 {
+		t.Fatalf("GetOnlineAccountInfo calls = %d, want 0", fake.legacyOnlineCalls)
 	}
 
 	var body map[string]any

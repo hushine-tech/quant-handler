@@ -136,7 +136,7 @@ func TotalValue(fw *accountv1.FuturesWallet, sw *accountv1.SpotWallet) float64 {
 	return feq + se
 }
 
-// FuturesWalletBalanceAndAvailable sets aggregates for UpdateAccountWalletState bootstrap (flat-book approximation).
+// FuturesWalletBalanceAndAvailable sets bootstrap aggregates with a flat-book approximation.
 func FuturesWalletBalanceAndAvailable(fw *accountv1.FuturesWallet) (wb, av float64) {
 	if fw == nil {
 		return 0, 0

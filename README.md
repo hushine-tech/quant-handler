@@ -34,9 +34,10 @@ go run ./cmd/quant-handler -config ./config.yaml
 - `POST /api/auth/signup` — JSON `{"username":"...", "password":"..."}` → user.
 - `POST /api/auth/login` — JSON `{"username":"...", "password":"..."}` → `{ "token", "expires_in", "user" }`.
 - `GET /api/accounts` — Bearer JWT → JSON array of accounts.
-- `POST /api/accounts` — Bearer JWT → create. Body: `name`, `mode`, optional `api_key`, `api_secret`, `initial_balance`, and for **backtest** optional `spot` / `futures` objects (see `core-service/docs/wallet-bootstrap-defaults.md`). If `spot` or `futures` is present, the handler runs `UpdateAccountWalletState` after `CreateAccount`.
+- `POST /api/accounts` — Bearer JWT → create. Body: `name`, `environment`, optional `api_key`, `api_secret`, and `initial_balance`. Compatibility requests may still send `mode`; the handler maps it to `environment`. After creation, account wallet display is refreshed through `UpdatePortfolioSnapshot`.
 - `GET /api/accounts/{id}` — Bearer JWT → registry JSON.
-- `GET /api/accounts/{id}/wallet` — Bearer JWT → wallet JSON from `GetOnlineAccountInfo`, including `spot_estimated_value`, `futures_position_equity`, and `metrics_authoritative` from **core-service** when reconciled; the handler recomputes aggregates only when the server marks metrics non-authoritative or components do not match `total_value`.
+- `GET /api/accounts/{id}/wallet` — Bearer JWT → compatibility wallet JSON from `GetPortfolioSnapshot`, including aggregate wallet fields plus venue-derived fallback data when the aggregate wallet is absent.
+- `GET /api/accounts/{id}/portfolio-snapshot` — Bearer JWT → portfolio aggregate plus venue snapshots from `GetPortfolioSnapshot`.
 - `GET /api/symbols?market=spot|usdm_futures&q=&limit=` — Bearer JWT → `{ "symbols": [], "stale": bool }`. **`market` is required** (returns `400` if omitted).
 
 ## Runtime And Market-Data Control Plane
@@ -57,6 +58,6 @@ behind the same feature flag but returns `410 Gone`; routing now uses
 
 1. Run **core-service** (Binance public `exchangeInfo` used for symbol cache; set `SYMBOL_CACHE_TTL` if needed).
 2. Run **quant-handler** and **quant-frontend** (`VITE_API_BASE_URL` pointing at handler).
-3. Log in, create a **backtest** account with spot and/or futures selections; open account detail and confirm banner (回测/测试网/实盘) and portfolio numbers.
+3. Log in, create an account; open account detail and confirm banner (回测/测试网/实盘) and portfolio numbers are read from the portfolio snapshot.
 
 Automated coverage: `go test ./...` in this repo; `go test -tags=integration ./tests/integration/...` in **core-service** (includes multi-symbol wallet bootstrap and `ListSymbols`).
