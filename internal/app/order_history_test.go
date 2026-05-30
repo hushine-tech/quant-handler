@@ -17,15 +17,17 @@ import (
 type fakeOrdersClient struct {
 	orderv1.OrderServiceClient // unused methods
 
-	lastIntentsReq  *orderv1.QueryOrderIntentsRequest
-	intentsResp     *orderv1.QueryOrderIntentsResponse
-	lastAttemptsReq *orderv1.QueryOrderAttemptsRequest
-	attemptsResp    *orderv1.QueryOrderAttemptsResponse
-	lastOrdersReq   *orderv1.QueryOrdersRequest
-	ordersResp      *orderv1.QueryOrdersResponse
-	lastFillsReq    *orderv1.QueryOrderFillsRequest
-	fillsResp       *orderv1.QueryOrderFillsResponse
-	err             error
+	lastIntentsReq   *orderv1.QueryOrderIntentsRequest
+	intentsResp      *orderv1.QueryOrderIntentsResponse
+	lastAttemptsReq  *orderv1.QueryOrderAttemptsRequest
+	attemptsResp     *orderv1.QueryOrderAttemptsResponse
+	lastOrdersReq    *orderv1.QueryOrdersRequest
+	ordersResp       *orderv1.QueryOrdersResponse
+	lastFillsReq     *orderv1.QueryOrderFillsRequest
+	fillsResp        *orderv1.QueryOrderFillsResponse
+	lastLifecycleReq *orderv1.ListOrderLifecycleEventsRequest
+	lifecycleResp    *orderv1.ListOrderLifecycleEventsResponse
+	err              error
 }
 
 func (f *fakeOrdersClient) QueryOrderIntents(_ context.Context, in *orderv1.QueryOrderIntentsRequest, _ ...grpc.CallOption) (*orderv1.QueryOrderIntentsResponse, error) {
@@ -46,6 +48,11 @@ func (f *fakeOrdersClient) QueryOrders(_ context.Context, in *orderv1.QueryOrder
 func (f *fakeOrdersClient) QueryOrderFills(_ context.Context, in *orderv1.QueryOrderFillsRequest, _ ...grpc.CallOption) (*orderv1.QueryOrderFillsResponse, error) {
 	f.lastFillsReq = in
 	return f.fillsResp, f.err
+}
+
+func (f *fakeOrdersClient) ListOrderLifecycleEvents(_ context.Context, in *orderv1.ListOrderLifecycleEventsRequest, _ ...grpc.CallOption) (*orderv1.ListOrderLifecycleEventsResponse, error) {
+	f.lastLifecycleReq = in
+	return f.lifecycleResp, f.err
 }
 
 func newOrderHistoryServer(fake *fakeOrdersClient) *server {

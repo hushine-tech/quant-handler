@@ -68,6 +68,22 @@ func (f *fakeAccountVenueWalletClient) GetVenueOnlineInfo(_ context.Context, req
 	}, nil
 }
 
+type fakePortfolioSnapshotClient struct {
+	accountv1.AccountServiceClient
+
+	lastReq *accountv1.GetPortfolioSnapshotRequest
+	resp    *accountv1.GetPortfolioSnapshotResponse
+	err     error
+}
+
+func (f *fakePortfolioSnapshotClient) GetPortfolioSnapshot(_ context.Context, req *accountv1.GetPortfolioSnapshotRequest, _ ...grpc.CallOption) (*accountv1.GetPortfolioSnapshotResponse, error) {
+	f.lastReq = req
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.resp, nil
+}
+
 type fakeCreateAccountClient struct {
 	accountv1.AccountServiceClient
 
@@ -172,6 +188,102 @@ func TestGetAccountVenueWalletsAggregatesPartialFailures(t *testing.T) {
 	}
 	if len(body.Items) != 2 || body.Items[1].Error != "invalid api key" {
 		t.Fatalf("items = %+v", body.Items)
+	}
+}
+
+func TestPortfolioSnapshotEndpointReturnsVenues(t *testing.T) {
+	now := timestamppb.Now()
+	fake := &fakePortfolioSnapshotClient{
+		resp: &accountv1.GetPortfolioSnapshotResponse{
+			Snapshot: &accountv1.PortfolioSnapshot{
+				AccountId:        42,
+				UserId:           7,
+				TotalValue:       2500,
+				WalletBalance:    2000,
+				AvailableBalance: 1500,
+				UpdatedAt:        now,
+				Wallet: &accountv1.AccountWalletState{
+					Mode:       2,
+					UpdatedAt:  now,
+					TotalValue: 2500,
+					Futures: &accountv1.FuturesWallet{
+						WalletBalance:    2000,
+						AvailableBalance: 1500,
+					},
+				},
+				Venues: []*accountv1.VenueSnapshot{
+					{
+						VenueId:          88,
+						Exchange:         1,
+						Environment:      1,
+						Market:           2,
+						TotalValue:       2500,
+						WalletBalance:    2000,
+						AvailableBalance: 1500,
+						UpdatedAt:        now,
+						Balances: []*accountv1.BalanceEntry{
+							{Asset: "USDT", WalletBalance: 2000, AvailableBalance: 1500, ValueUsdt: 2000},
+						},
+						Positions: []*accountv1.PositionEntry{
+							{Symbol: "ETHUSDT", PositionSide: "BOTH", Qty: 0.5, EntryPrice: 3000, MarkPrice: 3100, UnrealizedPnl: 50},
+						},
+					},
+				},
+			},
+		},
+	}
+	s := &server{accounts: fake, jwtSecret: []byte("secret"), corsOrigins: []string{"*"}}
+	req := withUID(httptest.NewRequest(http.MethodGet, "/api/accounts/42/portfolio-snapshot", nil), 7)
+	rec := httptest.NewRecorder()
+
+	s.getAccountPortfolioSnapshot(rec, req, 42)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if fake.lastReq == nil || fake.lastReq.GetAccountId() != 42 || fake.lastReq.GetUserId() != 7 {
+		t.Fatalf("snapshot request = %+v", fake.lastReq)
+	}
+	var body struct {
+		AccountID        int64   `json:"account_id"`
+		TotalValue       float64 `json:"total_value"`
+		WalletBalance    float64 `json:"wallet_balance"`
+		AvailableBalance float64 `json:"available_balance"`
+		Items            []struct {
+			Venue struct {
+				VenueID          int64  `json:"venue_id"`
+				ExchangeLabel    string `json:"exchange_label"`
+				MarketLabel      string `json:"market_label"`
+				EnvironmentLabel string `json:"environment_label"`
+			} `json:"venue"`
+			Snapshot struct {
+				TotalValue       float64 `json:"total_value"`
+				WalletBalance    float64 `json:"wallet_balance"`
+				AvailableBalance float64 `json:"available_balance"`
+				Balances         []struct {
+					Asset string `json:"asset"`
+				} `json:"balances"`
+				Positions []struct {
+					Symbol string `json:"symbol"`
+				} `json:"positions"`
+			} `json:"snapshot"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.AccountID != 42 || body.TotalValue != 2500 || body.WalletBalance != 2000 || body.AvailableBalance != 1500 {
+		t.Fatalf("summary = %+v", body)
+	}
+	if len(body.Items) != 1 {
+		t.Fatalf("items len = %d, want 1", len(body.Items))
+	}
+	item := body.Items[0]
+	if item.Venue.VenueID != 88 || item.Venue.ExchangeLabel != "binance" || item.Venue.MarketLabel != "perpetual_futures" || item.Venue.EnvironmentLabel != "demo" {
+		t.Fatalf("venue = %+v", item.Venue)
+	}
+	if item.Snapshot.TotalValue != 2500 || len(item.Snapshot.Balances) != 1 || item.Snapshot.Balances[0].Asset != "USDT" || len(item.Snapshot.Positions) != 1 || item.Snapshot.Positions[0].Symbol != "ETHUSDT" {
+		t.Fatalf("snapshot = %+v", item.Snapshot)
 	}
 }
 

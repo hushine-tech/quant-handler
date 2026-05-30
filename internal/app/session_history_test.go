@@ -244,6 +244,156 @@ func TestGetSessionSnapshots_NegativeOrZeroLimitFallsBackToDefault(t *testing.T)
 	}
 }
 
+func TestSessionOrderLifecycleEndpointReturnsEvents(t *testing.T) {
+	occurred := timestamppb.Now()
+	acct := &fakeSessionAccountsClient{
+		getSessionResp: &accountv1.GetSessionResponse{Session: &accountv1.StrategySessionEntry{
+			SessionId: "sess-1",
+			UserId:    7,
+			AccountId: 42,
+			RuntimeId: "rt-1",
+		}},
+	}
+	orders := &fakeOrdersClient{
+		lifecycleResp: &orderv1.ListOrderLifecycleEventsResponse{
+			Events: []*orderv1.OrderLifecycleEventEntry{
+				{
+					EventId:         101,
+					SessionId:       "sess-1",
+					AccountId:       42,
+					VenueId:         88,
+					IntentId:        "intent-1",
+					AttemptId:       "attempt-1",
+					OrderId:         "order-1",
+					ExchangeOrderId: "ex-order-1",
+					ExchangeTradeId: "trade-1",
+					EventType:       "fill",
+					OrderStatus:     "PARTIALLY_FILLED",
+					Environment:     1,
+					Exchange:        1,
+					Market:          2,
+					PositionSide:    1,
+					Side:            "BUY",
+					OccurredAt:      occurred,
+					CreatedAt:       occurred,
+					FillDelta: &orderv1.FillDeltaEntry{
+						Symbol:    "ETHUSDT",
+						Qty:       0.25,
+						FillPrice: 3100,
+						Fee:       0.12,
+						FeeAsset:  "USDT",
+						TradeTime: occurred,
+					},
+					OrderState: &orderv1.OrderStateEntry{
+						ExchangeOrderId: "ex-order-1",
+						Symbol:          "ETHUSDT",
+						Status:          "PARTIALLY_FILLED",
+						OrigQty:         1,
+						ExecutedQty:     0.25,
+						RemainingQty:    0.75,
+						AvgPrice:        3100,
+						UpdatedAt:       occurred,
+					},
+				},
+			},
+		},
+	}
+	s := &server{accounts: acct, orders: orders, jwtSecret: []byte("s"), corsOrigins: []string{"*"}}
+
+	req := withUID(httptest.NewRequest(http.MethodGet, "/api/sessions/sess-1/lifecycle-events?after_event_id=99&limit=5", nil), 7)
+	rec := httptest.NewRecorder()
+	s.handleSessions(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if acct.lastGetSessionReq == nil || acct.lastGetSessionReq.GetSessionId() != "sess-1" || acct.lastGetSessionReq.GetUserId() != 7 {
+		t.Fatalf("session authorization request = %+v", acct.lastGetSessionReq)
+	}
+	if orders.lastLifecycleReq == nil {
+		t.Fatal("ListOrderLifecycleEvents was not called")
+	}
+	if orders.lastLifecycleReq.GetSessionId() != "sess-1" || orders.lastLifecycleReq.GetAfterEventId() != 99 || orders.lastLifecycleReq.GetLimit() != 5 {
+		t.Fatalf("lifecycle request = %+v", orders.lastLifecycleReq)
+	}
+
+	var body struct {
+		Items []struct {
+			EventID       int64  `json:"event_id"`
+			EventType     string `json:"event_type"`
+			OrderStatus   string `json:"order_status"`
+			ExchangeLabel string `json:"exchange_label"`
+			MarketLabel   string `json:"market_label"`
+			PositionSide  string `json:"position_side"`
+			Side          string `json:"side"`
+			FillDelta     struct {
+				Symbol    string  `json:"symbol"`
+				Qty       float64 `json:"qty"`
+				FillPrice float64 `json:"fill_price"`
+			} `json:"fill_delta"`
+			OrderState struct {
+				Status       string  `json:"status"`
+				ExecutedQty  float64 `json:"executed_qty"`
+				RemainingQty float64 `json:"remaining_qty"`
+			} `json:"order_state"`
+		} `json:"items"`
+		NextEventID int64 `json:"next_event_id"`
+		NextOffset  int64 `json:"next_offset"`
+		HasMore     bool  `json:"has_more"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(body.Items) != 1 {
+		t.Fatalf("items len = %d, want 1", len(body.Items))
+	}
+	item := body.Items[0]
+	if item.EventID != 101 || item.EventType != "fill" || item.OrderStatus != "PARTIALLY_FILLED" {
+		t.Fatalf("item = %+v", item)
+	}
+	if item.ExchangeLabel != "binance" || item.MarketLabel != "perpetual_futures" || item.PositionSide != "LONG" || item.Side != "BUY" {
+		t.Fatalf("route facts = %+v", item)
+	}
+	if item.FillDelta.Symbol != "ETHUSDT" || item.FillDelta.Qty != 0.25 || item.OrderState.ExecutedQty != 0.25 || item.OrderState.RemainingQty != 0.75 {
+		t.Fatalf("fill/state = %+v", item)
+	}
+	if body.NextEventID != 101 || body.NextOffset != 101 || body.HasMore {
+		t.Fatalf("page = next_event_id:%d next_offset:%d has_more:%t", body.NextEventID, body.NextOffset, body.HasMore)
+	}
+}
+
+func TestStoppingFailedStatusReturnedToFrontend(t *testing.T) {
+	acct := &fakeSessionAccountsClient{
+		getSessionResp: &accountv1.GetSessionResponse{Session: &accountv1.StrategySessionEntry{
+			SessionId: "sess-stop-failed",
+			UserId:    7,
+			AccountId: 42,
+			Status:    "stopping_failed",
+			Error:     "manual exchange close required",
+			RuntimeId: "rt-1",
+		}},
+	}
+	s := &server{accounts: acct, jwtSecret: []byte("s"), corsOrigins: []string{"*"}}
+
+	req := withUID(httptest.NewRequest(http.MethodGet, "/api/sessions/sess-stop-failed", nil), 7)
+	rec := httptest.NewRecorder()
+	s.handleSessions(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Status string `json:"status"`
+		Error  string `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Status != "stopping_failed" || body.Error != "manual exchange close required" {
+		t.Fatalf("session status/error = %+v", body)
+	}
+}
+
 // ── reconciliation handler ──────────────────────────────────────────────
 
 func TestGetSessionReconciliation_PagedShapeAndCustomPaging(t *testing.T) {
