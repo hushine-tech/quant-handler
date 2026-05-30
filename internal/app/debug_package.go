@@ -15,7 +15,11 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-const debugPackageKlineLimit = int32(1000)
+const (
+	debugPackageKlineLimit       = int32(1000)
+	debugPackageStrategyMarket   = "perpetual_futures"
+	debugPackageMarketDataMarket = "futures"
+)
 
 var errDebugPackageIncompleteCoverage = errors.New("requested range has incomplete market data")
 
@@ -62,8 +66,8 @@ func (s *server) handleAccountDebugPackage(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	normalizeDebugPackageBody(&body)
-	if uid <= 0 || accountID <= 0 || body.Exchange != "binance" || body.Market != "futures" || body.Symbol == "" || body.Interval == "" {
-		writeErr(w, http.StatusBadRequest, "account_id, binance futures market, symbol, and interval are required")
+	if uid <= 0 || accountID <= 0 || body.Exchange != "binance" || body.Market != debugPackageStrategyMarket || body.Symbol == "" || body.Interval == "" {
+		writeErr(w, http.StatusBadRequest, "account_id, binance perpetual_futures market, symbol, and interval are required")
 		return
 	}
 	if body.StartTimeMS <= 0 || body.EndTimeMS <= body.StartTimeMS {
@@ -75,7 +79,7 @@ func (s *server) handleAccountDebugPackage(w http.ResponseWriter, r *http.Reques
 	}
 	key := &mdv1.StreamKey{
 		Exchange: body.Exchange,
-		Market:   body.Market,
+		Market:   debugPackageMarketDataMarket,
 		Kind:     "kline",
 		Symbol:   body.Symbol,
 		Interval: body.Interval,
@@ -148,6 +152,9 @@ func normalizeDebugPackageBody(body *debugPackageBody) {
 		body.Exchange = "binance"
 	}
 	body.Market = strings.ToLower(strings.TrimSpace(body.Market))
+	if body.Market == "" {
+		body.Market = debugPackageStrategyMarket
+	}
 	body.Symbol = strings.ToUpper(strings.TrimSpace(body.Symbol))
 	body.Interval = strings.TrimSpace(body.Interval)
 }
@@ -264,7 +271,7 @@ func debugPackageManifest(body debugPackageBody) string {
 }
 
 func debugPackageWallet(initialBalance float64) string {
-	return "market: futures\nasset: USDT\ninitial_balance: " + strconv.FormatFloat(initialBalance, 'f', -1, 64) + "\n"
+	return "market: " + debugPackageStrategyMarket + "\nasset: USDT\ninitial_balance: " + strconv.FormatFloat(initialBalance, 'f', -1, 64) + "\n"
 }
 
 func addZipFile(zw *zip.Writer, name string, data []byte) error {
@@ -277,5 +284,26 @@ func addZipFile(zw *zip.Writer, name string, data []byte) error {
 }
 
 func defaultDebugStrategyTemplate(symbol string, interval string) string {
-	return "from hushine_strategy import OrderDecision\n\nclass MyStrategy:\n    INPUTS = [{\"market\":\"futures\",\"symbol\":\"" + symbol + "\",\"interval\":\"" + interval + "\"}]\n\n    def on_market_data(self, data, wallet):\n        return None\n"
+	return fmt.Sprintf(`from hushine_strategy import Exchange, Market, OrderDecision, OrderSide, OrderType, PositionSide
+
+
+class MyStrategy:
+    EXCHANGE = Exchange.BINANCE
+    MARKET = Market.PERPETUAL_FUTURES
+    SYMBOL = %q
+    INTERVAL = %q
+
+    INPUTS = [
+        {"exchange": EXCHANGE, "market": MARKET, "symbol": SYMBOL, "interval": INTERVAL},
+    ]
+    ORDER_TARGETS = [
+        {"exchange": EXCHANGE, "market": MARKET, "symbol": SYMBOL},
+    ]
+
+    def on_market_data(self, data, wallet):
+        tick = data.exchange[self.EXCHANGE][self.MARKET].symbol[self.SYMBOL].interval[self.INTERVAL]
+        if tick is None:
+            return None
+        return None
+`, symbol, interval)
 }

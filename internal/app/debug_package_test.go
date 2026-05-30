@@ -54,7 +54,7 @@ func TestAccountDebugPackage_DownloadsZipWithParquet(t *testing.T) {
 	}
 	s := newServerWithFakeMarketData(t, fake)
 	req := withUID(httptest.NewRequest(http.MethodPost, "/api/accounts/7/debug-package", strings.NewReader(`{
-		"market":"futures",
+		"market":"perpetual_futures",
 		"symbol":"BTCUSDT",
 		"interval":"1m",
 		"start_time_ms":1735689600000,
@@ -91,6 +91,25 @@ func TestAccountDebugPackage_DownloadsZipWithParquet(t *testing.T) {
 	if entries["data.parquet"].UncompressedSize64 == 0 {
 		t.Fatalf("data.parquet is empty")
 	}
+	manifest := readZipText(t, entries["manifest.yaml"])
+	if !strings.Contains(manifest, "market: perpetual_futures") {
+		t.Fatalf("manifest.yaml = %q", manifest)
+	}
+	wallet := readZipText(t, entries["wallet.yaml"])
+	if !strings.Contains(wallet, "market: perpetual_futures") {
+		t.Fatalf("wallet.yaml = %q", wallet)
+	}
+	template := readZipText(t, entries["strategy.py.template"])
+	for _, want := range []string{"Exchange.BINANCE", "Market.PERPETUAL_FUTURES", "ORDER_TARGETS", "data.exchange"} {
+		if !strings.Contains(template, want) {
+			t.Fatalf("strategy.py.template missing %q:\n%s", want, template)
+		}
+	}
+	for _, forbidden := range []string{"data." + "market", `"market":"` + "futures" + `"`} {
+		if strings.Contains(template, forbidden) {
+			t.Fatalf("strategy.py.template contains forbidden %q:\n%s", forbidden, template)
+		}
+	}
 	rows := readDebugPackageRows(t, entries["data.parquet"])
 	if len(rows) != 1 {
 		t.Fatalf("parquet rows = %d, want 1", len(rows))
@@ -100,6 +119,9 @@ func TestAccountDebugPackage_DownloadsZipWithParquet(t *testing.T) {
 	}
 	if fake.lastValidateReq == nil {
 		t.Fatal("coverage was not validated")
+	}
+	if got := fake.lastValidateReq.GetKey().GetMarket(); got != "futures" {
+		t.Fatalf("market data key market = %q, want futures", got)
 	}
 	if fake.lastKlinesReq == nil {
 		t.Fatal("kline rows were not queried")
@@ -118,7 +140,7 @@ func TestAccountDebugPackage_RejectsIncompleteCoverage(t *testing.T) {
 	}
 	s := newServerWithFakeMarketData(t, fake)
 	req := withUID(httptest.NewRequest(http.MethodPost, "/api/accounts/7/debug-package", strings.NewReader(`{
-		"market":"futures",
+		"market":"perpetual_futures",
 		"symbol":"BTCUSDT",
 		"interval":"1m",
 		"start_time_ms":1735689600000,
@@ -159,7 +181,7 @@ func TestAccountDebugPackage_RejectsStaleValidationWhenRowsIncomplete(t *testing
 	}
 	s := newServerWithFakeMarketData(t, fake)
 	req := withUID(httptest.NewRequest(http.MethodPost, "/api/accounts/7/debug-package", strings.NewReader(`{
-		"market":"futures",
+		"market":"perpetual_futures",
 		"symbol":"BTCUSDT",
 		"interval":"1m",
 		"start_time_ms":1735689600000,
@@ -190,6 +212,20 @@ func readDebugPackageRows(t *testing.T, entry *zip.File) []debugPackageKlineRow 
 		t.Fatalf("read parquet rows: %v", err)
 	}
 	return rows
+}
+
+func readZipText(t *testing.T, entry *zip.File) string {
+	t.Helper()
+	rc, err := entry.Open()
+	if err != nil {
+		t.Fatalf("open zip entry: %v", err)
+	}
+	defer rc.Close()
+	data, err := io.ReadAll(rc)
+	if err != nil {
+		t.Fatalf("read zip entry: %v", err)
+	}
+	return string(data)
 }
 
 func timeFromMS(ms int64) time.Time {
