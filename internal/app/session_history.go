@@ -125,6 +125,9 @@ func (s *server) handleSessions(w http.ResponseWriter, r *http.Request) {
 		case "fills":
 			s.getSessionFills(w, r, sessionID)
 			return
+		case "lifecycle-events":
+			s.getSessionLifecycleEvents(w, r, sessionID)
+			return
 		}
 	}
 
@@ -631,6 +634,173 @@ func (s *server) getSessionFills(w http.ResponseWriter, r *http.Request, session
 		HasMore:    hasMore,
 		Total:      resp.GetTotal(),
 	})
+}
+
+func (s *server) getSessionLifecycleEvents(w http.ResponseWriter, r *http.Request, sessionID string) {
+	if s.orders == nil {
+		writeErr(w, http.StatusServiceUnavailable, "order API not configured")
+		return
+	}
+	uid, ok := userIDFromRequest(r)
+	if !ok {
+		writeErr(w, http.StatusUnauthorized, "missing user context")
+		return
+	}
+	if s.accounts == nil {
+		writeErr(w, http.StatusServiceUnavailable, "core-service not configured")
+		return
+	}
+	if _, err := s.accounts.GetSession(r.Context(), &accountv1.GetSessionRequest{SessionId: sessionID, UserId: uid}); err != nil {
+		code, msg := grpcToHTTP(err)
+		writeErr(w, code, msg)
+		return
+	}
+
+	limit, afterEventID := parseLifecycleEventPaging(r)
+	resp, err := s.orders.ListOrderLifecycleEvents(r.Context(), &orderv1.ListOrderLifecycleEventsRequest{
+		SessionId:    sessionID,
+		AfterEventId: afterEventID,
+		Limit:        limit,
+	})
+	if err != nil {
+		code, msg := grpcToHTTP(err)
+		writeErr(w, code, msg)
+		return
+	}
+
+	events := resp.GetEvents()
+	out := make([]orderLifecycleEventJSON, 0, len(events))
+	var nextEventID int64
+	for _, event := range events {
+		out = append(out, orderLifecycleEventToJSON(event))
+		if event.GetEventId() > nextEventID {
+			nextEventID = event.GetEventId()
+		}
+	}
+	if nextEventID == 0 {
+		nextEventID = afterEventID
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items":         out,
+		"next_event_id": nextEventID,
+		"next_offset":   nextEventID,
+		"has_more":      len(events) >= int(limit),
+		"total":         int64(0),
+	})
+}
+
+func parseLifecycleEventPaging(r *http.Request) (limit int32, afterEventID int64) {
+	limit = auditListDefaultLimit
+	q := r.URL.Query()
+	if v := q.Get("limit"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 32); err == nil && n > 0 {
+			if n > auditListMaxLimit {
+				n = auditListMaxLimit
+			}
+			limit = int32(n)
+		}
+	}
+	if v := q.Get("after_event_id"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n >= 0 {
+			afterEventID = n
+		}
+	}
+	if afterEventID == 0 {
+		if v := q.Get("offset"); v != "" {
+			if n, err := strconv.ParseInt(v, 10, 64); err == nil && n >= 0 {
+				afterEventID = n
+			}
+		}
+	}
+	return limit, afterEventID
+}
+
+type orderLifecycleEventJSON struct {
+	EventID          int64          `json:"event_id"`
+	SessionID        string         `json:"session_id"`
+	AccountID        int64          `json:"account_id"`
+	VenueID          int64          `json:"venue_id,omitempty"`
+	IntentID         string         `json:"intent_id,omitempty"`
+	AttemptID        string         `json:"attempt_id,omitempty"`
+	OrderID          string         `json:"order_id,omitempty"`
+	ExchangeOrderID  string         `json:"exchange_order_id,omitempty"`
+	ExchangeTradeID  string         `json:"exchange_trade_id,omitempty"`
+	EventType        string         `json:"event_type"`
+	OrderStatus      string         `json:"order_status"`
+	Environment      int32          `json:"environment"`
+	EnvironmentLabel string         `json:"environment_label"`
+	Exchange         int32          `json:"exchange"`
+	ExchangeLabel    string         `json:"exchange_label"`
+	Market           int32          `json:"market"`
+	MarketLabel      string         `json:"market_label"`
+	PositionSide     string         `json:"position_side"`
+	Side             string         `json:"side"`
+	FillDelta        map[string]any `json:"fill_delta,omitempty"`
+	OrderState       map[string]any `json:"order_state,omitempty"`
+	OccurredAt       string         `json:"occurred_at"`
+	CreatedAt        string         `json:"created_at"`
+}
+
+func orderLifecycleEventToJSON(event *orderv1.OrderLifecycleEventEntry) orderLifecycleEventJSON {
+	return orderLifecycleEventJSON{
+		EventID:          event.GetEventId(),
+		SessionID:        event.GetSessionId(),
+		AccountID:        event.GetAccountId(),
+		VenueID:          event.GetVenueId(),
+		IntentID:         event.GetIntentId(),
+		AttemptID:        event.GetAttemptId(),
+		OrderID:          event.GetOrderId(),
+		ExchangeOrderID:  event.GetExchangeOrderId(),
+		ExchangeTradeID:  event.GetExchangeTradeId(),
+		EventType:        event.GetEventType(),
+		OrderStatus:      event.GetOrderStatus(),
+		Environment:      event.GetEnvironment(),
+		EnvironmentLabel: venueEnvironmentLabel(event.GetEnvironment()),
+		Exchange:         event.GetExchange(),
+		ExchangeLabel:    orderExchangeLabel(event.GetExchange()),
+		Market:           event.GetMarket(),
+		MarketLabel:      orderMarketLabel(event.GetMarket()),
+		PositionSide:     orderPositionSideLabel(event.GetPositionSide()),
+		Side:             event.GetSide(),
+		FillDelta:        fillDeltaToJSON(event.GetFillDelta()),
+		OrderState:       orderStateToJSON(event.GetOrderState()),
+		OccurredAt:       protoTime(event.GetOccurredAt()),
+		CreatedAt:        protoTime(event.GetCreatedAt()),
+	}
+}
+
+func fillDeltaToJSON(delta *orderv1.FillDeltaEntry) map[string]any {
+	if delta == nil {
+		return nil
+	}
+	return map[string]any{
+		"exchange_trade_id": delta.GetExchangeTradeId(),
+		"exchange_order_id": delta.GetExchangeOrderId(),
+		"symbol":            delta.GetSymbol(),
+		"qty":               delta.GetQty(),
+		"fill_price":        delta.GetFillPrice(),
+		"fee":               delta.GetFee(),
+		"fee_asset":         delta.GetFeeAsset(),
+		"fee_missing":       delta.GetFeeMissing(),
+		"trade_time":        protoTime(delta.GetTradeTime()),
+	}
+}
+
+func orderStateToJSON(state *orderv1.OrderStateEntry) map[string]any {
+	if state == nil {
+		return nil
+	}
+	return map[string]any{
+		"exchange_order_id": state.GetExchangeOrderId(),
+		"client_order_id":   state.GetClientOrderId(),
+		"symbol":            state.GetSymbol(),
+		"status":            state.GetStatus(),
+		"orig_qty":          state.GetOrigQty(),
+		"executed_qty":      state.GetExecutedQty(),
+		"remaining_qty":     state.GetRemainingQty(),
+		"avg_price":         state.GetAvgPrice(),
+		"updated_at":        protoTime(state.GetUpdatedAt()),
+	}
 }
 
 func (s *server) getSessionReconciliation(w http.ResponseWriter, r *http.Request, sessionID string) {

@@ -401,7 +401,21 @@ func (s *server) handleStopStrategy(w http.ResponseWriter, r *http.Request, sess
 		writeErr(w, code, msg)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"stopped": resp.GetStopped()})
+	out := map[string]any{
+		"stopped":         resp.GetStopped(),
+		"stop_action":     action.String(),
+		"close_positions": legacyClose,
+		"runtime_id":      runtimeID,
+	}
+	if s.accounts != nil {
+		if current, err := s.accounts.GetSession(r.Context(), &accountv1.GetSessionRequest{SessionId: sessionID, UserId: uid}); err == nil {
+			if session := current.GetSession(); session != nil {
+				out["status"] = session.GetStatus()
+				out["error"] = session.GetError()
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *server) loadSessionForRuntimeRoute(w http.ResponseWriter, r *http.Request, sessionID string, userID int64) (*accountv1.StrategySessionEntry, bool) {

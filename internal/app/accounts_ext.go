@@ -196,6 +196,12 @@ type accountVenueWalletItemJSON struct {
 	Error  string         `json:"error,omitempty"`
 }
 
+type accountPortfolioSnapshotItemJSON struct {
+	Venue    venueJSON      `json:"venue"`
+	Snapshot map[string]any `json:"snapshot"`
+	Wallet   map[string]any `json:"wallet,omitempty"`
+}
+
 const accountVenueWalletTimeout = 5 * time.Second
 
 func (s *server) getAccountVenueWallets(w http.ResponseWriter, r *http.Request, accountID int64) {
@@ -282,7 +288,164 @@ func (s *server) getAccountVenueWallets(w http.ResponseWriter, r *http.Request, 
 	})
 }
 
+func (s *server) getAccountPortfolioSnapshot(w http.ResponseWriter, r *http.Request, accountID int64) {
+	uid, ok := userIDFromRequest(r)
+	if !ok {
+		writeErr(w, http.StatusUnauthorized, "missing user context")
+		return
+	}
+	resp, err := s.accounts.GetPortfolioSnapshot(r.Context(), &accountv1.GetPortfolioSnapshotRequest{
+		AccountId: accountID,
+		UserId:    uid,
+	})
+	if err != nil {
+		code, msg := grpcToHTTP(err)
+		writeErr(w, code, msg)
+		return
+	}
+	snapshot := resp.GetSnapshot()
+	if snapshot == nil {
+		writeErr(w, http.StatusNotFound, "no portfolio snapshot")
+		return
+	}
+	writeJSON(w, http.StatusOK, portfolioSnapshotToJSON(snapshot))
+}
+
+func portfolioSnapshotToJSON(snapshot *accountv1.PortfolioSnapshot) map[string]any {
+	updatedAt := ""
+	if ts := snapshot.GetUpdatedAt(); ts != nil {
+		updatedAt = ts.AsTime().UTC().Format(time.RFC3339Nano)
+	}
+	items := make([]accountPortfolioSnapshotItemJSON, 0, len(snapshot.GetVenues()))
+	for _, venueSnapshot := range snapshot.GetVenues() {
+		item := accountPortfolioSnapshotItemJSON{
+			Venue:    venueFromSnapshotToJSON(snapshot.GetUserId(), snapshot.GetAccountId(), venueSnapshot),
+			Snapshot: venueSnapshotToJSON(venueSnapshot),
+		}
+		if wallet := venueSnapshotWalletToAccountWallet(venueSnapshot); wallet != nil {
+			item.Wallet = accountWalletStateToJSON(wallet)
+		}
+		items = append(items, item)
+	}
+	return map[string]any{
+		"account_id":        snapshot.GetAccountId(),
+		"user_id":           snapshot.GetUserId(),
+		"total_value":       snapshot.GetTotalValue(),
+		"wallet_balance":    snapshot.GetWalletBalance(),
+		"available_balance": snapshot.GetAvailableBalance(),
+		"updated_at":        updatedAt,
+		"wallet":            accountWalletStateToJSON(snapshot.GetWallet()),
+		"items":             items,
+		"venue_count":       len(items),
+		"successful":        len(items),
+		"failed":            0,
+	}
+}
+
+func venueFromSnapshotToJSON(userID, accountID int64, snap *accountv1.VenueSnapshot) venueJSON {
+	if snap == nil {
+		return venueJSON{}
+	}
+	return venueJSON{
+		VenueID:          snap.GetVenueId(),
+		UserID:           userID,
+		AccountID:        accountID,
+		Exchange:         snap.GetExchange(),
+		ExchangeLabel:    orderExchangeLabel(snap.GetExchange()),
+		Market:           snap.GetMarket(),
+		MarketLabel:      orderMarketLabel(snap.GetMarket()),
+		Environment:      snap.GetEnvironment(),
+		EnvironmentLabel: venueEnvironmentLabel(snap.GetEnvironment()),
+		Status:           1,
+		StatusLabel:      "active",
+		DisplayName:      "venue-" + strconv.FormatInt(snap.GetVenueId(), 10),
+	}
+}
+
+func venueSnapshotToJSON(snap *accountv1.VenueSnapshot) map[string]any {
+	if snap == nil {
+		return nil
+	}
+	updatedAt := ""
+	if ts := snap.GetUpdatedAt(); ts != nil {
+		updatedAt = ts.AsTime().UTC().Format(time.RFC3339Nano)
+	}
+	balances := make([]map[string]any, 0, len(snap.GetBalances()))
+	for _, balance := range snap.GetBalances() {
+		balances = append(balances, map[string]any{
+			"asset":             balance.GetAsset(),
+			"wallet_balance":    balance.GetWalletBalance(),
+			"available_balance": balance.GetAvailableBalance(),
+			"locked":            balance.GetLocked(),
+			"value_usdt":        balance.GetValueUsdt(),
+		})
+	}
+	positions := make([]map[string]any, 0, len(snap.GetPositions()))
+	for _, position := range snap.GetPositions() {
+		positions = append(positions, map[string]any{
+			"symbol":            position.GetSymbol(),
+			"position_side":     position.GetPositionSide(),
+			"qty":               position.GetQty(),
+			"entry_price":       position.GetEntryPrice(),
+			"mark_price":        position.GetMarkPrice(),
+			"unrealized_pnl":    position.GetUnrealizedPnl(),
+			"margin_balance":    position.GetMarginBalance(),
+			"liquidation_price": position.GetLiquidationPrice(),
+		})
+	}
+	return map[string]any{
+		"venue_id":          snap.GetVenueId(),
+		"exchange":          snap.GetExchange(),
+		"exchange_label":    orderExchangeLabel(snap.GetExchange()),
+		"environment":       snap.GetEnvironment(),
+		"environment_label": venueEnvironmentLabel(snap.GetEnvironment()),
+		"market":            snap.GetMarket(),
+		"market_label":      orderMarketLabel(snap.GetMarket()),
+		"total_value":       snap.GetTotalValue(),
+		"wallet_balance":    snap.GetWalletBalance(),
+		"available_balance": snap.GetAvailableBalance(),
+		"updated_at":        updatedAt,
+		"balances":          balances,
+		"positions":         positions,
+	}
+}
+
+func venueSnapshotWalletToAccountWallet(snap *accountv1.VenueSnapshot) *accountv1.AccountWalletState {
+	if snap == nil {
+		return nil
+	}
+	return &accountv1.AccountWalletState{
+		Mode:       legacyAccountModeFromEnvironment(snap.GetEnvironment()),
+		UpdatedAt:  snap.GetUpdatedAt(),
+		TotalValue: snap.GetTotalValue(),
+		Futures: &accountv1.FuturesWallet{
+			WalletBalance:    snap.GetWalletBalance(),
+			AvailableBalance: snap.GetAvailableBalance(),
+			Positions:        venueSnapshotPositionsToFutures(snap.GetPositions()),
+		},
+	}
+}
+
+func venueSnapshotPositionsToFutures(positions []*accountv1.PositionEntry) []*accountv1.FuturesPosition {
+	out := make([]*accountv1.FuturesPosition, 0, len(positions))
+	for _, position := range positions {
+		out = append(out, &accountv1.FuturesPosition{
+			Symbol:        position.GetSymbol(),
+			PositionSide:  position.GetPositionSide(),
+			Qty:           position.GetQty(),
+			PositionQty:   position.GetQty(),
+			EntryPrice:    position.GetEntryPrice(),
+			MarkPrice:     position.GetMarkPrice(),
+			UnrealizedPnl: position.GetUnrealizedPnl(),
+		})
+	}
+	return out
+}
+
 func accountWalletStateToJSON(wal *accountv1.AccountWalletState) map[string]any {
+	if wal == nil {
+		return nil
+	}
 	updatedAt := ""
 	if ts := wal.GetUpdatedAt(); ts != nil {
 		updatedAt = ts.AsTime().UTC().Format(time.RFC3339Nano)

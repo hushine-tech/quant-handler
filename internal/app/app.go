@@ -409,6 +409,14 @@ func (s *server) handleAccountsByID() http.Handler {
 			s.getAccountVenueWallets(w, r, id)
 			return
 		}
+		if len(parts) == 2 && parts[1] == "portfolio-snapshot" {
+			if r.Method != http.MethodGet {
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			s.getAccountPortfolioSnapshot(w, r, id)
+			return
+		}
 		if len(parts) == 2 && parts[1] == "venues" {
 			s.handleAccountVenues(w, r, id)
 			return
