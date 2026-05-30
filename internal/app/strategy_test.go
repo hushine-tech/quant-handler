@@ -59,6 +59,22 @@ func TestPreviewRunStrategy_ForwardsBodyAndReturnsJSON(t *testing.T) {
 				},
 			},
 			RequiredStreams: []*strategyv1.LiveStreamBinding{},
+			DeclaredInputs: []*strategyv1.LiveStreamBinding{{
+				Exchange: "binance",
+				Market:   "perpetual_futures",
+				Kind:     "kline",
+				Symbol:   "ETHUSDT",
+				Interval: "1m",
+			}},
+			DeclaredOrderTargets: []*strategyv1.StrategyOrderTargetBinding{{
+				Exchange: "binance",
+				Market:   "perpetual_futures",
+				Symbol:   "ETHUSDT",
+			}},
+			RequiredRoutes: []*strategyv1.StrategyRouteBinding{{
+				Exchange: "binance",
+				Market:   "perpetual_futures",
+			}},
 		},
 	}
 	s := &server{
@@ -110,8 +126,17 @@ func TestPreviewRunStrategy_ForwardsBodyAndReturnsJSON(t *testing.T) {
 	if f.InputKey == nil {
 		t.Fatal("failure input_key is nil")
 	}
-	if f.InputKey.Symbol != "BTCUSDT" || f.InputKey.Market != "futures" || f.InputKey.Interval != "1m" {
+	if f.InputKey.Symbol != "BTCUSDT" || f.InputKey.Market != "perpetual_futures" || f.InputKey.Interval != "1m" {
 		t.Errorf("failure input_key = %+v", f.InputKey)
+	}
+	if len(resp.Inputs) != 1 || resp.Inputs[0].Market != "perpetual_futures" || resp.Inputs[0].Symbol != "ETHUSDT" {
+		t.Fatalf("inputs = %+v, want ETHUSDT perpetual_futures", resp.Inputs)
+	}
+	if len(resp.OrderTargets) != 1 || resp.OrderTargets[0].Market != "perpetual_futures" || resp.OrderTargets[0].Symbol != "ETHUSDT" {
+		t.Fatalf("order_targets = %+v, want ETHUSDT perpetual_futures", resp.OrderTargets)
+	}
+	if len(resp.RequiredRoutes) != 1 || resp.RequiredRoutes[0].Market != "perpetual_futures" {
+		t.Fatalf("required_routes = %+v, want binance/perpetual_futures", resp.RequiredRoutes)
 	}
 }
 

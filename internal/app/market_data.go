@@ -177,16 +177,44 @@ type createMarketDataRequestBody struct {
 
 // ── proto converters ────────────────────────────────────────────────────────
 
+func strategyMarketToMarketDataMarket(market string) string {
+	switch strings.ToLower(strings.TrimSpace(market)) {
+	case "perpetual_futures":
+		return "futures"
+	default:
+		return strings.ToLower(strings.TrimSpace(market))
+	}
+}
+
+func marketDataMarketToStrategyMarket(market string) string {
+	switch strings.ToLower(strings.TrimSpace(market)) {
+	case "futures":
+		return "perpetual_futures"
+	default:
+		return strings.ToLower(strings.TrimSpace(market))
+	}
+}
+
+func streamKeyJSONToMarketDataProto(key streamKeyJSON) *mdv1.StreamKey {
+	return &mdv1.StreamKey{
+		Exchange: strings.ToLower(strings.TrimSpace(key.Exchange)),
+		Market:   strategyMarketToMarketDataMarket(key.Market),
+		Kind:     strings.ToLower(strings.TrimSpace(key.Kind)),
+		Symbol:   strings.ToUpper(strings.TrimSpace(key.Symbol)),
+		Interval: strings.TrimSpace(key.Interval),
+	}
+}
+
 func streamKeyToJSON(k *mdv1.StreamKey) streamKeyJSON {
 	if k == nil {
 		return streamKeyJSON{}
 	}
 	return streamKeyJSON{
-		Exchange: k.GetExchange(),
-		Market:   k.GetMarket(),
-		Kind:     k.GetKind(),
-		Symbol:   k.GetSymbol(),
-		Interval: k.GetInterval(),
+		Exchange: strings.ToLower(strings.TrimSpace(k.GetExchange())),
+		Market:   marketDataMarketToStrategyMarket(k.GetMarket()),
+		Kind:     strings.ToLower(strings.TrimSpace(k.GetKind())),
+		Symbol:   strings.ToUpper(strings.TrimSpace(k.GetSymbol())),
+		Interval: strings.TrimSpace(k.GetInterval()),
 	}
 }
 
@@ -471,11 +499,12 @@ func (s *server) createMarketDataRequest(w http.ResponseWriter, r *http.Request)
 			return
 		}
 	}
+	key := streamKeyJSONToMarketDataProto(keyFlat)
 
 	req := &mdv1.CreateMarketDataRequestRequest{
 		UserId:            uid,
 		AccountId:         body.AccountID,
-		Key:               &mdv1.StreamKey{Exchange: keyFlat.Exchange, Market: keyFlat.Market, Kind: keyFlat.Kind, Symbol: keyFlat.Symbol, Interval: keyFlat.Interval},
+		Key:               key,
 		NeedsLiveDelivery: needsLive,
 		Scope:             scope,
 	}
@@ -567,7 +596,7 @@ func (s *server) getMarketDataStreamByKey(w http.ResponseWriter, r *http.Request
 	q := r.URL.Query()
 	key := &mdv1.StreamKey{
 		Exchange: q.Get("exchange"),
-		Market:   q.Get("market"),
+		Market:   strategyMarketToMarketDataMarket(q.Get("market")),
 		Kind:     q.Get("kind"),
 		Symbol:   q.Get("symbol"),
 		Interval: q.Get("interval"),
@@ -677,7 +706,7 @@ func parseCoverageQuery(w http.ResponseWriter, r *http.Request) (*mdv1.StreamKey
 	q := r.URL.Query()
 	key := &mdv1.StreamKey{
 		Exchange: q.Get("exchange"),
-		Market:   q.Get("market"),
+		Market:   strategyMarketToMarketDataMarket(q.Get("market")),
 		Kind:     q.Get("kind"),
 		Symbol:   q.Get("symbol"),
 		Interval: q.Get("interval"),

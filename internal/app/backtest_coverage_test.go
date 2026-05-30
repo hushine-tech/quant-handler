@@ -19,7 +19,7 @@ func TestMarketDataCoverageRoute(t *testing.T) {
 
 	req := withUID(httptest.NewRequest(
 		http.MethodGet,
-		"/api/market-data/coverage?exchange=binance&market=futures&kind=kline&symbol=ETHUSDT&interval=1m&start_time_ms=1779033600000&end_time_ms=1779037200000",
+		"/api/market-data/coverage?exchange=binance&market=perpetual_futures&kind=kline&symbol=ETHUSDT&interval=1m&start_time_ms=1779033600000&end_time_ms=1779037200000",
 		nil,
 	), 6)
 	rec := httptest.NewRecorder()
@@ -42,6 +42,9 @@ func TestMarketDataCoverageRoute(t *testing.T) {
 	if fake.lastCoverageReq.GetKey().GetSymbol() != "ETHUSDT" {
 		t.Fatalf("coverage symbol = %q", fake.lastCoverageReq.GetKey().GetSymbol())
 	}
+	if fake.lastCoverageReq.GetKey().GetMarket() != "futures" {
+		t.Fatalf("coverage market = %q, want internal futures", fake.lastCoverageReq.GetKey().GetMarket())
+	}
 }
 
 func TestCoveragePreviewUsesDeclaredInputs(t *testing.T) {
@@ -58,7 +61,7 @@ func TestCoveragePreviewUsesDeclaredInputs(t *testing.T) {
 			Ok:        true,
 			DeclaredInputs: []*strategyv1.LiveStreamBinding{{
 				Exchange: "binance",
-				Market:   "futures",
+				Market:   "perpetual_futures",
 				Kind:     "kline",
 				Symbol:   "ETHUSDT",
 				Interval: "1m",
@@ -84,6 +87,9 @@ func TestCoveragePreviewUsesDeclaredInputs(t *testing.T) {
 	if out.Inputs[0].Key.Symbol != "ETHUSDT" {
 		t.Fatalf("input symbol=%q", out.Inputs[0].Key.Symbol)
 	}
+	if out.Inputs[0].Key.Market != "perpetual_futures" {
+		t.Fatalf("input market=%q, want perpetual_futures", out.Inputs[0].Key.Market)
+	}
 }
 
 func TestDownloadAndRunCreatesJob(t *testing.T) {
@@ -95,7 +101,7 @@ func TestDownloadAndRunCreatesJob(t *testing.T) {
 		Supported: true,
 		Ok:        true,
 		DeclaredInputs: []*strategyv1.LiveStreamBinding{{
-			Exchange: "binance", Market: "futures", Kind: "kline", Symbol: "ETHUSDT", Interval: "1m",
+			Exchange: "binance", Market: "perpetual_futures", Kind: "kline", Symbol: "ETHUSDT", Interval: "1m",
 		}},
 	}}
 	s := &server{

@@ -123,6 +123,13 @@ func (s *server) buildCoveragePreview(w http.ResponseWriter, r *http.Request, de
 	}
 	for _, binding := range declared {
 		key := marketDataKeyFromLiveBinding(binding)
+		displayKey := streamKeyJSON{
+			Exchange: key.GetExchange(),
+			Market:   marketDataMarketToStrategyMarket(binding.GetMarket()),
+			Kind:     key.GetKind(),
+			Symbol:   key.GetSymbol(),
+			Interval: key.GetInterval(),
+		}
 		resp, err := s.marketData.QueryMarketDataCoverage(r.Context(), &mdv1.QueryMarketDataCoverageRequest{
 			Key:     key,
 			StartAt: timestamppb.New(time.UnixMilli(body.StartTimeMS).UTC()),
@@ -134,7 +141,7 @@ func (s *server) buildCoveragePreview(w http.ResponseWriter, r *http.Request, de
 			return out, false
 		}
 		item := coveragePreviewInputJSON{
-			Key:                   streamKeyToJSON(resp.GetKey()),
+			Key:                   displayKey,
 			Complete:              resp.GetComplete(),
 			ExpectedCount:         resp.GetExpectedCount(),
 			CoveredCount:          resp.GetCoveredCount(),
@@ -172,7 +179,7 @@ func marketDataKeyFromLiveBinding(binding *strategyv1.LiveStreamBinding) *mdv1.S
 	}
 	return &mdv1.StreamKey{
 		Exchange: exchange,
-		Market:   binding.GetMarket(),
+		Market:   strategyMarketToMarketDataMarket(binding.GetMarket()),
 		Kind:     kind,
 		Symbol:   binding.GetSymbol(),
 		Interval: binding.GetInterval(),

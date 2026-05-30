@@ -51,12 +51,27 @@ type preflightFailureJSON struct {
 }
 
 type previewRunStrategyResponse struct {
-	Profile         string                 `json:"profile"`
-	Supported       bool                   `json:"supported"`
-	Ok              bool                   `json:"ok"`
-	Failures        []preflightFailureJSON `json:"failures"`
-	RequiredStreams []streamKeyJSON        `json:"required_streams"`
-	DeclaredInputs  []streamKeyJSON        `json:"declared_inputs"`
+	Profile              string                    `json:"profile"`
+	Supported            bool                      `json:"supported"`
+	Ok                   bool                      `json:"ok"`
+	Failures             []preflightFailureJSON    `json:"failures"`
+	RequiredStreams      []streamKeyJSON           `json:"required_streams"`
+	Inputs               []streamKeyJSON           `json:"inputs"`
+	DeclaredInputs       []streamKeyJSON           `json:"declared_inputs"`
+	OrderTargets         []strategyOrderTargetJSON `json:"order_targets"`
+	DeclaredOrderTargets []strategyOrderTargetJSON `json:"declared_order_targets"`
+	RequiredRoutes       []strategyRouteJSON       `json:"required_routes"`
+}
+
+type strategyOrderTargetJSON struct {
+	Exchange string `json:"exchange"`
+	Market   string `json:"market"`
+	Symbol   string `json:"symbol"`
+}
+
+type strategyRouteJSON struct {
+	Exchange string `json:"exchange"`
+	Market   string `json:"market"`
 }
 
 func (s *server) strategyRoutePolicyForAccount(ctx context.Context, w http.ResponseWriter, userID int64, accountID int64, runtimeID string) (strategyRoutePolicy, bool) {
@@ -218,7 +233,7 @@ func (s *server) handlePreviewRunStrategy(w http.ResponseWriter, r *http.Request
 		}
 		if k := f.GetInputKey(); k != nil && (k.GetMarket() != "" || k.GetSymbol() != "" || k.GetInterval() != "") {
 			j.InputKey = &preflightInputKeyJSON{
-				Market:   k.GetMarket(),
+				Market:   marketDataMarketToStrategyMarket(k.GetMarket()),
 				Symbol:   k.GetSymbol(),
 				Interval: k.GetInterval(),
 			}
@@ -227,35 +242,79 @@ func (s *server) handlePreviewRunStrategy(w http.ResponseWriter, r *http.Request
 	}
 	required := make([]streamKeyJSON, 0, len(resp.GetRequiredStreams()))
 	for _, b := range resp.GetRequiredStreams() {
-		required = append(required, streamKeyJSON{
-			Exchange: b.GetExchange(),
-			Market:   b.GetMarket(),
-			Kind:     b.GetKind(),
-			Symbol:   b.GetSymbol(),
-			Interval: b.GetInterval(),
-		})
+		required = append(required, liveBindingToStreamKeyJSON(b))
 	}
 	declared := liveBindingsToStreamKeys(resp.GetDeclaredInputs())
+	orderTargets := orderTargetBindingsToJSON(resp.GetDeclaredOrderTargets())
+	routes := routeBindingsToJSON(resp.GetRequiredRoutes())
 
 	writeJSON(w, http.StatusOK, previewRunStrategyResponse{
-		Profile:         resp.GetProfile(),
-		Supported:       resp.GetSupported(),
-		Ok:              resp.GetOk(),
-		Failures:        failures,
-		RequiredStreams: required,
-		DeclaredInputs:  declared,
+		Profile:              resp.GetProfile(),
+		Supported:            resp.GetSupported(),
+		Ok:                   resp.GetOk(),
+		Failures:             failures,
+		RequiredStreams:      required,
+		Inputs:               declared,
+		DeclaredInputs:       declared,
+		OrderTargets:         orderTargets,
+		DeclaredOrderTargets: orderTargets,
+		RequiredRoutes:       routes,
 	})
 }
 
 func liveBindingsToStreamKeys(bindings []*strategyv1.LiveStreamBinding) []streamKeyJSON {
 	out := make([]streamKeyJSON, 0, len(bindings))
 	for _, b := range bindings {
-		out = append(out, streamKeyJSON{
-			Exchange: b.GetExchange(),
-			Market:   b.GetMarket(),
-			Kind:     b.GetKind(),
-			Symbol:   b.GetSymbol(),
-			Interval: b.GetInterval(),
+		out = append(out, liveBindingToStreamKeyJSON(b))
+	}
+	return out
+}
+
+func liveBindingToStreamKeyJSON(b *strategyv1.LiveStreamBinding) streamKeyJSON {
+	if b == nil {
+		return streamKeyJSON{}
+	}
+	exchange := strings.ToLower(strings.TrimSpace(b.GetExchange()))
+	if exchange == "" {
+		exchange = "binance"
+	}
+	kind := strings.ToLower(strings.TrimSpace(b.GetKind()))
+	if kind == "" {
+		kind = "kline"
+	}
+	return streamKeyJSON{
+		Exchange: exchange,
+		Market:   marketDataMarketToStrategyMarket(b.GetMarket()),
+		Kind:     kind,
+		Symbol:   strings.ToUpper(strings.TrimSpace(b.GetSymbol())),
+		Interval: strings.TrimSpace(b.GetInterval()),
+	}
+}
+
+func orderTargetBindingsToJSON(bindings []*strategyv1.StrategyOrderTargetBinding) []strategyOrderTargetJSON {
+	out := make([]strategyOrderTargetJSON, 0, len(bindings))
+	for _, b := range bindings {
+		if b == nil {
+			continue
+		}
+		out = append(out, strategyOrderTargetJSON{
+			Exchange: strings.ToLower(strings.TrimSpace(b.GetExchange())),
+			Market:   marketDataMarketToStrategyMarket(b.GetMarket()),
+			Symbol:   strings.ToUpper(strings.TrimSpace(b.GetSymbol())),
+		})
+	}
+	return out
+}
+
+func routeBindingsToJSON(bindings []*strategyv1.StrategyRouteBinding) []strategyRouteJSON {
+	out := make([]strategyRouteJSON, 0, len(bindings))
+	for _, b := range bindings {
+		if b == nil {
+			continue
+		}
+		out = append(out, strategyRouteJSON{
+			Exchange: strings.ToLower(strings.TrimSpace(b.GetExchange())),
+			Market:   marketDataMarketToStrategyMarket(b.GetMarket()),
 		})
 	}
 	return out
