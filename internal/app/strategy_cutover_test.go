@@ -7,8 +7,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	accountv1 "github.com/hushine-tech/core-service/gen/accountv1"
 	controlpanelv1 "github.com/hushine-tech/control-panel-service/gen/controlpanelv1"
+	accountv1 "github.com/hushine-tech/core-service/gen/accountv1"
 	"github.com/hushine-tech/quant-handler/internal/controlpanel"
 	strategyv1 "github.com/hushine-tech/strategy-service/gen/strategyv1"
 
@@ -312,7 +312,7 @@ func TestRunStrategy_FlagOn_ModeZeroDebuggerRuntimeRoutesAsDebugger(t *testing.T
 			Source:    "self_hosted",
 		},
 	}
-	accounts := &fakeSessionAccountsClient{accountMode: 0}
+	accounts := &fakeSessionAccountsClient{accountEnvironment: 0}
 	s := &server{
 		accounts:                 accounts,
 		controlPanel:             resolver,
@@ -354,7 +354,7 @@ func TestRunStrategy_FlagOn_ModeTwoAlwaysRoutesAsExecutor(t *testing.T) {
 			Source:    "self_hosted",
 		},
 	}
-	accounts := &fakeSessionAccountsClient{accountMode: 2}
+	accounts := &fakeSessionAccountsClient{accountEnvironment: 1}
 	s := &server{
 		accounts:                 accounts,
 		controlPanel:             resolver,
@@ -374,10 +374,10 @@ func TestRunStrategy_FlagOn_ModeTwoAlwaysRoutesAsExecutor(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
 	}
 	if resolver.getRuntimeCalls != 0 {
-		t.Fatalf("GetRuntime calls = %d, want 0 for mode=2 executor-only policy", resolver.getRuntimeCalls)
+		t.Fatalf("GetRuntime calls = %d, want 0 for demo executor-only policy", resolver.getRuntimeCalls)
 	}
-	if resolver.resolveByIDCalls != 1 || resolver.gotRole != "executor" || resolver.gotMode != 2 {
-		t.Fatalf("ResolveRouteByID calls=%d role=%q mode=%d, want 1/executor/2", resolver.resolveByIDCalls, resolver.gotRole, resolver.gotMode)
+	if resolver.resolveByIDCalls != 1 || resolver.gotRole != "executor" || resolver.gotMode != 1 {
+		t.Fatalf("ResolveRouteByID calls=%d role=%q environment=%d, want 1/executor/1", resolver.resolveByIDCalls, resolver.gotRole, resolver.gotMode)
 	}
 }
 

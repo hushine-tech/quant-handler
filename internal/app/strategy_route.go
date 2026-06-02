@@ -121,7 +121,7 @@ func defaultRuntimeDialOptions() []grpc.DialOption {
 // the control-panel strategy proxy client. Caller MUST already be on the
 // cutover path (feature flag on).
 //
-// Behavior depends on `mode`:
+// Behavior depends on route mode:
 //   - modeEnsure  → require runtime_id and call ResolveRuntimeRouteByID.
 //     Used by run / preview paths.
 //   - modeResolve → call ResolveRuntimeRoute; read-only.
@@ -133,19 +133,19 @@ func defaultRuntimeDialOptions() []grpc.DialOption {
 // without falling back to the legacy fixed dial — that is the section
 // 6.4 fail-closed contract.
 type strategyRoutePolicy struct {
-	role string
-	mode int
+	role        string
+	environment int
 }
 
 func defaultStrategyRoutePolicy() strategyRoutePolicy {
-	return strategyRoutePolicy{role: "executor", mode: -1}
+	return strategyRoutePolicy{role: "executor", environment: -1}
 }
 
-func strategyRoutePolicyForSessionMode(mode int32) strategyRoutePolicy {
-	if mode == 0 {
-		return strategyRoutePolicy{mode: 0}
+func strategyRoutePolicyForEnvironment(environment int32) strategyRoutePolicy {
+	if environment == 0 {
+		return strategyRoutePolicy{environment: 0}
 	}
-	return strategyRoutePolicy{role: "executor", mode: int(mode)}
+	return strategyRoutePolicy{role: "executor", environment: int(environment)}
 }
 
 func (s *server) resolveStrategyRuntime(ctx context.Context, w http.ResponseWriter, userID int64, mode strategyRouteMode, runtimeID string, policy strategyRoutePolicy) (strategyv1.StrategyServiceClient, string, string) {
@@ -157,7 +157,7 @@ func (s *server) resolveStrategyRuntime(ctx context.Context, w http.ResponseWrit
 			return nil, "", ""
 		}
 		var route controlpanel.Route
-		route, err = s.controlPanel.ResolveRouteByID(ctx, userID, runtimeID, policy.role, policy.mode)
+		route, err = s.controlPanel.ResolveRouteByID(ctx, userID, runtimeID, policy.role, policy.environment)
 		if err == nil {
 			return s.controlPanelStrategyProxy(w), "", route.RuntimeID
 		}
@@ -167,7 +167,7 @@ func (s *server) resolveStrategyRuntime(ctx context.Context, w http.ResponseWrit
 			return nil, "", ""
 		}
 		var rt controlpanel.Route
-		rt, err = s.controlPanel.ResolveRouteByID(ctx, userID, runtimeID, policy.role, policy.mode)
+		rt, err = s.controlPanel.ResolveRouteByID(ctx, userID, runtimeID, policy.role, policy.environment)
 		if err == nil {
 			return s.controlPanelStrategyProxy(w), "", rt.RuntimeID
 		}

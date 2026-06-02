@@ -44,7 +44,6 @@ type futIn struct {
 type createAccountBodyExt struct {
 	Name           string  `json:"name"`
 	Description    string  `json:"description"`
-	Mode           int32   `json:"mode"`
 	Environment    int32   `json:"environment"`
 	APIKey         string  `json:"api_key"`
 	APISecret      string  `json:"api_secret"`
@@ -488,9 +487,9 @@ func venueSnapshotWalletToAccountWallet(snap *accountv1.VenueSnapshot) *accountv
 		return nil
 	}
 	return &accountv1.AccountWalletState{
-		Mode:       legacyAccountModeFromEnvironment(snap.GetEnvironment()),
-		UpdatedAt:  snap.GetUpdatedAt(),
-		TotalValue: snap.GetTotalValue(),
+		Environment: snap.GetEnvironment(),
+		UpdatedAt:   snap.GetUpdatedAt(),
+		TotalValue:  snap.GetTotalValue(),
 		Futures: &accountv1.FuturesWallet{
 			WalletBalance:    snap.GetWalletBalance(),
 			AvailableBalance: snap.GetAvailableBalance(),
@@ -507,9 +506,9 @@ func portfolioSnapshotWalletToAccountWallet(snapshot *accountv1.PortfolioSnapsho
 		return wal
 	}
 	wal := &accountv1.AccountWalletState{
-		Mode:       portfolioSnapshotMode(snapshot),
-		UpdatedAt:  snapshot.GetUpdatedAt(),
-		TotalValue: snapshot.GetTotalValue(),
+		Environment: portfolioSnapshotEnvironment(snapshot),
+		UpdatedAt:   snapshot.GetUpdatedAt(),
+		TotalValue:  snapshot.GetTotalValue(),
 		Futures: &accountv1.FuturesWallet{
 			WalletBalance:    snapshot.GetWalletBalance(),
 			AvailableBalance: snapshot.GetAvailableBalance(),
@@ -567,13 +566,13 @@ func portfolioSnapshotWalletToAccountWallet(snapshot *accountv1.PortfolioSnapsho
 	return wal
 }
 
-func portfolioSnapshotMode(snapshot *accountv1.PortfolioSnapshot) int32 {
+func portfolioSnapshotEnvironment(snapshot *accountv1.PortfolioSnapshot) int32 {
 	for _, venue := range snapshot.GetVenues() {
 		if venue.GetEnvironment() != 0 {
-			return legacyAccountModeFromEnvironment(venue.GetEnvironment())
+			return venue.GetEnvironment()
 		}
 	}
-	return legacyAccountModeFromEnvironment(0)
+	return 0
 }
 
 func venueSnapshotPositionsToFutures(positions []*accountv1.PositionEntry) []*accountv1.FuturesPosition {
@@ -625,12 +624,12 @@ func accountWalletStateToJSON(wal *accountv1.AccountWalletState) map[string]any 
 		"spot_estimated_value":    se,
 		"futures_position_equity": feq,
 		"metrics_authoritative":   auth,
-		"futures_display_usd":     protoFuturesDisplayUSDToJSON(wal.GetMode(), fw),
+		"futures_display_usd":     protoFuturesDisplayUSDToJSON(wal.GetEnvironment(), fw),
 	}
 
 	return map[string]any{
 		// ── canonical runtime fields (authoritative for trading/risk) ──
-		"mode":                 wal.GetMode(),
+		"environment":          wal.GetEnvironment(),
 		"updated_at":           updatedAt,
 		"wallet_balance":       fw.GetWalletBalance(),
 		"margin_balance":       fw.GetMarginBalance(),
@@ -649,15 +648,15 @@ func accountWalletStateToJSON(wal *accountv1.AccountWalletState) map[string]any 
 		"spot_estimated_value":    se,
 		"futures_position_equity": feq,
 		"metrics_authoritative":   auth,
-		"futures_display_usd":     protoFuturesDisplayUSDToJSON(wal.GetMode(), fw),
+		"futures_display_usd":     protoFuturesDisplayUSDToJSON(wal.GetEnvironment(), fw),
 	}
 }
 
-func protoFuturesDisplayUSDToJSON(mode int32, fw *accountv1.FuturesWallet) any {
+func protoFuturesDisplayUSDToJSON(environment int32, fw *accountv1.FuturesWallet) any {
 	if fw == nil {
 		return nil
 	}
-	if mode != 1 && mode != 2 {
+	if environment != 1 && environment != 2 {
 		return nil
 	}
 	return map[string]any{
@@ -842,7 +841,6 @@ func (s *server) createAccountWithBootstrap(w http.ResponseWriter, r *http.Reque
 		AccountID:   resp.GetAccountId(),
 		Name:        resp.GetName(),
 		Description: resp.GetDescription(),
-		Mode:        legacyAccountModeFromEnvironment(resp.GetEnvironment()),
 		Environment: resp.GetEnvironment(),
 		CreatedAt:   resp.GetCreatedAt().AsTime().UTC().Format(time.RFC3339Nano),
 	})

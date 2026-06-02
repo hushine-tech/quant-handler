@@ -36,7 +36,7 @@ type fakeSessionAccountsClient struct {
 	getAccountErr             error
 	listSessionsResp          *accountv1.ListSessionsResponse
 	listSessionsErr           error
-	accountMode               int32
+	accountEnvironment        int32
 	reconciliationSummaryErr  error
 }
 
@@ -51,7 +51,7 @@ func (f *fakeSessionAccountsClient) GetAccount(_ context.Context, in *accountv1.
 	return &accountv1.GetAccountResponse{Account: &accountv1.AccountRegistryEntry{
 		AccountId:   in.GetAccountId(),
 		UserId:      in.GetUserId(),
-		Environment: accountEnvironmentFromLegacyMode(f.accountMode),
+		Environment: f.accountEnvironment,
 	}}, nil
 }
 
@@ -111,7 +111,7 @@ func TestListSessions_IncludesRuntimeAndDebugMetadata(t *testing.T) {
 				{
 					SessionId:      "debug-1",
 					AccountId:      7,
-					Mode:           0,
+					Environment:    0,
 					Status:         "finished",
 					Interval:       "1m",
 					BarsProcessed:  10,

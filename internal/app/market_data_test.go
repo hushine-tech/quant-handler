@@ -527,7 +527,7 @@ func TestMarketData_DeliveryHealth(t *testing.T) {
 				SessionId:      "sess-1",
 				RuntimeId:      "rt-1",
 				Key:            &mdv1.StreamKey{Exchange: "binance", Market: "futures", Kind: "kline", Symbol: "BTCUSDT", Interval: "1m"},
-				Mode:           2,
+				Environment:    2,
 				Status:         "active",
 			},
 			Lease: &mdv1.StreamDeliveryLease{

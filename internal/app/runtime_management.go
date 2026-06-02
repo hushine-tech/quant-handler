@@ -352,7 +352,7 @@ func (s *server) listRuntimes(w http.ResponseWriter, r *http.Request) {
 		writeControlPanelErr(w, err, "control-panel-service not configured")
 		return
 	}
-	items := filterRuntimeListForSelection(result.Runtimes, q.Get("eligible"), q.Get("eligible_for"), q.Get("role"), q.Get("mode"))
+	items := filterRuntimeListForSelection(result.Runtimes, q.Get("eligible"), q.Get("eligible_for"), q.Get("role"), q.Get("environment"))
 	total := result.Total
 	hasMore := result.HasMore
 	if len(items) != len(result.Runtimes) {
@@ -370,52 +370,52 @@ func (s *server) listRuntimes(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-func filterRuntimeListForSelection(runtimes []controlpanel.Runtime, eligible, eligibleFor, role, modeRaw string) []controlpanel.Runtime {
+func filterRuntimeListForSelection(runtimes []controlpanel.Runtime, eligible, eligibleFor, role, environmentRaw string) []controlpanel.Runtime {
 	eligibilityRequested := strings.TrimSpace(eligible) != "" || strings.TrimSpace(eligibleFor) != ""
 	role = strings.ToLower(strings.TrimSpace(role))
-	mode, hasMode := parseRuntimeEligibilityMode(modeRaw)
-	if !eligibilityRequested && role == "" && !hasMode {
+	environment, hasEnvironment := parseRuntimeEligibilityEnvironment(environmentRaw)
+	if !eligibilityRequested && role == "" && !hasEnvironment {
 		return runtimes
 	}
-	if role == "" && eligibilityRequested && !hasMode {
+	if role == "" && eligibilityRequested && !hasEnvironment {
 		role = "executor"
 	}
 	out := make([]controlpanel.Runtime, 0, len(runtimes))
 	for _, rt := range runtimes {
-		if runtimeMatchesSelectionEligibility(rt, eligibilityRequested, role, mode, hasMode) {
+		if runtimeMatchesSelectionEligibility(rt, eligibilityRequested, role, environment, hasEnvironment) {
 			out = append(out, rt)
 		}
 	}
 	return out
 }
 
-func parseRuntimeEligibilityMode(raw string) (int, bool) {
+func parseRuntimeEligibilityEnvironment(raw string) (int, bool) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return 0, false
 	}
-	mode, err := strconv.Atoi(raw)
+	environment, err := strconv.Atoi(raw)
 	if err != nil {
 		return 0, false
 	}
-	return mode, true
+	return environment, true
 }
 
-func runtimeMatchesSelectionEligibility(rt controlpanel.Runtime, requireHealthy bool, role string, mode int, hasMode bool) bool {
+func runtimeMatchesSelectionEligibility(rt controlpanel.Runtime, requireHealthy bool, role string, environment int, hasEnvironment bool) bool {
 	if requireHealthy && !runtimeHealthyForSelection(rt) {
 		return false
 	}
 	if role != "" && normalizedRuntimeRole(rt.Role) != role {
 		return false
 	}
-	if !hasMode {
+	if !hasEnvironment {
 		return true
 	}
 	switch normalizedRuntimeRole(rt.Role) {
 	case "executor":
-		return mode == 0 || mode == 2
+		return environment == 0 || environment == 1
 	case "debugger":
-		return mode == 0
+		return environment == 0
 	default:
 		return false
 	}

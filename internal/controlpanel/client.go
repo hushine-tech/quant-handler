@@ -20,7 +20,7 @@ type Resolver interface {
 	EndRuntime(ctx context.Context, userID int64, runtimeID string) (Runtime, error)
 	ListRuntimeAdmissionFailures(ctx context.Context, userID int64, limit int) ([]RuntimeAdmissionFailure, error)
 
-	ResolveRouteByID(ctx context.Context, userID int64, runtimeID string, role string, mode int) (Route, error)
+	ResolveRouteByID(ctx context.Context, userID int64, runtimeID string, role string, environment int) (Route, error)
 	PrepareDebugWorkspace(ctx context.Context, userID int64, runtimeID, hostPath, containerPath string) (DebugWorkspaceState, error)
 	LoadDebugDataset(ctx context.Context, args LoadDebugDatasetArgs) (DebugDatasetState, error)
 	GetRuntimeDebugDataset(ctx context.Context, userID int64, runtimeID string) (DebugDatasetState, error)
@@ -369,12 +369,12 @@ func (c *Client) ListRuntimeAdmissionFailures(ctx context.Context, userID int64,
 	return out, nil
 }
 
-func (c *Client) ResolveRouteByID(ctx context.Context, userID int64, runtimeID string, role string, mode int) (Route, error) {
+func (c *Client) ResolveRouteByID(ctx context.Context, userID int64, runtimeID string, role string, environment int) (Route, error) {
 	resp, err := c.rpc.ResolveRuntimeRouteByID(ctx, &controlpanelv1.ResolveRuntimeRouteByIDRequest{
-		UserId:    userID,
-		RuntimeId: runtimeID,
-		Role:      role,
-		Mode:      int32(mode),
+		UserId:      userID,
+		RuntimeId:   runtimeID,
+		Role:        role,
+		Environment: int32(environment),
 	})
 	if err != nil {
 		return Route{}, err

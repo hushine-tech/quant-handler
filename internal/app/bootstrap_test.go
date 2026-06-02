@@ -9,33 +9,33 @@ func TestShouldApplyWalletBootstrap(t *testing.T) {
 		want bool
 	}{
 		{
-			"live mode",
-			createAccountBodyExt{Mode: 1, Spot: &spotIn{Free: 1}},
+			"live environment",
+			createAccountBodyExt{Environment: 2, Spot: &spotIn{Free: 1}},
 			false,
 		},
 		{
 			"backtest empty spot object",
-			createAccountBodyExt{Mode: 0, Spot: &spotIn{}},
+			createAccountBodyExt{Environment: 0, Spot: &spotIn{}},
 			false,
 		},
 		{
 			"backtest spot free",
-			createAccountBodyExt{Mode: 0, Spot: &spotIn{Free: 10}},
+			createAccountBodyExt{Environment: 0, Spot: &spotIn{Free: 10}},
 			true,
 		},
 		{
 			"backtest futures positions",
-			createAccountBodyExt{Mode: 0, Futures: &futIn{Positions: []futPosIn{{Symbol: "BTCUSDT"}}}},
+			createAccountBodyExt{Environment: 0, Futures: &futIn{Positions: []futPosIn{{Symbol: "BTCUSDT"}}}},
 			true,
 		},
 		{
 			"backtest cross pool only",
-			createAccountBodyExt{Mode: 0, Futures: &futIn{InitialBalance: 5000}},
+			createAccountBodyExt{Environment: 0, Futures: &futIn{InitialBalance: 5000}},
 			true,
 		},
 		{
 			"backtest empty futures",
-			createAccountBodyExt{Mode: 0, Futures: &futIn{MarginMode: "isolated", PositionMode: "one_way"}},
+			createAccountBodyExt{Environment: 0, Futures: &futIn{MarginMode: "isolated", PositionMode: "one_way"}},
 			false,
 		},
 	}

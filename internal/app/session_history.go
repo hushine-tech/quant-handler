@@ -180,10 +180,10 @@ func (s *server) listSessionsHandler(w http.ResponseWriter, r *http.Request) {
 			req.StrategyId = n
 		}
 	}
-	if v := strings.TrimSpace(q.Get("mode")); v != "" {
+	if v := strings.TrimSpace(q.Get("environment")); v != "" {
 		if n, err := strconv.ParseInt(v, 10, 32); err == nil {
-			req.Mode = int32(n)
-			req.ModeSet = true
+			req.Environment = int32(n)
+			req.EnvironmentSet = true
 		}
 	}
 	if v := strings.TrimSpace(q.Get("status")); v != "" {
@@ -842,7 +842,7 @@ func (s *server) getSessionReconciliation(w http.ResponseWriter, r *http.Request
 		SessionID            string          `json:"session_id"`
 		SnapshotReason       int32           `json:"snapshot_reason"`
 		RunType              string          `json:"run_type"`
-		Mode                 int32           `json:"mode"`
+		Environment          int32           `json:"environment"`
 		HardPass             bool            `json:"hard_pass"`
 		SoftPass             bool            `json:"soft_pass"`
 		HardFailCount        int             `json:"hard_fail_count"`
@@ -910,7 +910,7 @@ func (s *server) getSessionReconciliation(w http.ResponseWriter, r *http.Request
 			SessionID:            run.GetSessionId(),
 			SnapshotReason:       run.GetSnapshotReason(),
 			RunType:              run.GetRunType(),
-			Mode:                 run.GetMode(),
+			Environment:          run.GetEnvironment(),
 			HardPass:             run.GetHardPass(),
 			SoftPass:             run.GetSoftPass(),
 			HardFailCount:        hardFailCount,
@@ -963,7 +963,7 @@ type sessionJSON struct {
 	SessionID      string `json:"session_id"`
 	AccountID      int64  `json:"account_id"`
 	StrategyID     int64  `json:"strategy_id"`
-	Mode           int32  `json:"mode"`
+	Environment    int32  `json:"environment"`
 	Status         string `json:"status"`
 	Interval       string `json:"interval"`
 	StartTimeMs    int64  `json:"start_time_ms,omitempty"`
@@ -988,7 +988,7 @@ func protoSessionToJSON(se *accountv1.StrategySessionEntry) sessionJSON {
 		SessionID:      se.GetSessionId(),
 		AccountID:      se.GetAccountId(),
 		StrategyID:     se.GetStrategyId(),
-		Mode:           se.GetMode(),
+		Environment:    se.GetEnvironment(),
 		Status:         se.GetStatus(),
 		Interval:       se.GetInterval(),
 		StartTimeMs:    se.GetStartTimeMs(),

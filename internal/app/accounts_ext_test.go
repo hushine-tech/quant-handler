@@ -62,7 +62,7 @@ func (f *fakeAccountVenueWalletClient) GetVenueOnlineInfo(_ context.Context, req
 	return &accountv1.GetVenueOnlineInfoResponse{
 		Venue: &accountv1.VenueEntry{VenueId: req.GetVenueId(), UserId: req.GetUserId(), AccountId: 42, Exchange: 1, Market: 2, Environment: 1, Status: 1, DisplayName: "ok venue"},
 		Wallet: &accountv1.AccountWalletState{
-			Mode:                  2,
+			Environment:           2,
 			UpdatedAt:             timestamppb.Now(),
 			TotalValue:            123.45,
 			SpotEstimatedValue:    0,
@@ -134,7 +134,7 @@ func TestCreateAccountWithBootstrapCreatesVenueFromLegacyCredentials(t *testing.
 	body := []byte(`{
 		"name":"demo-account",
 		"description":"legacy form",
-		"mode":2,
+		"environment":1,
 		"api_key":"demo-key",
 		"api_secret":"demo-secret",
 		"futures":{"margin_mode":"cross","position_mode":"one_way"}
@@ -267,9 +267,9 @@ func TestPortfolioSnapshotEndpointReturnsVenues(t *testing.T) {
 				AvailableBalance: 1500,
 				UpdatedAt:        now,
 				Wallet: &accountv1.AccountWalletState{
-					Mode:       2,
-					UpdatedAt:  now,
-					TotalValue: 2500,
+					Environment: 2,
+					UpdatedAt:   now,
+					TotalValue:  2500,
 					Futures: &accountv1.FuturesWallet{
 						WalletBalance:    2000,
 						AvailableBalance: 1500,
@@ -360,7 +360,7 @@ func TestGetWalletIncludesMarginBalanceFields(t *testing.T) {
 				UserId:    7,
 				Wallet: &accountv1.AccountWalletState{
 					TotalValue:            20759.4682,
-					Mode:                  2,
+					Environment:           2,
 					UpdatedAt:             now,
 					SpotEstimatedValue:    9997.9,
 					FuturesPositionEquity: 10761.5682,
@@ -480,7 +480,7 @@ func TestGetWallet_StructurallySeparatesCanonicalFromDisplay(t *testing.T) {
 				UserId:    7,
 				Wallet: &accountv1.AccountWalletState{
 					TotalValue:            20759.4682,
-					Mode:                  2,
+					Environment:           2,
 					UpdatedAt:             now,
 					SpotEstimatedValue:    9997.9,
 					FuturesPositionEquity: 10761.5682,
@@ -521,7 +521,7 @@ func TestGetWallet_StructurallySeparatesCanonicalFromDisplay(t *testing.T) {
 
 	// 1. Canonical runtime fields exist at the top level.
 	for _, canonicalKey := range []string{
-		"mode", "updated_at",
+		"environment", "updated_at",
 		"wallet_balance", "margin_balance", "total_margin_balance", "available_balance",
 		"spot", "futures",
 	} {

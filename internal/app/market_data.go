@@ -149,7 +149,7 @@ type sessionMarketDataSubscriptionJSON struct {
 	SessionID      string        `json:"session_id"`
 	RuntimeID      string        `json:"runtime_id"`
 	Key            streamKeyJSON `json:"key"`
-	Mode           int32         `json:"mode"`
+	Environment    int32         `json:"environment"`
 	Status         string        `json:"status"`
 	CreatedAt      string        `json:"created_at,omitempty"`
 	UpdatedAt      string        `json:"updated_at,omitempty"`
@@ -303,7 +303,7 @@ func sessionSubscriptionToJSON(s *mdv1.SessionMarketDataSubscription) sessionMar
 		SessionID:      s.GetSessionId(),
 		RuntimeID:      s.GetRuntimeId(),
 		Key:            streamKeyToJSON(s.GetKey()),
-		Mode:           s.GetMode(),
+		Environment:    s.GetEnvironment(),
 		Status:         s.GetStatus(),
 		CreatedAt:      formatProtoTime(s.GetCreatedAt()),
 		UpdatedAt:      formatProtoTime(s.GetUpdatedAt()),

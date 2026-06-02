@@ -69,7 +69,7 @@ func TestRuntimeManagement_ListEligibleExecutorRuntimesFiltersRoleModeAndHealth(
 	}
 	s := &server{controlPanel: resolver, jwtSecret: []byte("s"), corsOrigins: []string{"*"}}
 
-	req := withUID(httptest.NewRequest(http.MethodGet, "/api/runtimes?eligible=session_start&role=executor&mode=2&limit=100", nil), 42)
+	req := withUID(httptest.NewRequest(http.MethodGet, "/api/runtimes?eligible=session_start&role=executor&environment=1&limit=100", nil), 42)
 	rec := httptest.NewRecorder()
 	s.handleRuntimesCollection(rec, req)
 
@@ -102,7 +102,7 @@ func TestRuntimeManagement_ListEligibleModeZeroAllowsExecutorAndDebugger(t *test
 	}
 	s := &server{controlPanel: resolver, jwtSecret: []byte("s"), corsOrigins: []string{"*"}}
 
-	req := withUID(httptest.NewRequest(http.MethodGet, "/api/runtimes?eligible=session_start&mode=0&limit=100", nil), 42)
+	req := withUID(httptest.NewRequest(http.MethodGet, "/api/runtimes?eligible=session_start&environment=0&limit=100", nil), 42)
 	rec := httptest.NewRecorder()
 	s.handleRuntimesCollection(rec, req)
 

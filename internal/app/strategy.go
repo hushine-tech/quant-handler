@@ -78,7 +78,7 @@ func (s *server) strategyRoutePolicyForAccount(ctx context.Context, w http.Respo
 	if !s.controlPanelRouteFeature {
 		return defaultStrategyRoutePolicy(), true
 	}
-	mode := int32(0)
+	environment := int32(0)
 	if s.accounts != nil {
 		resp, err := s.accounts.GetAccount(ctx, &accountv1.GetAccountRequest{
 			AccountId: accountID,
@@ -94,14 +94,14 @@ func (s *server) strategyRoutePolicyForAccount(ctx context.Context, w http.Respo
 			writeErr(w, http.StatusNotFound, "account not found")
 			return strategyRoutePolicy{}, false
 		}
-		mode = legacyAccountModeFromEnvironment(account.GetEnvironment())
+		environment = account.GetEnvironment()
 	}
-	return s.strategyRoutePolicyForSelectedRuntime(ctx, w, userID, runtimeID, mode)
+	return s.strategyRoutePolicyForSelectedRuntime(ctx, w, userID, runtimeID, environment)
 }
 
-func (s *server) strategyRoutePolicyForSelectedRuntime(ctx context.Context, w http.ResponseWriter, userID int64, runtimeID string, mode int32) (strategyRoutePolicy, bool) {
-	policy := strategyRoutePolicyForSessionMode(mode)
-	if !s.controlPanelRouteFeature || mode != 0 || runtimeID == "" {
+func (s *server) strategyRoutePolicyForSelectedRuntime(ctx context.Context, w http.ResponseWriter, userID int64, runtimeID string, environment int32) (strategyRoutePolicy, bool) {
+	policy := strategyRoutePolicyForEnvironment(environment)
+	if !s.controlPanelRouteFeature || environment != 0 || runtimeID == "" {
 		return policy, true
 	}
 	runtime, err := s.controlPanel.GetRuntime(ctx, userID, runtimeID)
@@ -373,7 +373,7 @@ func (s *server) handleStrategySession(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
-		policy, ok = s.strategyRoutePolicyForSelectedRuntime(r.Context(), w, uid, runtimeID, session.GetMode())
+		policy, ok = s.strategyRoutePolicyForSelectedRuntime(r.Context(), w, uid, runtimeID, session.GetEnvironment())
 		if !ok {
 			return
 		}
@@ -435,7 +435,7 @@ func (s *server) handleStopStrategy(w http.ResponseWriter, r *http.Request, sess
 			return
 		}
 		runtimeID = session.GetRuntimeId()
-		policy, ok = s.strategyRoutePolicyForSelectedRuntime(r.Context(), w, uid, runtimeID, session.GetMode())
+		policy, ok = s.strategyRoutePolicyForSelectedRuntime(r.Context(), w, uid, runtimeID, session.GetEnvironment())
 		if !ok {
 			return
 		}
