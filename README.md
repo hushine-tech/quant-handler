@@ -34,7 +34,7 @@ go run ./cmd/quant-handler -config ./config.yaml
 - `POST /api/auth/signup` — JSON `{"username":"...", "password":"..."}` → user.
 - `POST /api/auth/login` — JSON `{"username":"...", "password":"..."}` → `{ "token", "expires_in", "user" }`.
 - `GET /api/accounts` — Bearer JWT → JSON array of accounts.
-- `POST /api/accounts` — Bearer JWT → create an account context. Body: `name`, `environment`, optional `description`, and optional backtest wallet bootstrap fields such as `initial_balance`. Exchange credentials are managed as venues and then bound to accounts; account wallet display is read from `GetPortfolioSnapshot`.
+- `POST /api/accounts` — Bearer JWT → create an account context. Body: `name`, `environment`, optional `description`. Exchange credentials and simulated wallet state are managed as venues and then bound to accounts; account wallet display is read from `GetPortfolioSnapshot`.
 - `GET /api/accounts/{id}` — Bearer JWT → registry JSON.
 - `GET /api/accounts/{id}/wallet` — Bearer JWT → portfolio wallet JSON from `GetPortfolioSnapshot`, including aggregate wallet fields plus venue snapshots.
 - `GET /api/accounts/{id}/portfolio-snapshot` — Bearer JWT → portfolio aggregate plus venue snapshots from `GetPortfolioSnapshot`.

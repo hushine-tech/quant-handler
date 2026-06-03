@@ -46,7 +46,7 @@ type fakeResolver struct {
 	gotStartTimeMS    int64
 	gotEndTimeMS      int64
 	gotRole           string
-	gotMode           int
+	gotEnvironment    int
 	resolveByIDResp   controlpanel.Route
 	resolveByIDErr    error
 	resolveCalls      int
@@ -116,12 +116,12 @@ func (f *fakeResolver) GetRuntimeDebugDataset(_ context.Context, userID int64, r
 	return f.debugDataset, f.debugDatasetErr
 }
 
-func (f *fakeResolver) ResolveRouteByID(_ context.Context, userID int64, runtimeID string, role string, mode int) (controlpanel.Route, error) {
+func (f *fakeResolver) ResolveRouteByID(_ context.Context, userID int64, runtimeID string, role string, environment int) (controlpanel.Route, error) {
 	f.resolveByIDCalls++
 	f.gotUserID = userID
 	f.gotRuntimeID = runtimeID
 	f.gotRole = role
-	f.gotMode = mode
+	f.gotEnvironment = environment
 	if f.resolveByIDResp.RuntimeID == "" && f.resolveByIDErr == nil {
 		return f.resp, f.err
 	}

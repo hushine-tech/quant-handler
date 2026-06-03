@@ -54,7 +54,7 @@ func TestRuntimeManagement_ListRuntimes(t *testing.T) {
 	}
 }
 
-func TestRuntimeManagement_ListEligibleExecutorRuntimesFiltersRoleModeAndHealth(t *testing.T) {
+func TestRuntimeManagement_ListEligibleExecutorRuntimesFiltersRoleEnvironmentAndHealth(t *testing.T) {
 	heartbeat := time.Date(2026, 5, 13, 1, 2, 3, 0, time.UTC)
 	resolver := &fakeResolver{
 		runtimeList: controlpanel.RuntimeList{
@@ -88,7 +88,7 @@ func TestRuntimeManagement_ListEligibleExecutorRuntimesFiltersRoleModeAndHealth(
 	}
 }
 
-func TestRuntimeManagement_ListEligibleModeZeroAllowsExecutorAndDebugger(t *testing.T) {
+func TestRuntimeManagement_ListEligibleBacktestEnvironmentAllowsExecutorAndDebugger(t *testing.T) {
 	heartbeat := time.Date(2026, 5, 13, 1, 2, 3, 0, time.UTC)
 	resolver := &fakeResolver{
 		runtimeList: controlpanel.RuntimeList{

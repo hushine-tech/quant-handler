@@ -298,7 +298,7 @@ func TestRunStrategy_FlagOn_ExplicitRuntimeIDRoutesByID(t *testing.T) {
 	}
 }
 
-func TestRunStrategy_FlagOn_ModeZeroDebuggerRuntimeRoutesAsDebugger(t *testing.T) {
+func TestRunStrategy_FlagOn_BacktestDebuggerRuntimeRoutesAsDebugger(t *testing.T) {
 	proxy := &fakeControlPanelStrategyProxy{}
 	resolver := &fakeResolver{
 		runtimeResp: controlpanel.Runtime{
@@ -337,15 +337,15 @@ func TestRunStrategy_FlagOn_ModeZeroDebuggerRuntimeRoutesAsDebugger(t *testing.T
 	if resolver.getRuntimeCalls != 1 || resolver.gotRuntimeID != "rt_debug" {
 		t.Fatalf("GetRuntime calls=%d runtime=%q, want 1/rt_debug", resolver.getRuntimeCalls, resolver.gotRuntimeID)
 	}
-	if resolver.resolveByIDCalls != 1 || resolver.gotRole != "debugger" || resolver.gotMode != 0 {
-		t.Fatalf("ResolveRouteByID calls=%d role=%q mode=%d, want 1/debugger/0", resolver.resolveByIDCalls, resolver.gotRole, resolver.gotMode)
+	if resolver.resolveByIDCalls != 1 || resolver.gotRole != "debugger" || resolver.gotEnvironment != 0 {
+		t.Fatalf("ResolveRouteByID calls=%d role=%q environment=%d, want 1/debugger/0", resolver.resolveByIDCalls, resolver.gotRole, resolver.gotEnvironment)
 	}
 	if proxy.runReq == nil || proxy.runReq.GetRuntimeId() != "rt_debug" {
 		t.Fatalf("proxy RunStrategy = %+v, want runtime rt_debug", proxy.runReq)
 	}
 }
 
-func TestRunStrategy_FlagOn_ModeTwoAlwaysRoutesAsExecutor(t *testing.T) {
+func TestRunStrategy_FlagOn_DemoAlwaysRoutesAsExecutor(t *testing.T) {
 	proxy := &fakeControlPanelStrategyProxy{}
 	resolver := &fakeResolver{
 		resolveByIDResp: controlpanel.Route{
@@ -376,8 +376,8 @@ func TestRunStrategy_FlagOn_ModeTwoAlwaysRoutesAsExecutor(t *testing.T) {
 	if resolver.getRuntimeCalls != 0 {
 		t.Fatalf("GetRuntime calls = %d, want 0 for demo executor-only policy", resolver.getRuntimeCalls)
 	}
-	if resolver.resolveByIDCalls != 1 || resolver.gotRole != "executor" || resolver.gotMode != 1 {
-		t.Fatalf("ResolveRouteByID calls=%d role=%q environment=%d, want 1/executor/1", resolver.resolveByIDCalls, resolver.gotRole, resolver.gotMode)
+	if resolver.resolveByIDCalls != 1 || resolver.gotRole != "executor" || resolver.gotEnvironment != 1 {
+		t.Fatalf("ResolveRouteByID calls=%d role=%q environment=%d, want 1/executor/1", resolver.resolveByIDCalls, resolver.gotRole, resolver.gotEnvironment)
 	}
 }
 
@@ -711,14 +711,14 @@ func TestRunStrategy_FlagOn_HostedUsesControlPanelProxy(t *testing.T) {
 	}
 }
 
-func TestResolveStrategyRuntime_ModeEnsureRequiresRuntimeID(t *testing.T) {
+func TestResolveStrategyRuntime_EnsureRequiresRuntimeID(t *testing.T) {
 	resolver := &fakeResolver{}
 	s := &server{
 		controlPanel:  resolver,
 		runtimeDialer: newRuntimeDialer(),
 	}
 	rec := httptest.NewRecorder()
-	cli, _, _ := s.resolveStrategyRuntime(context.Background(), rec, 42, modeEnsure, "", defaultStrategyRoutePolicy())
+	cli, _, _ := s.resolveStrategyRuntime(context.Background(), rec, 42, routeEnsure, "", defaultStrategyRoutePolicy())
 	if cli != nil {
 		t.Fatal("client returned without runtime_id")
 	}
@@ -739,7 +739,7 @@ func TestResolveStrategyRuntime_RouteByIDErrorDoesNotProvisionHosted(t *testing.
 		runtimeDialer: newRuntimeDialer(),
 	}
 	rec := httptest.NewRecorder()
-	cli, _, _ := s.resolveStrategyRuntime(context.Background(), rec, 42, modeEnsure, "rt_unhealthy", defaultStrategyRoutePolicy())
+	cli, _, _ := s.resolveStrategyRuntime(context.Background(), rec, 42, routeEnsure, "rt_unhealthy", defaultStrategyRoutePolicy())
 	if cli != nil {
 		t.Fatal("client returned; route error must fail closed")
 	}

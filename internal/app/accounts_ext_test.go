@@ -128,16 +128,13 @@ func (f *fakeCreateAccountClient) UpdateAccountWalletState(_ context.Context, re
 	return &accountv1.UpdateAccountWalletStateResponse{Wallet: &accountv1.AccountWalletState{}}, nil
 }
 
-func TestCreateAccountWithBootstrapCreatesVenueFromLegacyCredentials(t *testing.T) {
+func TestCreateAccountCreatesPlainPortfolioContext(t *testing.T) {
 	fake := &fakeCreateAccountClient{}
 	s := &server{accounts: fake, jwtSecret: []byte("secret"), corsOrigins: []string{"*"}}
 	body := []byte(`{
 		"name":"demo-account",
-		"description":"legacy form",
-		"environment":1,
-		"api_key":"demo-key",
-		"api_secret":"demo-secret",
-		"futures":{"margin_mode":"cross","position_mode":"one_way"}
+		"description":"portfolio context",
+		"environment":1
 	}`)
 	req := withUID(httptest.NewRequest(http.MethodPost, "/api/accounts", bytes.NewReader(body)), 7)
 	rec := httptest.NewRecorder()
@@ -150,38 +147,19 @@ func TestCreateAccountWithBootstrapCreatesVenueFromLegacyCredentials(t *testing.
 	if fake.createAccountReq == nil {
 		t.Fatal("CreateAccount was not called")
 	}
-	if fake.createVenueReq == nil {
-		t.Fatal("CreateVenue was not called for legacy exchange credentials")
+	if fake.createAccountReq.GetUserId() != 7 || fake.createAccountReq.GetName() != "demo-account" || fake.createAccountReq.GetEnvironment() != 1 {
+		t.Fatalf("create account request = %+v", fake.createAccountReq)
 	}
-	if fake.createVenueReq.GetUserId() != 7 || fake.createVenueReq.GetAccountId() != 42 {
-		t.Fatalf("venue owner/account mismatch: %+v", fake.createVenueReq)
+	if fake.createAccountReq.GetInitialBalance() != 0 {
+		t.Fatalf("account initial_balance = %v, want 0", fake.createAccountReq.GetInitialBalance())
 	}
-	if fake.createVenueReq.GetExchange() != 1 || fake.createVenueReq.GetMarket() != 2 || fake.createVenueReq.GetEnvironment() != 1 {
-		t.Fatalf("venue route mismatch: exchange=%d market=%d environment=%d",
-			fake.createVenueReq.GetExchange(), fake.createVenueReq.GetMarket(), fake.createVenueReq.GetEnvironment())
-	}
-	if fake.createVenueReq.GetApiKey() != "demo-key" {
-		t.Fatalf("api_key = %q", fake.createVenueReq.GetApiKey())
-	}
-	var credential map[string]string
-	if err := json.Unmarshal([]byte(fake.createVenueReq.GetCredentialJson()), &credential); err != nil {
-		t.Fatalf("credential_json invalid: %v", err)
-	}
-	if credential["api_key"] != "demo-key" || credential["api_secret"] != "demo-secret" {
-		t.Fatalf("credential_json = %+v", credential)
-	}
-	if fake.createVenueReq.GetMarginMode() != 1 || fake.createVenueReq.GetPositionMode() != 1 {
-		t.Fatalf("venue modes = margin:%d position:%d", fake.createVenueReq.GetMarginMode(), fake.createVenueReq.GetPositionMode())
-	}
-	if fake.updateSnapshotReq != nil {
-		t.Fatalf("portfolio snapshot refresh request = %+v, want nil for exchange-backed venue creation", fake.updateSnapshotReq)
-	}
-	if fake.updateWalletReq != nil {
-		t.Fatalf("wallet bootstrap request = %+v, want nil for exchange-backed venue creation", fake.updateWalletReq)
+	if fake.createVenueReq != nil || fake.updateSnapshotReq != nil || fake.updateWalletReq != nil {
+		t.Fatalf("account creation must not configure venues or wallet state: venue=%+v snapshot=%+v wallet=%+v",
+			fake.createVenueReq, fake.updateSnapshotReq, fake.updateWalletReq)
 	}
 }
 
-func TestCreateAccountWithBootstrapWritesBacktestWalletBootstrap(t *testing.T) {
+func TestCreateBacktestAccountWalletPayloadCreatesDefaultVenue(t *testing.T) {
 	fake := &fakeCreateAccountClient{}
 	s := &server{accounts: fake, jwtSecret: []byte("secret"), corsOrigins: []string{"*"}}
 	body := []byte(`{
@@ -198,23 +176,92 @@ func TestCreateAccountWithBootstrapWritesBacktestWalletBootstrap(t *testing.T) {
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want 201; body=%s", rec.Code, rec.Body.String())
 	}
-	if fake.updateSnapshotReq != nil {
-		t.Fatalf("portfolio snapshot refresh request = %+v, want nil", fake.updateSnapshotReq)
+	if fake.createAccountReq == nil || fake.createAccountReq.GetEnvironment() != 0 {
+		t.Fatalf("create account request = %+v, want backtest account", fake.createAccountReq)
 	}
 	if fake.updateWalletReq == nil {
-		t.Fatal("wallet bootstrap request was not sent")
+		t.Fatal("UpdateAccountWalletState was not called for backtest wallet compatibility")
 	}
 	if fake.updateWalletReq.GetAccountId() != 42 {
-		t.Fatalf("wallet account_id = %d, want 42", fake.updateWalletReq.GetAccountId())
+		t.Fatalf("update wallet account_id = %d, want 42", fake.updateWalletReq.GetAccountId())
 	}
-	if got := fake.updateWalletReq.GetFutures().GetWalletBalance(); got != 1000 {
-		t.Fatalf("futures wallet_balance = %v, want 1000", got)
+	if fake.updateWalletReq.GetSpot().GetFree() != 250 {
+		t.Fatalf("spot free = %v, want 250", fake.updateWalletReq.GetSpot().GetFree())
 	}
-	if got := fake.updateWalletReq.GetFutures().GetAvailableBalance(); got != 1000 {
-		t.Fatalf("futures available_balance = %v, want 1000", got)
+	if fake.updateWalletReq.GetFutures().GetInitialBalance() != 1000 || fake.updateWalletReq.GetFutures().GetMarginMode() != "cross" {
+		t.Fatalf("futures bootstrap = %+v, want cross 1000", fake.updateWalletReq.GetFutures())
 	}
-	if got := fake.updateWalletReq.GetSpot().GetFree(); got != 250 {
-		t.Fatalf("spot free = %v, want 250", got)
+	if fake.updateWalletReq.GetTotalValue() != 1250 || fake.updateWalletReq.GetWalletBalance() != 1000 {
+		t.Fatalf("wallet totals = total:%v wallet:%v", fake.updateWalletReq.GetTotalValue(), fake.updateWalletReq.GetWalletBalance())
+	}
+	if fake.createVenueReq != nil || fake.updateSnapshotReq != nil {
+		t.Fatalf("account compatibility should use default venue wallet path only: venue=%+v snapshot=%+v", fake.createVenueReq, fake.updateSnapshotReq)
+	}
+}
+
+func TestCreateBacktestAccountInitialBalanceCreatesDefaultVenueWallet(t *testing.T) {
+	fake := &fakeCreateAccountClient{}
+	s := &server{accounts: fake, jwtSecret: []byte("secret"), corsOrigins: []string{"*"}}
+	body := []byte(`{
+		"name":"backtest-account",
+		"environment":0,
+		"initial_balance":1000
+	}`)
+	req := withUID(httptest.NewRequest(http.MethodPost, "/api/accounts", bytes.NewReader(body)), 7)
+	rec := httptest.NewRecorder()
+
+	s.createAccountWithBootstrap(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", rec.Code, rec.Body.String())
+	}
+	if fake.updateWalletReq == nil {
+		t.Fatal("UpdateAccountWalletState was not called")
+	}
+	if fake.updateWalletReq.GetSpot().GetFree() != 1000 || fake.updateWalletReq.GetTotalValue() != 1000 {
+		t.Fatalf("bootstrap = spot:%+v total:%v, want initial balance spot wallet", fake.updateWalletReq.GetSpot(), fake.updateWalletReq.GetTotalValue())
+	}
+}
+
+func TestCreateAccountRejectsDeprecatedAccountLevelRuntimePayload(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+	}{
+		{
+			"legacy credentials",
+			`{
+				"name":"demo-account",
+				"environment":1,
+				"api_key":"demo-key",
+				"api_secret":"demo-secret"
+			}`,
+		},
+		{
+			"legacy mode",
+			`{
+				"name":"legacy-account",
+				"mode":1
+			}`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := &fakeCreateAccountClient{}
+			s := &server{accounts: fake, jwtSecret: []byte("secret"), corsOrigins: []string{"*"}}
+			req := withUID(httptest.NewRequest(http.MethodPost, "/api/accounts", bytes.NewReader([]byte(tc.body))), 7)
+			rec := httptest.NewRecorder()
+
+			s.createAccountWithBootstrap(rec, req)
+
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+			}
+			if fake.createAccountReq != nil || fake.createVenueReq != nil || fake.updateWalletReq != nil || fake.updateSnapshotReq != nil {
+				t.Fatalf("deprecated payload should not call core-service: account=%+v venue=%+v wallet=%+v snapshot=%+v",
+					fake.createAccountReq, fake.createVenueReq, fake.updateWalletReq, fake.updateSnapshotReq)
+			}
+		})
 	}
 }
 

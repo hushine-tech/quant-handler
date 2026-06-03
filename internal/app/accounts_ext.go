@@ -12,190 +12,16 @@ import (
 	"github.com/hushine-tech/quant-handler/internal/walletagg"
 )
 
-type spotAssetIn struct {
-	Symbol        string   `json:"symbol"`
-	Qty           float64  `json:"qty"`
-	Locked        float64  `json:"locked"`
-	AvgEntryPrice float64  `json:"avg_entry_price"`
-	Price         *float64 `json:"price"`
-}
-
-type spotIn struct {
-	Free   float64       `json:"free"`
-	Locked float64       `json:"locked"`
-	Assets []spotAssetIn `json:"assets"`
-}
-
-type futPosIn struct {
-	Symbol         string  `json:"symbol"`
-	Direction      int32   `json:"direction"`
-	InitialBalance float64 `json:"initial_balance"`
-	Leverage       float64 `json:"leverage"`
-	FeeRate        float64 `json:"fee_rate"`
-}
-
-type futIn struct {
-	MarginMode     string     `json:"margin_mode"`
-	PositionMode   string     `json:"position_mode"`
-	InitialBalance float64    `json:"initial_balance"`
-	Positions      []futPosIn `json:"positions"`
-}
-
 type createAccountBodyExt struct {
-	Name           string  `json:"name"`
-	Description    string  `json:"description"`
-	Environment    int32   `json:"environment"`
-	APIKey         string  `json:"api_key"`
-	APISecret      string  `json:"api_secret"`
-	InitialBalance float64 `json:"initial_balance"`
-	Spot           *spotIn `json:"spot"`
-	Futures        *futIn  `json:"futures"`
-}
-
-func normPositionMode(s string) string {
-	s = strings.ToLower(strings.TrimSpace(s))
-	s = strings.ReplaceAll(s, "-", "_")
-	if s == "oneway" {
-		return "one_way"
-	}
-	return s
-}
-
-func buildSpotWallet(in *spotIn, initialBalance float64) *accountv1.SpotWallet {
-	if in == nil {
-		if initialBalance <= 0 {
-			return nil
-		}
-		return &accountv1.SpotWallet{Free: initialBalance}
-	}
-	sw := &accountv1.SpotWallet{Free: in.Free, Locked: in.Locked}
-	for _, a := range in.Assets {
-		sym := strings.ToUpper(strings.TrimSpace(a.Symbol))
-		if sym == "" {
-			continue
-		}
-		asset := &accountv1.SpotAsset{
-			Symbol: sym, Qty: a.Qty, Locked: a.Locked, AvgEntryPrice: a.AvgEntryPrice,
-		}
-		if a.Price != nil {
-			asset.Price = a.Price
-		}
-		sw.Assets = append(sw.Assets, asset)
-	}
-	return sw
-}
-
-func buildFuturesWallet(in *futIn) *accountv1.FuturesWallet {
-	if in == nil {
-		return nil
-	}
-	mm := strings.ToLower(strings.TrimSpace(in.MarginMode))
-	if mm == "" {
-		mm = "isolated"
-	}
-	if mm != "isolated" && mm != "cross" {
-		mm = "isolated"
-	}
-	pm := normPositionMode(in.PositionMode)
-	if pm == "" {
-		pm = "one_way"
-	}
-	if pm != "one_way" && pm != "hedge" {
-		pm = "one_way"
-	}
-	fw := &accountv1.FuturesWallet{
-		MarginMode: mm, PositionMode: pm, InitialBalance: in.InitialBalance,
-	}
-	if mm == "cross" && in.InitialBalance > 0 {
-		fw.WalletBalance = in.InitialBalance
-		fw.AvailableBalance = in.InitialBalance
-		fw.MarginBalance = in.InitialBalance
-		fw.TotalMarginBalance = in.InitialBalance
-		fw.TotalCrossWalletBalance = in.InitialBalance
-	}
-	for _, p := range in.Positions {
-		sym := strings.ToUpper(strings.TrimSpace(p.Symbol))
-		if sym == "" {
-			continue
-		}
-		ib := p.InitialBalance
-		if ib == 0 {
-			ib = 1000
-		}
-		lev := p.Leverage
-		if lev == 0 {
-			lev = 10
-		}
-		fr := p.FeeRate
-		if fr == 0 {
-			fr = 0.0004
-		}
-		fw.Positions = append(fw.Positions, &accountv1.FuturesPosition{
-			Symbol: sym, Direction: p.Direction, InitialBalance: ib, Leverage: lev, FeeRate: fr,
-		})
-	}
-	return fw
-}
-
-func spotBootstrapValue(s *accountv1.SpotWallet) float64 {
-	if s == nil {
-		return 0
-	}
-	total := s.GetFree() + s.GetLocked()
-	for _, asset := range s.GetAssets() {
-		price := asset.GetAvgEntryPrice()
-		if asset.Price != nil {
-			price = asset.GetPrice()
-		}
-		if price > 0 {
-			total += (asset.GetQty() + asset.GetLocked()) * price
-		}
-	}
-	return total
-}
-
-func futuresBootstrapValue(f *accountv1.FuturesWallet) float64 {
-	if f == nil {
-		return 0
-	}
-	if f.GetMarginBalance() != 0 {
-		return f.GetMarginBalance()
-	}
-	if f.GetWalletBalance() != 0 {
-		return f.GetWalletBalance()
-	}
-	if f.GetInitialBalance() != 0 {
-		return f.GetInitialBalance()
-	}
-	var total float64
-	for _, p := range f.GetPositions() {
-		total += p.GetInitialBalance()
-	}
-	return total
-}
-
-func buildBacktestWalletBootstrapRequest(accountID int64, body createAccountBodyExt) *accountv1.UpdateAccountWalletStateRequest {
-	spot := buildSpotWallet(body.Spot, body.InitialBalance)
-	futures := buildFuturesWallet(body.Futures)
-	spotValue := spotBootstrapValue(spot)
-	futuresValue := futuresBootstrapValue(futures)
-	totalValue := spotValue + futuresValue
-	walletBalance := futuresValue
-	availableBalance := futuresValue
-	if futures == nil {
-		walletBalance = spotValue
-		if spot != nil {
-			availableBalance = spot.GetFree()
-		}
-	}
-	return &accountv1.UpdateAccountWalletStateRequest{
-		AccountId:        accountID,
-		Futures:          futures,
-		Spot:             spot,
-		TotalValue:       totalValue,
-		WalletBalance:    walletBalance,
-		AvailableBalance: availableBalance,
-	}
+	Name           string          `json:"name"`
+	Description    string          `json:"description"`
+	Environment    int32           `json:"environment"`
+	Mode           *int32          `json:"mode"`
+	APIKey         string          `json:"api_key"`
+	APISecret      string          `json:"api_secret"`
+	InitialBalance *float64        `json:"initial_balance"`
+	Spot           json.RawMessage `json:"spot"`
+	Futures        json.RawMessage `json:"futures"`
 }
 
 func (s *server) handleSymbols(w http.ResponseWriter, r *http.Request) {
@@ -743,7 +569,8 @@ func protoFuturesToJSON(fw *accountv1.FuturesWallet) any {
 	return out
 }
 
-// decodeCreateAccountBody accepts extended JSON for wallet wizard.
+// decodeCreateAccountBody accepts account metadata. Venue and wallet payloads
+// are rejected below so account creation cannot bypass the venue model.
 func decodeCreateAccountBody(r *http.Request) (createAccountBodyExt, error) {
 	var body createAccountBodyExt
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -752,18 +579,46 @@ func decodeCreateAccountBody(r *http.Request) (createAccountBodyExt, error) {
 	return body, nil
 }
 
-func legacyVenueMarginMode(f *futIn) int32 {
-	if f != nil && strings.ToLower(strings.TrimSpace(f.MarginMode)) == "isolated" {
-		return 2
-	}
-	return 1
+func jsonFieldPresent(raw json.RawMessage) bool {
+	value := strings.TrimSpace(string(raw))
+	return value != "" && value != "null"
 }
 
-func legacyVenuePositionMode(f *futIn) int32 {
-	if f != nil && normPositionMode(f.PositionMode) == "hedge" {
-		return 2
+func deprecatedAccountRuntimePayloadError(body createAccountBodyExt) string {
+	if body.Mode != nil {
+		return "account mode is deprecated; use environment"
 	}
-	return 1
+	if strings.TrimSpace(body.APIKey) != "" || strings.TrimSpace(body.APISecret) != "" {
+		return "account credentials must be configured on venues"
+	}
+	if accountEnvironmentFromBody(body) != 0 && (body.InitialBalance != nil || jsonFieldPresent(body.Spot) || jsonFieldPresent(body.Futures)) {
+		return "account wallet bootstrap is only supported for backtest compatibility"
+	}
+	return ""
+}
+
+func accountWalletBootstrapProvided(body createAccountBodyExt) bool {
+	return body.InitialBalance != nil || jsonFieldPresent(body.Spot) || jsonFieldPresent(body.Futures)
+}
+
+func buildAccountWalletBootstrap(body createAccountBodyExt) (walletBootstrap, error) {
+	var spot *spotIn
+	if jsonFieldPresent(body.Spot) {
+		var parsed spotIn
+		if err := json.Unmarshal(body.Spot, &parsed); err != nil {
+			return walletBootstrap{}, err
+		}
+		spot = &parsed
+	}
+	var futures *futIn
+	if jsonFieldPresent(body.Futures) {
+		var parsed futIn
+		if err := json.Unmarshal(body.Futures, &parsed); err != nil {
+			return walletBootstrap{}, err
+		}
+		futures = &parsed
+	}
+	return buildWalletBootstrap(spot, futures, body.InitialBalance), nil
 }
 
 func (s *server) createAccountWithBootstrap(w http.ResponseWriter, r *http.Request) {
@@ -776,8 +631,8 @@ func (s *server) createAccountWithBootstrap(w http.ResponseWriter, r *http.Reque
 		writeErr(w, http.StatusBadRequest, "name is required")
 		return
 	}
-	if err := validateFuturesPayload(body.Futures); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+	if msg := deprecatedAccountRuntimePayloadError(body); msg != "" {
+		writeErr(w, http.StatusBadRequest, msg)
 		return
 	}
 	ctx := r.Context()
@@ -788,51 +643,32 @@ func (s *server) createAccountWithBootstrap(w http.ResponseWriter, r *http.Reque
 	}
 	environment := accountEnvironmentFromBody(body)
 	resp, err := s.accounts.CreateAccount(ctx, &accountv1.CreateAccountRequest{
-		Name:           body.Name,
-		Description:    body.Description,
-		Environment:    environment,
-		InitialBalance: body.InitialBalance,
-		UserId:         uid,
+		Name:        body.Name,
+		Description: body.Description,
+		Environment: environment,
+		UserId:      uid,
 	})
 	if err != nil {
 		code, msg := grpcToHTTP(err)
 		writeErr(w, code, msg)
 		return
 	}
-	if environment != 0 && strings.TrimSpace(body.APIKey) != "" && strings.TrimSpace(body.APISecret) != "" {
-		credentialJSON, err := json.Marshal(map[string]string{
-			"api_key":    strings.TrimSpace(body.APIKey),
-			"api_secret": strings.TrimSpace(body.APISecret),
-		})
+	if environment == 0 && accountWalletBootstrapProvided(body) {
+		bootstrap, err := buildAccountWalletBootstrap(body)
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "encode credential")
+			writeErr(w, http.StatusBadRequest, "account wallet bootstrap must be JSON serializable")
 			return
 		}
-		if _, err := s.accounts.CreateVenue(ctx, &accountv1.CreateVenueRequest{
-			UserId:         uid,
-			AccountId:      resp.GetAccountId(),
-			Exchange:       1, // binance
-			Market:         2, // perpetual_futures
-			Environment:    environment,
-			Status:         1, // active
-			DisplayName:    strings.TrimSpace(body.Name) + " binance perpetual",
-			Description:    "created from account credentials",
-			ApiKey:         strings.TrimSpace(body.APIKey),
-			CredentialJson: string(credentialJSON),
-			MarginMode:     legacyVenueMarginMode(body.Futures),
-			PositionMode:   legacyVenuePositionMode(body.Futures),
+		if _, err := s.accounts.UpdateAccountWalletState(ctx, &accountv1.UpdateAccountWalletStateRequest{
+			AccountId:        resp.GetAccountId(),
+			Futures:          bootstrap.Futures,
+			Spot:             bootstrap.Spot,
+			TotalValue:       bootstrap.TotalValue,
+			WalletBalance:    bootstrap.WalletBalance,
+			AvailableBalance: bootstrap.AvailableBalance,
 		}); err != nil {
 			code, msg := grpcToHTTP(err)
-			writeErr(w, code, "create account ok but venue creation failed: "+msg)
-			return
-		}
-	}
-
-	if shouldApplyWalletBootstrap(body) {
-		_, err = s.accounts.UpdateAccountWalletState(ctx, buildBacktestWalletBootstrapRequest(resp.GetAccountId(), body))
-		if err != nil {
-			code, msg := grpcToHTTP(err)
-			writeErr(w, code, "create ok but wallet bootstrap failed: "+msg)
+			writeErr(w, code, "account created, but default venue wallet bootstrap failed: "+msg)
 			return
 		}
 	}

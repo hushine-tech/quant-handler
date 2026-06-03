@@ -94,7 +94,7 @@ func (s *server) previewStrategyForCoverage(w http.ResponseWriter, r *http.Reque
 	if !ok {
 		return nil, false
 	}
-	cli, callerToken, _, ok := s.strategyClient(r.Context(), w, uid, modeEnsure, runtimeID, policy)
+	cli, callerToken, _, ok := s.strategyClient(r.Context(), w, uid, routeEnsure, runtimeID, policy)
 	if !ok {
 		return nil, false
 	}

@@ -134,7 +134,7 @@ func (s *server) handleDownloadAndRun(w http.ResponseWriter, r *http.Request, ac
 	if !ok {
 		return
 	}
-	cli, callerToken, _, ok := s.strategyClient(r.Context(), w, uid, modeEnsure, runtimeID, policy)
+	cli, callerToken, _, ok := s.strategyClient(r.Context(), w, uid, routeEnsure, runtimeID, policy)
 	if !ok {
 		return
 	}

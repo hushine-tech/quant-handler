@@ -155,7 +155,7 @@ func (s *server) handleRunStrategy(w http.ResponseWriter, r *http.Request, accou
 	if !ok {
 		return
 	}
-	cli, callerToken, _, ok := s.strategyClient(r.Context(), w, uid, modeEnsure, runtimeID, policy)
+	cli, callerToken, _, ok := s.strategyClient(r.Context(), w, uid, routeEnsure, runtimeID, policy)
 	if !ok {
 		return
 	}
@@ -206,7 +206,7 @@ func (s *server) handlePreviewRunStrategy(w http.ResponseWriter, r *http.Request
 	if !ok {
 		return
 	}
-	cli, callerToken, _, ok := s.strategyClient(r.Context(), w, uid, modeEnsure, runtimeID, policy)
+	cli, callerToken, _, ok := s.strategyClient(r.Context(), w, uid, routeEnsure, runtimeID, policy)
 	if !ok {
 		return
 	}
@@ -378,7 +378,7 @@ func (s *server) handleStrategySession(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	cli, callerToken, selectedRuntimeID, ok := s.strategyClient(r.Context(), w, uid, modeResolve, runtimeID, policy)
+	cli, callerToken, selectedRuntimeID, ok := s.strategyClient(r.Context(), w, uid, routeResolve, runtimeID, policy)
 	if !ok {
 		return
 	}
@@ -440,7 +440,7 @@ func (s *server) handleStopStrategy(w http.ResponseWriter, r *http.Request, sess
 			return
 		}
 	}
-	cli, callerToken, selectedRuntimeID, ok := s.strategyClient(r.Context(), w, uid, modeResolve, runtimeID, policy)
+	cli, callerToken, selectedRuntimeID, ok := s.strategyClient(r.Context(), w, uid, routeResolve, runtimeID, policy)
 	if !ok {
 		return
 	}

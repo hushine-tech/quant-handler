@@ -121,10 +121,10 @@ func defaultRuntimeDialOptions() []grpc.DialOption {
 // the control-panel strategy proxy client. Caller MUST already be on the
 // cutover path (feature flag on).
 //
-// Behavior depends on route mode:
-//   - modeEnsure  → require runtime_id and call ResolveRuntimeRouteByID.
+// Behavior depends on route resolution:
+//   - routeEnsure  → require runtime_id and call ResolveRuntimeRouteByID.
 //     Used by run / preview paths.
-//   - modeResolve → call ResolveRuntimeRoute; read-only.
+//   - routeResolve → call ResolveRuntimeRoute; read-only.
 //     Used by stop / status paths (the session must
 //     already exist somewhere).
 //
@@ -148,10 +148,10 @@ func strategyRoutePolicyForEnvironment(environment int32) strategyRoutePolicy {
 	return strategyRoutePolicy{role: "executor", environment: int(environment)}
 }
 
-func (s *server) resolveStrategyRuntime(ctx context.Context, w http.ResponseWriter, userID int64, mode strategyRouteMode, runtimeID string, policy strategyRoutePolicy) (strategyv1.StrategyServiceClient, string, string) {
+func (s *server) resolveStrategyRuntime(ctx context.Context, w http.ResponseWriter, userID int64, resolution strategyRouteResolution, runtimeID string, policy strategyRoutePolicy) (strategyv1.StrategyServiceClient, string, string) {
 	var err error
-	switch mode {
-	case modeEnsure:
+	switch resolution {
+	case routeEnsure:
 		if runtimeID == "" {
 			writeErr(w, http.StatusBadRequest, "runtime selection required")
 			return nil, "", ""
@@ -161,7 +161,7 @@ func (s *server) resolveStrategyRuntime(ctx context.Context, w http.ResponseWrit
 		if err == nil {
 			return s.controlPanelStrategyProxy(w), "", route.RuntimeID
 		}
-	case modeResolve:
+	case routeResolve:
 		if runtimeID == "" {
 			writeErr(w, http.StatusConflict, "session is not bound to a runtime")
 			return nil, "", ""
@@ -172,7 +172,7 @@ func (s *server) resolveStrategyRuntime(ctx context.Context, w http.ResponseWrit
 			return s.controlPanelStrategyProxy(w), "", rt.RuntimeID
 		}
 	default:
-		writeErr(w, http.StatusInternalServerError, "internal: unknown strategyRouteMode")
+		writeErr(w, http.StatusInternalServerError, "internal: unknown strategy route resolution")
 		return nil, "", ""
 	}
 	if err != nil {
@@ -196,12 +196,12 @@ func (s *server) controlPanelStrategyProxy(w http.ResponseWriter) strategyv1.Str
 	return controlPanelStrategyClient{rpc: s.cpRuntime}
 }
 
-// strategyRouteMode picks Ensure (lazy provision) vs Resolve (read-only).
-type strategyRouteMode int
+// strategyRouteResolution picks Ensure (lazy provision) vs Resolve (read-only).
+type strategyRouteResolution int
 
 const (
-	modeEnsure strategyRouteMode = iota
-	modeResolve
+	routeEnsure strategyRouteResolution = iota
+	routeResolve
 )
 
 // strategyClient is the single seam every strategy-session handler uses
@@ -218,11 +218,11 @@ const (
 //
 // Returns (client, callerToken, ok). When ok=false, an HTTP error has
 // already been written to `w` and the caller MUST return immediately.
-func (s *server) strategyClient(ctx context.Context, w http.ResponseWriter, userID int64, mode strategyRouteMode, runtimeID string, policy strategyRoutePolicy) (strategyv1.StrategyServiceClient, string, string, bool) {
+func (s *server) strategyClient(ctx context.Context, w http.ResponseWriter, userID int64, resolution strategyRouteResolution, runtimeID string, policy strategyRoutePolicy) (strategyv1.StrategyServiceClient, string, string, bool) {
 	if s.controlPanelRouteFeature {
 		// Cutover path. Errors surface via writeErr inside
 		// resolveStrategyRuntime; no fallback.
-		cli, token, runtimeID := s.resolveStrategyRuntime(ctx, w, userID, mode, runtimeID, policy)
+		cli, token, runtimeID := s.resolveStrategyRuntime(ctx, w, userID, resolution, runtimeID, policy)
 		if cli == nil {
 			return nil, "", "", false
 		}
