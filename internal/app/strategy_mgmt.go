@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/hushine-tech/core-service/gen/accountv1"
-	strategyv1 "github.com/hushine-tech/strategy-service/gen/strategyv1"
 )
 
 // ── Request / Response types ─────────────────────────────────────────────────
@@ -30,13 +29,6 @@ type strategyJSON struct {
 	CreatedAt      string `json:"created_at"`
 	RuntimeVersion string `json:"runtime_version,omitempty"`
 	RuntimeProfile string `json:"runtime_profile,omitempty"`
-}
-
-type strategyValidationIssueJSON struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
-	Module  string `json:"module,omitempty"`
-	Line    int32  `json:"line,omitempty"`
 }
 
 // ── Route handler: /api/strategies and /api/strategies/{id} ─────────────────
@@ -104,47 +96,13 @@ func (s *server) createStrategy(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnauthorized, "missing user context")
 		return
 	}
-	if s.strategy == nil {
-		writeErr(w, http.StatusServiceUnavailable, "strategy-service is not configured")
-		return
-	}
-	validation, err := s.strategy.ValidateStrategyCode(r.Context(), &strategyv1.ValidateStrategyCodeRequest{
-		UserId: uid,
-		Code:   body.Code,
-	})
-	if err != nil {
-		code, msg := grpcToHTTP(err)
-		writeErr(w, code, msg)
-		return
-	}
-	if !validation.GetOk() {
-		issues := make([]strategyValidationIssueJSON, 0, len(validation.GetIssues()))
-		for _, issue := range validation.GetIssues() {
-			issues = append(issues, strategyValidationIssueJSON{
-				Code:    issue.GetCode(),
-				Message: issue.GetMessage(),
-				Module:  issue.GetModule(),
-				Line:    issue.GetLine(),
-			})
-		}
-		writeJSON(w, http.StatusBadRequest, map[string]any{
-			"error":                       "strategy validation failed",
-			"issues":                      issues,
-			"runtime_version":             validation.GetRuntimeVersion(),
-			"runtime_profile":             validation.GetRuntimeProfile(),
-			"allowed_third_party_modules": validation.GetAllowedThirdPartyModules(),
-		})
-		return
-	}
 
 	resp, err := s.accounts.CreateStrategy(r.Context(), &accountv1.CreateStrategyRequest{
-		Name:           body.Name,
-		Version:        body.Version,
-		Description:    body.Description,
-		Code:           body.Code,
-		UserId:         uid,
-		RuntimeVersion: validation.GetRuntimeVersion(),
-		RuntimeProfile: validation.GetRuntimeProfile(),
+		Name:        body.Name,
+		Version:     body.Version,
+		Description: body.Description,
+		Code:        body.Code,
+		UserId:      uid,
 	})
 	if err != nil {
 		code, msg := grpcToHTTP(err)

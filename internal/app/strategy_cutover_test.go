@@ -14,37 +14,21 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
 
-// callerTokenObservingClient records the metadata it receives so tests
-// can assert that the handler attached x-caller-token to outgoing calls.
-type callerTokenObservingClient struct {
-	strategyv1.StrategyServiceClient
-	receivedMD  metadata.MD
-	runReq      *strategyv1.RunStrategyRequest
-	runResp     *strategyv1.RunStrategyResponse
-	stopReq     *strategyv1.StopStrategyRequest
-	stopResp    *strategyv1.StopStrategyResponse
-	statusReq   *strategyv1.GetStrategyStatusRequest
-	statusResp  *strategyv1.GetStrategyStatusResponse
-	previewReq  *strategyv1.PreviewRunStrategyRequest
-	previewResp *strategyv1.PreviewRunStrategyResponse
-	err         error
-}
-
 type fakeControlPanelStrategyProxy struct {
 	controlpanelv1.ControlPanelServiceClient
-	runReq     *strategyv1.RunStrategyRequest
-	runResp    *strategyv1.RunStrategyResponse
-	runErr     error
-	statusReq  *strategyv1.GetStrategyStatusRequest
-	statusErr  error
-	stopReq    *strategyv1.StopStrategyRequest
-	stopErr    error
-	previewReq *strategyv1.PreviewRunStrategyRequest
-	previewErr error
+	runReq      *strategyv1.RunStrategyRequest
+	runResp     *strategyv1.RunStrategyResponse
+	runErr      error
+	statusReq   *strategyv1.GetStrategyStatusRequest
+	statusErr   error
+	stopReq     *strategyv1.StopStrategyRequest
+	stopErr     error
+	previewReq  *strategyv1.PreviewRunStrategyRequest
+	previewResp *strategyv1.PreviewRunStrategyResponse
+	previewErr  error
 }
 
 func (f *fakeControlPanelStrategyProxy) RunStrategy(ctx context.Context, in *strategyv1.RunStrategyRequest, _ ...grpc.CallOption) (*strategyv1.RunStrategyResponse, error) {
@@ -79,108 +63,22 @@ func (f *fakeControlPanelStrategyProxy) PreviewRunStrategy(ctx context.Context, 
 	if f.previewErr != nil {
 		return nil, f.previewErr
 	}
+	if f.previewResp != nil {
+		return f.previewResp, nil
+	}
 	return &strategyv1.PreviewRunStrategyResponse{Profile: "backtest", Supported: true, Ok: true}, nil
 }
 
-func (f *callerTokenObservingClient) RunStrategy(ctx context.Context, in *strategyv1.RunStrategyRequest, _ ...grpc.CallOption) (*strategyv1.RunStrategyResponse, error) {
-	if md, ok := metadata.FromOutgoingContext(ctx); ok {
-		f.receivedMD = md
-	}
-	f.runReq = in
-	if f.err != nil {
-		return nil, f.err
-	}
-	if f.runResp == nil {
-		return &strategyv1.RunStrategyResponse{SessionId: "sess_xyz"}, nil
-	}
-	return f.runResp, nil
-}
-
-func (f *callerTokenObservingClient) PreviewRunStrategy(ctx context.Context, in *strategyv1.PreviewRunStrategyRequest, _ ...grpc.CallOption) (*strategyv1.PreviewRunStrategyResponse, error) {
-	if md, ok := metadata.FromOutgoingContext(ctx); ok {
-		f.receivedMD = md
-	}
-	f.previewReq = in
-	if f.err != nil {
-		return nil, f.err
-	}
-	if f.previewResp == nil {
-		return &strategyv1.PreviewRunStrategyResponse{Profile: "live"}, nil
-	}
-	return f.previewResp, nil
-}
-
-func (f *callerTokenObservingClient) GetStrategyStatus(ctx context.Context, in *strategyv1.GetStrategyStatusRequest, _ ...grpc.CallOption) (*strategyv1.GetStrategyStatusResponse, error) {
-	if md, ok := metadata.FromOutgoingContext(ctx); ok {
-		f.receivedMD = md
-	}
-	f.statusReq = in
-	if f.err != nil {
-		return nil, f.err
-	}
-	if f.statusResp == nil {
-		return &strategyv1.GetStrategyStatusResponse{Status: "running"}, nil
-	}
-	return f.statusResp, nil
-}
-
-func (f *callerTokenObservingClient) StopStrategy(ctx context.Context, in *strategyv1.StopStrategyRequest, _ ...grpc.CallOption) (*strategyv1.StopStrategyResponse, error) {
-	if md, ok := metadata.FromOutgoingContext(ctx); ok {
-		f.receivedMD = md
-	}
-	f.stopReq = in
-	if f.err != nil {
-		return nil, f.err
-	}
-	if f.stopResp == nil {
-		return &strategyv1.StopStrategyResponse{Stopped: true}, nil
-	}
-	return f.stopResp, nil
-}
-
-// stubRuntimeDialer implements the same surface as runtimeDialer but
-// returns a caller-controlled strategy client without opening a real
-// gRPC connection.
-type stubRuntimeDialer struct {
-	cli         strategyv1.StrategyServiceClient
-	dialErr     error
-	gotEndpoint string
-}
-
-// To make stubRuntimeDialer drop into the runtimeDialer slot we monkey-
-// patch the server's runtimeDialer field to a real dialer whose dial map
-// already contains a fake. Simpler: build the server with a real dialer
-// preloaded with a fake conn — but we can't synthesize *grpc.ClientConn
-// from a stub client. Instead, we replace handler dispatch by setting
-// server.strategy directly when feature flag is OFF, and for feature-on
-// tests we use an in-process bufconn server.
-//
-// For section 6 we exercise the routing decision rather than the dial
-// wire. Tests that need to assert "RunStrategy was called" use the
-// flag-off path with `server.strategy = fake`. Tests that need to
-// assert "control-panel resolved correctly" use the flag-on path with
-// the fakeResolver and a stub dialer that injects the strategy client
-// directly. We add `server.runtimeDialerOverride` for the latter.
-
-// ─────────────────────────────────────────────────────────────────────
-// 6.4 fail-closed semantics: feature flag on, control panel rejects
-// ─────────────────────────────────────────────────────────────────────
-
-// TestRunStrategy_FlagOn_ControlPanelNotFound surfaces the gRPC NotFound
-// from ResolveRuntimeRouteByID as HTTP 404 and never falls back to the
-// legacy fixed strategy-service even though it is configured.
-func TestRunStrategy_FlagOn_ControlPanelNotFound(t *testing.T) {
-	legacy := &callerTokenObservingClient{}
+// TestRunStrategy_ControlPanelNotFound surfaces the gRPC NotFound from
+// ResolveRuntimeRouteByID as HTTP 404.
+func TestRunStrategy_ControlPanelNotFound(t *testing.T) {
 	resolver := &fakeResolver{
 		resolveByIDErr: status.Error(codes.NotFound, "runtime not found"),
 	}
 	s := &server{
-		strategy:                 legacy,
-		controlPanel:             resolver,
-		controlPanelRouteFeature: true,
-		runtimeDialer:            newRuntimeDialer(),
-		jwtSecret:                []byte("s"),
-		corsOrigins:              []string{"*"},
+		controlPanel: resolver,
+		jwtSecret:    []byte("s"),
+		corsOrigins:  []string{"*"},
 	}
 
 	req := withUID(httptest.NewRequest(http.MethodPost,
@@ -194,26 +92,19 @@ func TestRunStrategy_FlagOn_ControlPanelNotFound(t *testing.T) {
 	if resolver.resolveByIDCalls != 1 || resolver.ensureCalls != 0 {
 		t.Errorf("route calls: resolveByID=%d ensure=%d, want 1/0", resolver.resolveByIDCalls, resolver.ensureCalls)
 	}
-	if legacy.runReq != nil {
-		t.Error("legacy strategy.RunStrategy was called; expected fail-closed (no silent fallback)")
-	}
 }
 
-// TestRunStrategy_FlagOn_ControlPanelResourceExhausted maps quota errors
+// TestRunStrategy_ControlPanelResourceExhausted maps quota errors
 // to HTTP 502 (Unavailable mapping in grpcToHTTP for non-typed) — the
 // exact code matters less than "no silent fallback".
-func TestRunStrategy_FlagOn_ControlPanelResourceExhausted(t *testing.T) {
-	legacy := &callerTokenObservingClient{}
+func TestRunStrategy_ControlPanelResourceExhausted(t *testing.T) {
 	resolver := &fakeResolver{
 		resolveByIDErr: status.Error(codes.ResourceExhausted, "plan caps hosted at 1"),
 	}
 	s := &server{
-		strategy:                 legacy,
-		controlPanel:             resolver,
-		controlPanelRouteFeature: true,
-		runtimeDialer:            newRuntimeDialer(),
-		jwtSecret:                []byte("s"),
-		corsOrigins:              []string{"*"},
+		controlPanel: resolver,
+		jwtSecret:    []byte("s"),
+		corsOrigins:  []string{"*"},
 	}
 	req := withUID(httptest.NewRequest(http.MethodPost,
 		"/api/accounts/7/run-strategy", bytes.NewBufferString(`{"runtime_id":"rt_quota","start_time_ms":0,"end_time_ms":0}`)), 42)
@@ -223,27 +114,20 @@ func TestRunStrategy_FlagOn_ControlPanelResourceExhausted(t *testing.T) {
 	if rec.Code == http.StatusOK {
 		t.Fatalf("status = %d, expected non-2xx; body=%s", rec.Code, rec.Body.String())
 	}
-	if legacy.runReq != nil {
-		t.Error("legacy strategy.RunStrategy was called; quota errors must surface")
-	}
 }
 
-// TestRunStrategy_FlagOn_HostedEmptyEndpointUsesProxy: hosted runtime
+// TestRunStrategy_HostedEmptyEndpointUsesProxy: hosted runtime
 // routeability is runtime_id + RuntimeChannel owner, not grpc_endpoint.
-func TestRunStrategy_FlagOn_HostedEmptyEndpointUsesProxy(t *testing.T) {
-	legacy := &callerTokenObservingClient{}
+func TestRunStrategy_HostedEmptyEndpointUsesProxy(t *testing.T) {
 	proxy := &fakeControlPanelStrategyProxy{}
 	resolver := &fakeResolver{
 		resolveByIDResp: controlpanel.Route{RuntimeID: "rt_empty", Source: "hosted", GRPCEndpoint: ""},
 	}
 	s := &server{
-		strategy:                 legacy,
-		controlPanel:             resolver,
-		cpRuntime:                proxy,
-		controlPanelRouteFeature: true,
-		runtimeDialer:            newRuntimeDialer(),
-		jwtSecret:                []byte("s"),
-		corsOrigins:              []string{"*"},
+		controlPanel: resolver,
+		cpRuntime:    proxy,
+		jwtSecret:    []byte("s"),
+		corsOrigins:  []string{"*"},
 	}
 	req := withUID(httptest.NewRequest(http.MethodPost,
 		"/api/accounts/7/run-strategy", bytes.NewBufferString(`{"runtime_id":"rt_empty","start_time_ms":0,"end_time_ms":0}`)), 42)
@@ -253,15 +137,12 @@ func TestRunStrategy_FlagOn_HostedEmptyEndpointUsesProxy(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
 	}
-	if legacy.runReq != nil {
-		t.Fatal("legacy/direct strategy client was called for hosted route")
-	}
 	if proxy.runReq == nil || proxy.runReq.GetRuntimeId() != "rt_empty" {
 		t.Fatalf("proxy RunStrategy = %+v, want runtime rt_empty", proxy.runReq)
 	}
 }
 
-func TestRunStrategy_FlagOn_ExplicitRuntimeIDRoutesByID(t *testing.T) {
+func TestRunStrategy_ExplicitRuntimeIDRoutesByID(t *testing.T) {
 	proxy := &fakeControlPanelStrategyProxy{}
 	resolver := &fakeResolver{
 		resolveByIDResp: controlpanel.Route{
@@ -271,12 +152,10 @@ func TestRunStrategy_FlagOn_ExplicitRuntimeIDRoutesByID(t *testing.T) {
 		},
 	}
 	s := &server{
-		controlPanel:             resolver,
-		cpRuntime:                proxy,
-		controlPanelRouteFeature: true,
-		runtimeDialer:            newRuntimeDialer(),
-		jwtSecret:                []byte("s"),
-		corsOrigins:              []string{"*"},
+		controlPanel: resolver,
+		cpRuntime:    proxy,
+		jwtSecret:    []byte("s"),
+		corsOrigins:  []string{"*"},
 	}
 	req := withUID(httptest.NewRequest(http.MethodPost,
 		"/api/accounts/7/run-strategy",
@@ -298,7 +177,7 @@ func TestRunStrategy_FlagOn_ExplicitRuntimeIDRoutesByID(t *testing.T) {
 	}
 }
 
-func TestRunStrategy_FlagOn_BacktestDebuggerRuntimeRoutesAsDebugger(t *testing.T) {
+func TestRunStrategy_BacktestDebuggerRuntimeRoutesAsDebugger(t *testing.T) {
 	proxy := &fakeControlPanelStrategyProxy{}
 	resolver := &fakeResolver{
 		runtimeResp: controlpanel.Runtime{
@@ -314,13 +193,11 @@ func TestRunStrategy_FlagOn_BacktestDebuggerRuntimeRoutesAsDebugger(t *testing.T
 	}
 	accounts := &fakeSessionAccountsClient{accountEnvironment: 0}
 	s := &server{
-		accounts:                 accounts,
-		controlPanel:             resolver,
-		cpRuntime:                proxy,
-		controlPanelRouteFeature: true,
-		runtimeDialer:            newRuntimeDialer(),
-		jwtSecret:                []byte("s"),
-		corsOrigins:              []string{"*"},
+		accounts:     accounts,
+		controlPanel: resolver,
+		cpRuntime:    proxy,
+		jwtSecret:    []byte("s"),
+		corsOrigins:  []string{"*"},
 	}
 	req := withUID(httptest.NewRequest(http.MethodPost,
 		"/api/accounts/7/run-strategy",
@@ -345,7 +222,7 @@ func TestRunStrategy_FlagOn_BacktestDebuggerRuntimeRoutesAsDebugger(t *testing.T
 	}
 }
 
-func TestRunStrategy_FlagOn_DemoAlwaysRoutesAsExecutor(t *testing.T) {
+func TestRunStrategy_DemoAlwaysRoutesAsExecutor(t *testing.T) {
 	proxy := &fakeControlPanelStrategyProxy{}
 	resolver := &fakeResolver{
 		resolveByIDResp: controlpanel.Route{
@@ -356,13 +233,11 @@ func TestRunStrategy_FlagOn_DemoAlwaysRoutesAsExecutor(t *testing.T) {
 	}
 	accounts := &fakeSessionAccountsClient{accountEnvironment: 1}
 	s := &server{
-		accounts:                 accounts,
-		controlPanel:             resolver,
-		cpRuntime:                proxy,
-		controlPanelRouteFeature: true,
-		runtimeDialer:            newRuntimeDialer(),
-		jwtSecret:                []byte("s"),
-		corsOrigins:              []string{"*"},
+		accounts:     accounts,
+		controlPanel: resolver,
+		cpRuntime:    proxy,
+		jwtSecret:    []byte("s"),
+		corsOrigins:  []string{"*"},
 	}
 	req := withUID(httptest.NewRequest(http.MethodPost,
 		"/api/accounts/7/run-strategy",
@@ -381,8 +256,7 @@ func TestRunStrategy_FlagOn_DemoAlwaysRoutesAsExecutor(t *testing.T) {
 	}
 }
 
-func TestRunStrategy_FlagOn_OmittedRuntimeIDWithMultipleRuntimesRequiresSelection(t *testing.T) {
-	legacy := &callerTokenObservingClient{}
+func TestRunStrategy_OmittedRuntimeIDWithMultipleRuntimesRequiresSelection(t *testing.T) {
 	resolver := &fakeResolver{
 		runtimeList: controlpanel.RuntimeList{
 			Runtimes: []controlpanel.Runtime{
@@ -393,12 +267,9 @@ func TestRunStrategy_FlagOn_OmittedRuntimeIDWithMultipleRuntimesRequiresSelectio
 		},
 	}
 	s := &server{
-		strategy:                 legacy,
-		controlPanel:             resolver,
-		controlPanelRouteFeature: true,
-		runtimeDialer:            newRuntimeDialer(),
-		jwtSecret:                []byte("s"),
-		corsOrigins:              []string{"*"},
+		controlPanel: resolver,
+		jwtSecret:    []byte("s"),
+		corsOrigins:  []string{"*"},
 	}
 	req := withUID(httptest.NewRequest(http.MethodPost,
 		"/api/accounts/7/run-strategy", bytes.NewBufferString(`{"start_time_ms":1,"end_time_ms":2}`)), 42)
@@ -408,12 +279,12 @@ func TestRunStrategy_FlagOn_OmittedRuntimeIDWithMultipleRuntimesRequiresSelectio
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
 	}
-	if resolver.resolveByIDCalls != 0 || resolver.ensureCalls != 0 || legacy.runReq != nil {
-		t.Fatalf("ambiguous selection should not route: resolveByID=%d ensure=%d legacy=%v", resolver.resolveByIDCalls, resolver.ensureCalls, legacy.runReq != nil)
+	if resolver.resolveByIDCalls != 0 || resolver.ensureCalls != 0 {
+		t.Fatalf("ambiguous selection should not route: resolveByID=%d ensure=%d", resolver.resolveByIDCalls, resolver.ensureCalls)
 	}
 }
 
-func TestRunStrategy_FlagOn_SingleRuntimeDoesNotAutoSelect(t *testing.T) {
+func TestRunStrategy_SingleRuntimeDoesNotAutoSelect(t *testing.T) {
 	proxy := &fakeControlPanelStrategyProxy{}
 	resolver := &fakeResolver{
 		runtimeList: controlpanel.RuntimeList{
@@ -427,12 +298,10 @@ func TestRunStrategy_FlagOn_SingleRuntimeDoesNotAutoSelect(t *testing.T) {
 		},
 	}
 	s := &server{
-		controlPanel:             resolver,
-		cpRuntime:                proxy,
-		controlPanelRouteFeature: true,
-		runtimeDialer:            newRuntimeDialer(),
-		jwtSecret:                []byte("s"),
-		corsOrigins:              []string{"*"},
+		controlPanel: resolver,
+		cpRuntime:    proxy,
+		jwtSecret:    []byte("s"),
+		corsOrigins:  []string{"*"},
 	}
 	req := withUID(httptest.NewRequest(http.MethodPost,
 		"/api/accounts/7/run-strategy", bytes.NewBufferString(`{"start_time_ms":1,"end_time_ms":2}`)), 42)
@@ -447,19 +316,14 @@ func TestRunStrategy_FlagOn_SingleRuntimeDoesNotAutoSelect(t *testing.T) {
 	}
 }
 
-// TestRunStrategy_FlagOn_ControlPanelDisabled: feature flag on but the
-// resolver itself is the Disabled() fallback (operator forgot to wire
+// TestRunStrategy_ControlPanelDisabled: control-panel resolver itself is the Disabled() fallback (operator forgot to wire
 // dependencies.control_panel_service_grpc). Surface 503 — clear signal
 // to operator vs 502 dial errors.
-func TestRunStrategy_FlagOn_ControlPanelDisabled(t *testing.T) {
-	legacy := &callerTokenObservingClient{}
+func TestRunStrategy_ControlPanelDisabled(t *testing.T) {
 	s := &server{
-		strategy:                 legacy,
-		controlPanel:             controlpanel.Disabled(),
-		controlPanelRouteFeature: true,
-		runtimeDialer:            newRuntimeDialer(),
-		jwtSecret:                []byte("s"),
-		corsOrigins:              []string{"*"},
+		controlPanel: controlpanel.Disabled(),
+		jwtSecret:    []byte("s"),
+		corsOrigins:  []string{"*"},
 	}
 	req := withUID(httptest.NewRequest(http.MethodPost,
 		"/api/accounts/7/run-strategy", bytes.NewBufferString(`{"runtime_id":"rt_disabled","start_time_ms":0,"end_time_ms":0}`)), 42)
@@ -468,13 +332,9 @@ func TestRunStrategy_FlagOn_ControlPanelDisabled(t *testing.T) {
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Errorf("status = %d, want 503", rec.Code)
 	}
-	if legacy.runReq != nil {
-		t.Error("legacy strategy.RunStrategy was called; Disabled() must fail closed")
-	}
 }
 
-func TestRunStrategy_FlagOn_SelfHostedUsesControlPanelProxy(t *testing.T) {
-	legacy := &callerTokenObservingClient{}
+func TestRunStrategy_SelfHostedUsesControlPanelProxy(t *testing.T) {
 	proxy := &fakeControlPanelStrategyProxy{}
 	resolver := &fakeResolver{
 		resolveByIDResp: controlpanel.Route{
@@ -485,13 +345,10 @@ func TestRunStrategy_FlagOn_SelfHostedUsesControlPanelProxy(t *testing.T) {
 		},
 	}
 	s := &server{
-		strategy:                 legacy,
-		controlPanel:             resolver,
-		cpRuntime:                proxy,
-		controlPanelRouteFeature: true,
-		runtimeDialer:            newRuntimeDialer(),
-		jwtSecret:                []byte("s"),
-		corsOrigins:              []string{"*"},
+		controlPanel: resolver,
+		cpRuntime:    proxy,
+		jwtSecret:    []byte("s"),
+		corsOrigins:  []string{"*"},
 	}
 	req := withUID(httptest.NewRequest(http.MethodPost,
 		"/api/accounts/7/run-strategy", bytes.NewBufferString(`{"runtime_id":"rt_self","start_time_ms":1,"end_time_ms":2}`)), 42)
@@ -507,16 +364,12 @@ func TestRunStrategy_FlagOn_SelfHostedUsesControlPanelProxy(t *testing.T) {
 	if proxy.runReq.GetAccountId() != 7 || proxy.runReq.GetUserId() != 42 {
 		t.Fatalf("proxy request = %+v", proxy.runReq)
 	}
-	if legacy.runReq != nil {
-		t.Fatal("legacy/direct strategy client was called for self-hosted route")
-	}
 	if resolver.ensureCalls != 0 {
 		t.Fatalf("EnsureHostedRuntime calls = %d, want 0 for self-hosted route", resolver.ensureCalls)
 	}
 }
 
-func TestRunStrategy_FlagOn_SelfHostedStreamDropSurfacesError(t *testing.T) {
-	legacy := &callerTokenObservingClient{}
+func TestRunStrategy_SelfHostedStreamDropSurfacesError(t *testing.T) {
 	proxy := &fakeControlPanelStrategyProxy{
 		runErr: status.Error(codes.Unavailable, "runtime stream disconnected mid-call"),
 	}
@@ -528,13 +381,10 @@ func TestRunStrategy_FlagOn_SelfHostedStreamDropSurfacesError(t *testing.T) {
 		},
 	}
 	s := &server{
-		strategy:                 legacy,
-		controlPanel:             resolver,
-		cpRuntime:                proxy,
-		controlPanelRouteFeature: true,
-		runtimeDialer:            newRuntimeDialer(),
-		jwtSecret:                []byte("s"),
-		corsOrigins:              []string{"*"},
+		controlPanel: resolver,
+		cpRuntime:    proxy,
+		jwtSecret:    []byte("s"),
+		corsOrigins:  []string{"*"},
 	}
 	req := withUID(httptest.NewRequest(http.MethodPost,
 		"/api/accounts/7/run-strategy", bytes.NewBufferString(`{"runtime_id":"rt_self","start_time_ms":1,"end_time_ms":2}`)), 42)
@@ -547,12 +397,9 @@ func TestRunStrategy_FlagOn_SelfHostedStreamDropSurfacesError(t *testing.T) {
 	if proxy.runReq == nil {
 		t.Fatal("control-panel proxy RunStrategy was not called")
 	}
-	if legacy.runReq != nil {
-		t.Fatal("legacy/direct strategy client was called after self-hosted stream drop")
-	}
 }
 
-func TestStatus_FlagOn_RuntimeOfflineSurfacesProxyError(t *testing.T) {
+func TestStatus_RuntimeOfflineSurfacesProxyError(t *testing.T) {
 	proxy := &fakeControlPanelStrategyProxy{
 		statusErr: status.Error(codes.Unavailable, "runtime stream disconnected"),
 	}
@@ -573,13 +420,11 @@ func TestStatus_FlagOn_RuntimeOfflineSurfacesProxyError(t *testing.T) {
 		}},
 	}
 	s := &server{
-		accounts:                 accounts,
-		controlPanel:             resolver,
-		cpRuntime:                proxy,
-		controlPanelRouteFeature: true,
-		runtimeDialer:            newRuntimeDialer(),
-		jwtSecret:                []byte("s"),
-		corsOrigins:              []string{"*"},
+		accounts:     accounts,
+		controlPanel: resolver,
+		cpRuntime:    proxy,
+		jwtSecret:    []byte("s"),
+		corsOrigins:  []string{"*"},
 	}
 	req := withUID(httptest.NewRequest(http.MethodGet,
 		"/api/strategy-sessions/sess_abc", nil), 42)
@@ -597,7 +442,7 @@ func TestStatus_FlagOn_RuntimeOfflineSurfacesProxyError(t *testing.T) {
 	}
 }
 
-func TestStatus_FlagOn_UsesSessionRuntimeID(t *testing.T) {
+func TestStatus_UsesSessionRuntimeID(t *testing.T) {
 	proxy := &fakeControlPanelStrategyProxy{}
 	resolver := &fakeResolver{
 		resolveByIDResp: controlpanel.Route{
@@ -616,13 +461,11 @@ func TestStatus_FlagOn_UsesSessionRuntimeID(t *testing.T) {
 		}},
 	}
 	s := &server{
-		accounts:                 accounts,
-		controlPanel:             resolver,
-		cpRuntime:                proxy,
-		controlPanelRouteFeature: true,
-		runtimeDialer:            newRuntimeDialer(),
-		jwtSecret:                []byte("s"),
-		corsOrigins:              []string{"*"},
+		accounts:     accounts,
+		controlPanel: resolver,
+		cpRuntime:    proxy,
+		jwtSecret:    []byte("s"),
+		corsOrigins:  []string{"*"},
 	}
 	req := withUID(httptest.NewRequest(http.MethodGet, "/api/strategy-sessions/sess_abc", nil), 42)
 	rec := httptest.NewRecorder()
@@ -639,23 +482,21 @@ func TestStatus_FlagOn_UsesSessionRuntimeID(t *testing.T) {
 	}
 }
 
-func TestStatus_FlagOn_UnboundSessionFailsExplicitly(t *testing.T) {
+func TestStatus_UnboundSessionFailsExplicitly(t *testing.T) {
 	resolver := &fakeResolver{}
 	accounts := &fakeSessionAccountsClient{
 		getSessionResp: &accountv1.GetSessionResponse{Session: &accountv1.StrategySessionEntry{
-			SessionId: "sess_legacy",
+			SessionId: "sess_unbound",
 			UserId:    42,
 		}},
 	}
 	s := &server{
-		accounts:                 accounts,
-		controlPanel:             resolver,
-		controlPanelRouteFeature: true,
-		runtimeDialer:            newRuntimeDialer(),
-		jwtSecret:                []byte("s"),
-		corsOrigins:              []string{"*"},
+		accounts:     accounts,
+		controlPanel: resolver,
+		jwtSecret:    []byte("s"),
+		corsOrigins:  []string{"*"},
 	}
-	req := withUID(httptest.NewRequest(http.MethodGet, "/api/strategy-sessions/sess_legacy", nil), 42)
+	req := withUID(httptest.NewRequest(http.MethodGet, "/api/strategy-sessions/sess_unbound", nil), 42)
 	rec := httptest.NewRecorder()
 	s.handleStrategySession(rec, req)
 
@@ -667,8 +508,7 @@ func TestStatus_FlagOn_UnboundSessionFailsExplicitly(t *testing.T) {
 	}
 }
 
-func TestRunStrategy_FlagOn_HostedUsesControlPanelProxy(t *testing.T) {
-	legacy := &callerTokenObservingClient{}
+func TestRunStrategy_HostedUsesControlPanelProxy(t *testing.T) {
 	proxy := &fakeControlPanelStrategyProxy{}
 	resolver := &fakeResolver{
 		resolveByIDResp: controlpanel.Route{
@@ -680,13 +520,10 @@ func TestRunStrategy_FlagOn_HostedUsesControlPanelProxy(t *testing.T) {
 		},
 	}
 	s := &server{
-		strategy:                 legacy,
-		controlPanel:             resolver,
-		cpRuntime:                proxy,
-		controlPanelRouteFeature: true,
-		runtimeDialer:            newRuntimeDialer(),
-		jwtSecret:                []byte("s"),
-		corsOrigins:              []string{"*"},
+		controlPanel: resolver,
+		cpRuntime:    proxy,
+		jwtSecret:    []byte("s"),
+		corsOrigins:  []string{"*"},
 	}
 
 	req := withUID(httptest.NewRequest(http.MethodPost,
@@ -703,9 +540,6 @@ func TestRunStrategy_FlagOn_HostedUsesControlPanelProxy(t *testing.T) {
 	if proxy.runReq.GetRuntimeId() != "rt_hosted" || proxy.runReq.GetUserId() != 42 {
 		t.Fatalf("proxy request = %+v, want runtime/user rt_hosted/42", proxy.runReq)
 	}
-	if legacy.runReq != nil {
-		t.Fatal("legacy/direct strategy client was called for hosted route")
-	}
 	if resolver.ensureCalls != 0 {
 		t.Fatalf("EnsureHostedRuntime calls = %d, want 0 for healthy hosted route", resolver.ensureCalls)
 	}
@@ -714,11 +548,10 @@ func TestRunStrategy_FlagOn_HostedUsesControlPanelProxy(t *testing.T) {
 func TestResolveStrategyRuntime_EnsureRequiresRuntimeID(t *testing.T) {
 	resolver := &fakeResolver{}
 	s := &server{
-		controlPanel:  resolver,
-		runtimeDialer: newRuntimeDialer(),
+		controlPanel: resolver,
 	}
 	rec := httptest.NewRecorder()
-	cli, _, _ := s.resolveStrategyRuntime(context.Background(), rec, 42, routeEnsure, "", defaultStrategyRoutePolicy())
+	cli, _ := s.resolveStrategyRuntime(context.Background(), rec, 42, routeEnsure, "", defaultStrategyRoutePolicy())
 	if cli != nil {
 		t.Fatal("client returned without runtime_id")
 	}
@@ -735,11 +568,10 @@ func TestResolveStrategyRuntime_RouteByIDErrorDoesNotProvisionHosted(t *testing.
 		resolveByIDErr: status.Error(codes.FailedPrecondition, "runtime unhealthy"),
 	}
 	s := &server{
-		controlPanel:  resolver,
-		runtimeDialer: newRuntimeDialer(),
+		controlPanel: resolver,
 	}
 	rec := httptest.NewRecorder()
-	cli, _, _ := s.resolveStrategyRuntime(context.Background(), rec, 42, routeEnsure, "rt_unhealthy", defaultStrategyRoutePolicy())
+	cli, _ := s.resolveStrategyRuntime(context.Background(), rec, 42, routeEnsure, "rt_unhealthy", defaultStrategyRoutePolicy())
 	if cli != nil {
 		t.Fatal("client returned; route error must fail closed")
 	}
@@ -751,91 +583,52 @@ func TestResolveStrategyRuntime_RouteByIDErrorDoesNotProvisionHosted(t *testing.
 	}
 }
 
-// ─────────────────────────────────────────────────────────────────────
-// 6.1 / 6.3 routing: feature flag off keeps legacy path unchanged
-// ─────────────────────────────────────────────────────────────────────
-
-// TestRunStrategy_FlagOff_UsesLegacyClient: feature flag off → handler
-// calls s.strategy.RunStrategy as before. Asserts no regression for
-// pre-cutover deployments.
-func TestRunStrategy_FlagOff_UsesLegacyClient(t *testing.T) {
-	legacy := &callerTokenObservingClient{}
+func TestRunStrategyWithoutRuntimeIDRejectsInsteadOfUsingLegacyClient(t *testing.T) {
 	resolver := &fakeResolver{}
 	s := &server{
-		strategy:                 legacy,
-		controlPanel:             resolver,
-		controlPanelRouteFeature: false,
-		runtimeDialer:            newRuntimeDialer(),
-		jwtSecret:                []byte("s"),
-		corsOrigins:              []string{"*"},
+		controlPanel: resolver,
+		jwtSecret:    []byte("s"),
+		corsOrigins:  []string{"*"},
 	}
 	req := withUID(httptest.NewRequest(http.MethodPost,
 		"/api/accounts/7/run-strategy", bytes.NewBufferString(`{"start_time_ms":0,"end_time_ms":0}`)), 42)
 	rec := httptest.NewRecorder()
 	s.handleRunStrategy(rec, req, 7)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-	}
-	if legacy.runReq == nil {
-		t.Fatal("legacy strategy.RunStrategy was NOT called; feature-off should use legacy path")
-	}
-	if legacy.runReq.GetUserId() != 42 {
-		t.Errorf("user_id = %d, want 42", legacy.runReq.GetUserId())
-	}
-	if resolver.ensureCalls != 0 {
-		t.Errorf("EnsureHostedRuntime calls = %d, want 0 (feature flag off)", resolver.ensureCalls)
-	}
-	// Caller token MUST NOT be attached on the legacy path.
-	if vals := legacy.receivedMD.Get(callerTokenMetadataKey); len(vals) != 0 {
-		t.Errorf("legacy path should not attach caller-token metadata; got %v", vals)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
 	}
 }
 
-// TestStop_FlagOff_UsesLegacyClient mirrors the run path for stop.
-func TestStop_FlagOff_UsesLegacyClient(t *testing.T) {
-	legacy := &callerTokenObservingClient{}
+func TestStopWithoutRuntimeBindingRejectsInsteadOfUsingLegacyClient(t *testing.T) {
 	s := &server{
-		strategy:                 legacy,
-		controlPanel:             controlpanel.Disabled(),
-		controlPanelRouteFeature: false,
-		runtimeDialer:            newRuntimeDialer(),
-		jwtSecret:                []byte("s"),
-		corsOrigins:              []string{"*"},
+		controlPanel: controlpanel.Disabled(),
+		jwtSecret:    []byte("s"),
+		corsOrigins:  []string{"*"},
 	}
 	req := withUID(httptest.NewRequest(http.MethodPost,
 		"/api/strategy-sessions/sess_abc/stop", bytes.NewBufferString(`{}`)), 42)
 	rec := httptest.NewRecorder()
 	s.handleStrategySession(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-	}
-	if legacy.stopReq == nil {
-		t.Fatal("legacy StopStrategy was NOT called")
-	}
-	if legacy.stopReq.GetSessionId() != "sess_abc" {
-		t.Errorf("session_id = %q, want sess_abc", legacy.stopReq.GetSessionId())
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503; body=%s", rec.Code, rec.Body.String())
 	}
 }
 
-// TestStop_FlagOn_UsesResolveNotEnsure: stop must NOT lazily provision
+// TestStop_UsesResolveNotEnsure: stop must NOT lazily provision
 // a runtime — it goes through ResolveRoute (read-only). If the user's
 // runtime is gone, the stop returns the gRPC error from control panel,
 // not a fresh runtime.
-func TestStop_FlagOn_UsesResolveNotEnsure(t *testing.T) {
-	legacy := &callerTokenObservingClient{}
+func TestStop_UsesResolveNotEnsure(t *testing.T) {
 	resolver := &fakeResolver{
 		err: status.Error(codes.NotFound, "no runtime"),
 	}
 	s := &server{
-		strategy:                 legacy,
-		accounts:                 &fakeSessionAccountsClient{},
-		controlPanel:             resolver,
-		controlPanelRouteFeature: true,
-		runtimeDialer:            newRuntimeDialer(),
-		jwtSecret:                []byte("s"),
-		corsOrigins:              []string{"*"},
+		accounts:     &fakeSessionAccountsClient{},
+		controlPanel: resolver,
+		jwtSecret:    []byte("s"),
+		corsOrigins:  []string{"*"},
 	}
 	req := withUID(httptest.NewRequest(http.MethodPost,
 		"/api/strategy-sessions/sess_abc/stop", bytes.NewBufferString(`{}`)), 42)
@@ -851,12 +644,9 @@ func TestStop_FlagOn_UsesResolveNotEnsure(t *testing.T) {
 	if resolver.ensureCalls != 0 {
 		t.Errorf("EnsureHostedRuntime calls = %d, want 0 (stop must NOT lazily provision)", resolver.ensureCalls)
 	}
-	if legacy.stopReq != nil {
-		t.Error("legacy StopStrategy was called; fail-closed required")
-	}
 }
 
-func TestStop_FlagOn_TerminalSessionDoesNotResolveRuntime(t *testing.T) {
+func TestStop_TerminalSessionDoesNotResolveRuntime(t *testing.T) {
 	proxy := &fakeControlPanelStrategyProxy{}
 	resolver := &fakeResolver{
 		err: status.Error(codes.FailedPrecondition, "runtime ended"),
@@ -870,13 +660,11 @@ func TestStop_FlagOn_TerminalSessionDoesNotResolveRuntime(t *testing.T) {
 		}},
 	}
 	s := &server{
-		accounts:                 accounts,
-		controlPanel:             resolver,
-		cpRuntime:                proxy,
-		controlPanelRouteFeature: true,
-		runtimeDialer:            newRuntimeDialer(),
-		jwtSecret:                []byte("s"),
-		corsOrigins:              []string{"*"},
+		accounts:     accounts,
+		controlPanel: resolver,
+		cpRuntime:    proxy,
+		jwtSecret:    []byte("s"),
+		corsOrigins:  []string{"*"},
 	}
 	req := withUID(httptest.NewRequest(http.MethodPost,
 		"/api/strategy-sessions/sess_abc/stop", bytes.NewBufferString(`{"stop_action":"FINISH"}`)), 42)
@@ -894,7 +682,7 @@ func TestStop_FlagOn_TerminalSessionDoesNotResolveRuntime(t *testing.T) {
 	}
 }
 
-func TestStop_FlagOn_UsesSessionRuntimeID(t *testing.T) {
+func TestStop_UsesSessionRuntimeID(t *testing.T) {
 	proxy := &fakeControlPanelStrategyProxy{}
 	resolver := &fakeResolver{
 		resolveByIDResp: controlpanel.Route{
@@ -911,13 +699,11 @@ func TestStop_FlagOn_UsesSessionRuntimeID(t *testing.T) {
 		}},
 	}
 	s := &server{
-		accounts:                 accounts,
-		controlPanel:             resolver,
-		cpRuntime:                proxy,
-		controlPanelRouteFeature: true,
-		runtimeDialer:            newRuntimeDialer(),
-		jwtSecret:                []byte("s"),
-		corsOrigins:              []string{"*"},
+		accounts:     accounts,
+		controlPanel: resolver,
+		cpRuntime:    proxy,
+		jwtSecret:    []byte("s"),
+		corsOrigins:  []string{"*"},
 	}
 	req := withUID(httptest.NewRequest(http.MethodPost,
 		"/api/strategy-sessions/sess_abc/stop", bytes.NewBufferString(`{}`)), 42)

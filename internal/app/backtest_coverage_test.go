@@ -9,6 +9,7 @@ import (
 	"time"
 
 	mdv1 "github.com/hushine-tech/control-panel-service/gen/marketdatav1"
+	"github.com/hushine-tech/quant-handler/internal/controlpanel"
 	strategyv1 "github.com/hushine-tech/strategy-service/gen/strategyv1"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -48,25 +49,30 @@ func TestMarketDataCoverageRoute(t *testing.T) {
 }
 
 func TestCoveragePreviewUsesDeclaredInputs(t *testing.T) {
-	body := bytes.NewBufferString(`{"start_time_ms":1779033600000,"end_time_ms":1779037200000}`)
+	body := bytes.NewBufferString(`{"runtime_id":"rt-coverage","start_time_ms":1779033600000,"end_time_ms":1779037200000}`)
 	req := withUID(httptest.NewRequest(http.MethodPost, "/api/accounts/7/strategy/coverage-preview", body), 6)
 	rec := httptest.NewRecorder()
+	proxy := &fakeControlPanelStrategyProxy{previewResp: &strategyv1.PreviewRunStrategyResponse{
+		Profile:   "backtest",
+		Supported: true,
+		Ok:        true,
+		DeclaredInputs: []*strategyv1.LiveStreamBinding{{
+			Exchange: "binance",
+			Market:   "perpetual_futures",
+			Kind:     "kline",
+			Symbol:   "ETHUSDT",
+			Interval: "1m",
+		}},
+	}}
 	s := &server{
 		jwtSecret:   []byte("s"),
 		corsOrigins: []string{"*"},
 		marketData:  &fakeMarketDataClient{},
-		strategy: &fakeStrategyClient{previewResp: &strategyv1.PreviewRunStrategyResponse{
-			Profile:   "backtest",
-			Supported: true,
-			Ok:        true,
-			DeclaredInputs: []*strategyv1.LiveStreamBinding{{
-				Exchange: "binance",
-				Market:   "perpetual_futures",
-				Kind:     "kline",
-				Symbol:   "ETHUSDT",
-				Interval: "1m",
-			}},
-		}},
+		controlPanel: &fakeResolver{
+			resp:        controlpanel.Route{RuntimeID: "rt-coverage"},
+			runtimeResp: controlpanel.Runtime{RuntimeID: "rt-coverage", Role: "executor"},
+		},
+		cpRuntime: proxy,
 	}
 
 	s.handleCoveragePreview(rec, req, 7)
@@ -96,7 +102,7 @@ func TestDownloadAndRunCreatesJob(t *testing.T) {
 	fakeMarket := &fakeMarketDataClient{
 		coverageResp: &mdv1CoverageComplete,
 	}
-	fakeStrategy := &fakeStrategyClient{previewResp: &strategyv1.PreviewRunStrategyResponse{
+	proxy := &fakeControlPanelStrategyProxy{previewResp: &strategyv1.PreviewRunStrategyResponse{
 		Profile:   "backtest",
 		Supported: true,
 		Ok:        true,
@@ -105,14 +111,18 @@ func TestDownloadAndRunCreatesJob(t *testing.T) {
 		}},
 	}}
 	s := &server{
-		jwtSecret:       []byte("s"),
-		corsOrigins:     []string{"*"},
-		marketData:      fakeMarket,
-		strategy:        fakeStrategy,
+		jwtSecret:   []byte("s"),
+		corsOrigins: []string{"*"},
+		marketData:  fakeMarket,
+		controlPanel: &fakeResolver{
+			resp:        controlpanel.Route{RuntimeID: "rt-download"},
+			runtimeResp: controlpanel.Runtime{RuntimeID: "rt-download", Role: "executor"},
+		},
+		cpRuntime:       proxy,
 		downloadRunJobs: newDownloadRunJobStore(),
 	}
 
-	body := bytes.NewBufferString(`{"start_time_ms":1779033600000,"end_time_ms":1779037200000,"interval":"1m"}`)
+	body := bytes.NewBufferString(`{"runtime_id":"rt-download","start_time_ms":1779033600000,"end_time_ms":1779037200000,"interval":"1m"}`)
 	req := withUID(httptest.NewRequest(http.MethodPost, "/api/accounts/7/strategy/download-and-run", body), 6)
 	rec := httptest.NewRecorder()
 

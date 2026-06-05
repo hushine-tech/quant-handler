@@ -8,8 +8,6 @@ import (
 	"testing"
 
 	"github.com/hushine-tech/quant-handler/internal/controlpanel"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 // fakeResolver is a stub controlpanel.Resolver. It records the last call
@@ -136,42 +134,14 @@ func (f *fakeResolver) EnsureHostedRuntime(_ context.Context, userID int64, name
 	return f.ensureResp, f.ensureErr
 }
 
-// TestRuntimeRoute_FeatureFlagOffReturns404 proves the default D1a posture:
-// even with a healthy control-panel client wired in, the shadow endpoint is
-// NOT advertised unless the operator flips the flag. This is what protects
-// the existing fixed STRATEGY_SERVICE_GRPC_ADDR call path.
-func TestRuntimeRoute_FeatureFlagOffReturns404(t *testing.T) {
+func TestRuntimeRouteByNameReturnsGone(t *testing.T) {
 	resolver := &fakeResolver{
 		resp: controlpanel.Route{RuntimeID: "rt_x", GRPCEndpoint: "10.0.0.1:50053"},
 	}
 	s := &server{
-		controlPanel:             resolver,
-		controlPanelRouteFeature: false,
-		jwtSecret:                []byte("s"),
-		corsOrigins:              []string{"*"},
-	}
-	req := withUID(httptest.NewRequest(http.MethodGet, "/api/_debug/runtime-route", nil), 42)
-	rec := httptest.NewRecorder()
-
-	s.handleResolveRuntimeRoute(rec, req)
-
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404 (feature flag off); body=%s", rec.Code, rec.Body.String())
-	}
-	if resolver.gotUserID != 0 {
-		t.Errorf("ResolveRoute should not have been called when feature flag is off, got user_id=%d", resolver.gotUserID)
-	}
-}
-
-// TestRuntimeRoute_FeatureFlagOnReturnsGone preserves the debug endpoint
-// shape while documenting that name-based routing has been removed.
-func TestRuntimeRoute_FeatureFlagOnReturnsGone(t *testing.T) {
-	resolver := &fakeResolver{}
-	s := &server{
-		controlPanel:             resolver,
-		controlPanelRouteFeature: true,
-		jwtSecret:                []byte("s"),
-		corsOrigins:              []string{"*"},
+		controlPanel: resolver,
+		jwtSecret:    []byte("s"),
+		corsOrigins:  []string{"*"},
 	}
 	req := withUID(httptest.NewRequest(http.MethodGet, "/api/_debug/runtime-route", nil), 42)
 	rec := httptest.NewRecorder()
@@ -189,55 +159,13 @@ func TestRuntimeRoute_FeatureFlagOnReturnsGone(t *testing.T) {
 	}
 }
 
-func TestRuntimeRoute_FeatureFlagOnButDisabledClientReturnsGone(t *testing.T) {
-	s := &server{
-		controlPanel:             controlpanel.Disabled(),
-		controlPanelRouteFeature: true,
-		jwtSecret:                []byte("s"),
-		corsOrigins:              []string{"*"},
-	}
-	req := withUID(httptest.NewRequest(http.MethodGet, "/api/_debug/runtime-route", nil), 42)
-	rec := httptest.NewRecorder()
-
-	s.handleResolveRuntimeRoute(rec, req)
-
-	if rec.Code != http.StatusGone {
-		t.Fatalf("status = %d, want 410; body=%s", rec.Code, rec.Body.String())
-	}
-}
-
-// TestRuntimeRoute_GRPCFailedPreconditionMapsTo412 confirms fail-closed
-// errors from control-panel-service (NotFound / FailedPrecondition / etc.)
-// get mapped through grpcToHTTP rather than swallowed. This is the
-// no-silent-fallback property the section 6 cutover will rely on.
-func TestRuntimeRoute_GRPCFailedPreconditionMapsTo412(t *testing.T) {
-	resolver := &fakeResolver{
-		err: status.Error(codes.FailedPrecondition, "runtime unhealthy"),
-	}
-	s := &server{
-		controlPanel:             resolver,
-		controlPanelRouteFeature: true,
-		jwtSecret:                []byte("s"),
-		corsOrigins:              []string{"*"},
-	}
-	req := withUID(httptest.NewRequest(http.MethodGet, "/api/_debug/runtime-route", nil), 42)
-	rec := httptest.NewRecorder()
-
-	s.handleResolveRuntimeRoute(rec, req)
-
-	if rec.Code != http.StatusGone {
-		t.Fatalf("status = %d, want 410; body=%s", rec.Code, rec.Body.String())
-	}
-}
-
 // TestRuntimeRoute_MethodNotAllowed proves only GET is accepted, since the
-// shadow endpoint is read-only.
+// removal endpoint is read-only.
 func TestRuntimeRoute_MethodNotAllowed(t *testing.T) {
 	s := &server{
-		controlPanel:             controlpanel.Disabled(),
-		controlPanelRouteFeature: true,
-		jwtSecret:                []byte("s"),
-		corsOrigins:              []string{"*"},
+		controlPanel: controlpanel.Disabled(),
+		jwtSecret:    []byte("s"),
+		corsOrigins:  []string{"*"},
 	}
 	req := withUID(httptest.NewRequest(http.MethodPost, "/api/_debug/runtime-route", nil), 42)
 	rec := httptest.NewRecorder()
@@ -246,22 +174,5 @@ func TestRuntimeRoute_MethodNotAllowed(t *testing.T) {
 
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("status = %d, want 405", rec.Code)
-	}
-}
-
-func TestRuntimeRoute_MissingUserContextReturnsGone(t *testing.T) {
-	s := &server{
-		controlPanel:             controlpanel.Disabled(),
-		controlPanelRouteFeature: true,
-		jwtSecret:                []byte("s"),
-		corsOrigins:              []string{"*"},
-	}
-	req := httptest.NewRequest(http.MethodGet, "/api/_debug/runtime-route", nil)
-	rec := httptest.NewRecorder()
-
-	s.handleResolveRuntimeRoute(rec, req)
-
-	if rec.Code != http.StatusGone {
-		t.Fatalf("status = %d, want 410", rec.Code)
 	}
 }

@@ -13,15 +13,9 @@ import (
 )
 
 type createAccountBodyExt struct {
-	Name           string          `json:"name"`
-	Description    string          `json:"description"`
-	Environment    int32           `json:"environment"`
-	Mode           *int32          `json:"mode"`
-	APIKey         string          `json:"api_key"`
-	APISecret      string          `json:"api_secret"`
-	InitialBalance *float64        `json:"initial_balance"`
-	Spot           json.RawMessage `json:"spot"`
-	Futures        json.RawMessage `json:"futures"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Environment int32  `json:"environment"`
 }
 
 func (s *server) handleSymbols(w http.ResponseWriter, r *http.Request) {
@@ -569,59 +563,19 @@ func protoFuturesToJSON(fw *accountv1.FuturesWallet) any {
 	return out
 }
 
-// decodeCreateAccountBody accepts account metadata. Venue and wallet payloads
-// are rejected below so account creation cannot bypass the venue model.
+// decodeCreateAccountBody accepts account metadata only. Credentials and wallet
+// payloads belong to venues, so unknown JSON fields fail closed here.
 func decodeCreateAccountBody(r *http.Request) (createAccountBodyExt, error) {
 	var body createAccountBodyExt
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&body); err != nil {
 		return body, err
 	}
 	return body, nil
 }
 
-func jsonFieldPresent(raw json.RawMessage) bool {
-	value := strings.TrimSpace(string(raw))
-	return value != "" && value != "null"
-}
-
-func deprecatedAccountRuntimePayloadError(body createAccountBodyExt) string {
-	if body.Mode != nil {
-		return "account mode is deprecated; use environment"
-	}
-	if strings.TrimSpace(body.APIKey) != "" || strings.TrimSpace(body.APISecret) != "" {
-		return "account credentials must be configured on venues"
-	}
-	if accountEnvironmentFromBody(body) != 0 && (body.InitialBalance != nil || jsonFieldPresent(body.Spot) || jsonFieldPresent(body.Futures)) {
-		return "account wallet bootstrap is only supported for backtest compatibility"
-	}
-	return ""
-}
-
-func accountWalletBootstrapProvided(body createAccountBodyExt) bool {
-	return body.InitialBalance != nil || jsonFieldPresent(body.Spot) || jsonFieldPresent(body.Futures)
-}
-
-func buildAccountWalletBootstrap(body createAccountBodyExt) (walletBootstrap, error) {
-	var spot *spotIn
-	if jsonFieldPresent(body.Spot) {
-		var parsed spotIn
-		if err := json.Unmarshal(body.Spot, &parsed); err != nil {
-			return walletBootstrap{}, err
-		}
-		spot = &parsed
-	}
-	var futures *futIn
-	if jsonFieldPresent(body.Futures) {
-		var parsed futIn
-		if err := json.Unmarshal(body.Futures, &parsed); err != nil {
-			return walletBootstrap{}, err
-		}
-		futures = &parsed
-	}
-	return buildWalletBootstrap(spot, futures, body.InitialBalance), nil
-}
-
-func (s *server) createAccountWithBootstrap(w http.ResponseWriter, r *http.Request) {
+func (s *server) createAccount(w http.ResponseWriter, r *http.Request) {
 	body, err := decodeCreateAccountBody(r)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid JSON")
@@ -629,10 +583,6 @@ func (s *server) createAccountWithBootstrap(w http.ResponseWriter, r *http.Reque
 	}
 	if strings.TrimSpace(body.Name) == "" {
 		writeErr(w, http.StatusBadRequest, "name is required")
-		return
-	}
-	if msg := deprecatedAccountRuntimePayloadError(body); msg != "" {
-		writeErr(w, http.StatusBadRequest, msg)
 		return
 	}
 	ctx := r.Context()
@@ -652,25 +602,6 @@ func (s *server) createAccountWithBootstrap(w http.ResponseWriter, r *http.Reque
 		code, msg := grpcToHTTP(err)
 		writeErr(w, code, msg)
 		return
-	}
-	if environment == 0 && accountWalletBootstrapProvided(body) {
-		bootstrap, err := buildAccountWalletBootstrap(body)
-		if err != nil {
-			writeErr(w, http.StatusBadRequest, "account wallet bootstrap must be JSON serializable")
-			return
-		}
-		if _, err := s.accounts.UpdateAccountWalletState(ctx, &accountv1.UpdateAccountWalletStateRequest{
-			AccountId:        resp.GetAccountId(),
-			Futures:          bootstrap.Futures,
-			Spot:             bootstrap.Spot,
-			TotalValue:       bootstrap.TotalValue,
-			WalletBalance:    bootstrap.WalletBalance,
-			AvailableBalance: bootstrap.AvailableBalance,
-		}); err != nil {
-			code, msg := grpcToHTTP(err)
-			writeErr(w, code, "account created, but default venue wallet bootstrap failed: "+msg)
-			return
-		}
 	}
 
 	writeJSON(w, http.StatusCreated, accountJSON{

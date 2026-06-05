@@ -21,7 +21,6 @@ import (
 	"github.com/hushine-tech/quant-handler/internal/config"
 	"github.com/hushine-tech/quant-handler/internal/controlpanel"
 	"github.com/hushine-tech/quant-handler/internal/logger"
-	strategyv1 "github.com/hushine-tech/strategy-service/gen/strategyv1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -61,18 +60,6 @@ func Run(cfg *config.Config) error {
 
 	cli := accountv1.NewAccountServiceClient(conn)
 
-	// strategy-service（可选）
-	var strategyCli strategyv1.StrategyServiceClient
-	if strategyAddr := cfg.Dependencies.StrategyServiceGRPC; strategyAddr != "" {
-		stratConn, err := grpc.DialContext(ctx, strategyAddr, dialOpts...)
-		if err != nil {
-			logger.Info(ctx, "system", fmt.Sprintf("strategy-service dial failed: %v (strategy endpoints disabled)", err))
-		} else {
-			strategyCli = strategyv1.NewStrategyServiceClient(stratConn)
-			logger.Info(ctx, "system", fmt.Sprintf("strategy-service → %s", strategyAddr))
-		}
-	}
-
 	// order.v1 API（可选，当前由 core-service gRPC 端口提供）
 	var orderCli orderv1.OrderServiceClient
 	if orderAddr := cfg.Dependencies.OrderServiceGRPC; orderAddr != "" {
@@ -85,23 +72,23 @@ func Run(cfg *config.Config) error {
 		}
 	}
 
-	// control-panel-service: D1a route resolution + D2 market-data control plane.
-	// Market-data RPCs are mandatory once D2 lands; if the dial fails the
-	// market-data endpoints fail-closed at request time.
-	var controlPanel controlpanel.Resolver = controlpanel.Disabled()
+	// control-panel-service owns runtime routing, hosted runtime provisioning,
+	// RuntimeChannel strategy proxying, runtime credentials, and market-data.
+	if cfg.Dependencies.ControlPanelServiceGRPC == "" {
+		return errors.New("dependencies.control_panel_service_grpc is required")
+	}
+	var controlPanel controlpanel.Resolver
 	var marketDataCli mdv1.MarketDataControlPlaneServiceClient
 	var cpRuntimeCli controlpanelv1.ControlPanelServiceClient
-	if cpAddr := cfg.Dependencies.ControlPanelServiceGRPC; cpAddr != "" {
-		cpConn, err := grpc.DialContext(ctx, cpAddr, dialOpts...)
-		if err != nil {
-			logger.Info(ctx, "system", fmt.Sprintf("control-panel-service dial failed: %v (route resolution + market-data disabled)", err))
-		} else {
-			controlPanel = controlpanel.NewClient(controlpanelv1.NewControlPanelServiceClient(cpConn))
-			marketDataCli = mdv1.NewMarketDataControlPlaneServiceClient(cpConn)
-			cpRuntimeCli = controlpanelv1.NewControlPanelServiceClient(cpConn)
-			logger.Info(ctx, "system", fmt.Sprintf("control-panel-service → %s (feature flag=%t, market-data=on, credentials=on)", cpAddr, cfg.Features.ControlPanelRouteResolution))
-		}
+	cpAddr := cfg.Dependencies.ControlPanelServiceGRPC
+	cpConn, err := grpc.DialContext(ctx, cpAddr, dialOpts...)
+	if err != nil {
+		return fmt.Errorf("control-panel-service grpc dial %q: %w", cpAddr, err)
 	}
+	controlPanel = controlpanel.NewClient(controlpanelv1.NewControlPanelServiceClient(cpConn))
+	marketDataCli = mdv1.NewMarketDataControlPlaneServiceClient(cpConn)
+	cpRuntimeCli = controlpanelv1.NewControlPanelServiceClient(cpConn)
+	logger.Info(ctx, "system", fmt.Sprintf("control-panel-service → %s (runtime-proxy=on, market-data=on, credentials=on)", cpAddr))
 
 	corsOrigins := cfg.Auth.CORSOrigins
 	if len(corsOrigins) == 0 {
@@ -109,17 +96,14 @@ func Run(cfg *config.Config) error {
 	}
 
 	s := &server{
-		accounts:                 cli,
-		strategy:                 strategyCli,
-		orders:                   orderCli,
-		controlPanel:             controlPanel,
-		cpRuntime:                cpRuntimeCli,
-		marketData:               marketDataCli,
-		controlPanelRouteFeature: cfg.Features.ControlPanelRouteResolution,
-		runtimeDialer:            newRuntimeDialer(defaultRuntimeDialOptions()...),
-		downloadRunJobs:          newDownloadRunJobStore(),
-		jwtSecret:                []byte(jwtSecret),
-		corsOrigins:              corsOrigins,
+		accounts:        cli,
+		orders:          orderCli,
+		controlPanel:    controlPanel,
+		cpRuntime:       cpRuntimeCli,
+		marketData:      marketDataCli,
+		downloadRunJobs: newDownloadRunJobStore(),
+		jwtSecret:       []byte(jwtSecret),
+		corsOrigins:     corsOrigins,
 	}
 
 	mux := http.NewServeMux()
@@ -165,17 +149,14 @@ func Run(cfg *config.Config) error {
 }
 
 type server struct {
-	accounts                 accountv1.AccountServiceClient
-	strategy                 strategyv1.StrategyServiceClient         // nil if not configured
-	orders                   orderv1.OrderServiceClient               // nil if not configured
-	controlPanel             controlpanel.Resolver                    // never nil; Disabled() when not configured
-	cpRuntime                controlpanelv1.ControlPanelServiceClient // Phase D3: direct gRPC client for credential RPCs; nil if CP not configured
-	marketData               mdv1.MarketDataControlPlaneServiceClient // Phase D2: market-data control plane on control-panel-service
-	controlPanelRouteFeature bool                                     // gates /api/_debug/runtime-route AND section-6 strategy cutover
-	runtimeDialer            *runtimeDialer                           // dial cache for strategy-runtime endpoints (D1 section 6)
-	downloadRunJobs          *downloadRunJobStore
-	jwtSecret                []byte
-	corsOrigins              []string
+	accounts        accountv1.AccountServiceClient
+	orders          orderv1.OrderServiceClient // nil if not configured
+	controlPanel    controlpanel.Resolver
+	cpRuntime       controlpanelv1.ControlPanelServiceClient // Phase D3: direct gRPC client for credential RPCs; nil if CP not configured
+	marketData      mdv1.MarketDataControlPlaneServiceClient // Phase D2: market-data control plane on control-panel-service
+	downloadRunJobs *downloadRunJobStore
+	jwtSecret       []byte
+	corsOrigins     []string
 }
 
 type authContextKey string
@@ -363,7 +344,7 @@ func (s *server) handleAccountsCollection() http.Handler {
 		case http.MethodGet:
 			s.listAccounts(w, r)
 		case http.MethodPost:
-			s.createAccountWithBootstrap(w, r)
+			s.createAccount(w, r)
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}

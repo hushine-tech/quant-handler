@@ -3,80 +3,16 @@ package app
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
-	"sync"
-	"time"
 
-	grpcclientmw "github.com/hushine-tech/golang-lib/middleware/grpcclient"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
 	controlpanelv1 "github.com/hushine-tech/control-panel-service/gen/controlpanelv1"
 	"github.com/hushine-tech/quant-handler/internal/controlpanel"
-	"github.com/hushine-tech/quant-handler/internal/logger"
 	strategyv1 "github.com/hushine-tech/strategy-service/gen/strategyv1"
 )
-
-// callerTokenMetadataKey is retained for the legacy direct-dial path when
-// control-panel routing is disabled. RuntimeChannel proxy routing does not
-// attach caller_token to strategy RPCs.
-const callerTokenMetadataKey = "x-caller-token"
-
-// runtimeDialer keeps a process-lifetime cache of legacy gRPC connections
-// keyed by `host:port`.
-//
-// Connection eviction: D1 keeps connections forever; if a runtime is
-// ended or moved, the next call to its endpoint hangs/fails and the
-// caller surfaces the error. D3's control-plane proxy makes this cache
-// obsolete. For D1 a simple map is enough.
-type runtimeDialer struct {
-	mu          sync.Mutex
-	conns       map[string]*grpc.ClientConn
-	dialOptions []grpc.DialOption
-}
-
-func newRuntimeDialer(opts ...grpc.DialOption) *runtimeDialer {
-	return &runtimeDialer{
-		conns:       make(map[string]*grpc.ClientConn),
-		dialOptions: opts,
-	}
-}
-
-// Dial returns a strategy-service client backed by a cached connection
-// to `endpoint`. Empty endpoint is rejected.
-func (d *runtimeDialer) Dial(ctx context.Context, endpoint string) (strategyv1.StrategyServiceClient, error) {
-	if endpoint == "" {
-		return nil, errors.New("runtime endpoint is empty")
-	}
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	if conn, ok := d.conns[endpoint]; ok {
-		return strategyv1.NewStrategyServiceClient(conn), nil
-	}
-	dialCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	conn, err := grpc.DialContext(dialCtx, endpoint, d.dialOptions...)
-	if err != nil {
-		return nil, fmt.Errorf("dial runtime %q: %w", endpoint, err)
-	}
-	d.conns[endpoint] = conn
-	return strategyv1.NewStrategyServiceClient(conn), nil
-}
-
-// Close shuts down all cached connections. Used by graceful shutdown
-// in main; not exercised by tests.
-func (d *runtimeDialer) Close() {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	for _, c := range d.conns {
-		_ = c.Close()
-	}
-	d.conns = make(map[string]*grpc.ClientConn)
-}
 
 type controlPanelStrategyClient struct {
 	rpc controlpanelv1.ControlPanelServiceClient
@@ -106,20 +42,8 @@ func (c controlPanelStrategyClient) ValidateStrategyCode(ctx context.Context, in
 	return nil, status.Error(codes.Unimplemented, "control-panel proxy does not implement strategy validation")
 }
 
-// defaultRuntimeDialOptions is the dial-option set used by handler when
-// connecting to a strategy-runtime. Matches the existing fixed-address
-// dial so tracing / logging behavior is unchanged.
-func defaultRuntimeDialOptions() []grpc.DialOption {
-	return []grpc.DialOption{
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithUnaryInterceptor(grpcclientmw.UnaryClientInterceptor(logger.Instance())),
-		grpc.WithStreamInterceptor(grpcclientmw.StreamClientInterceptor(logger.Instance())),
-	}
-}
-
 // resolveStrategyRuntime resolves a runtime route via control-panel and returns
-// the control-panel strategy proxy client. Caller MUST already be on the
-// cutover path (feature flag on).
+// the control-panel strategy proxy client.
 //
 // Behavior depends on route resolution:
 //   - routeEnsure  → require runtime_id and call ResolveRuntimeRouteByID.
@@ -129,9 +53,8 @@ func defaultRuntimeDialOptions() []grpc.DialOption {
 //     already exist somewhere).
 //
 // On any failure (control-panel rejection or missing proxy client)
-// writes an HTTP error response and returns nil. Caller MUST bail out
-// without falling back to the legacy fixed dial — that is the section
-// 6.4 fail-closed contract.
+// writes an HTTP error response and returns nil. Caller MUST bail out; the
+// control-panel proxy is the only allowed strategy RPC route.
 type strategyRoutePolicy struct {
 	role        string
 	environment int
@@ -148,44 +71,44 @@ func strategyRoutePolicyForEnvironment(environment int32) strategyRoutePolicy {
 	return strategyRoutePolicy{role: "executor", environment: int(environment)}
 }
 
-func (s *server) resolveStrategyRuntime(ctx context.Context, w http.ResponseWriter, userID int64, resolution strategyRouteResolution, runtimeID string, policy strategyRoutePolicy) (strategyv1.StrategyServiceClient, string, string) {
+func (s *server) resolveStrategyRuntime(ctx context.Context, w http.ResponseWriter, userID int64, resolution strategyRouteResolution, runtimeID string, policy strategyRoutePolicy) (strategyv1.StrategyServiceClient, string) {
 	var err error
 	switch resolution {
 	case routeEnsure:
 		if runtimeID == "" {
 			writeErr(w, http.StatusBadRequest, "runtime selection required")
-			return nil, "", ""
+			return nil, ""
 		}
 		var route controlpanel.Route
 		route, err = s.controlPanel.ResolveRouteByID(ctx, userID, runtimeID, policy.role, policy.environment)
 		if err == nil {
-			return s.controlPanelStrategyProxy(w), "", route.RuntimeID
+			return s.controlPanelStrategyProxy(w), route.RuntimeID
 		}
 	case routeResolve:
 		if runtimeID == "" {
 			writeErr(w, http.StatusConflict, "session is not bound to a runtime")
-			return nil, "", ""
+			return nil, ""
 		}
 		var rt controlpanel.Route
 		rt, err = s.controlPanel.ResolveRouteByID(ctx, userID, runtimeID, policy.role, policy.environment)
 		if err == nil {
-			return s.controlPanelStrategyProxy(w), "", rt.RuntimeID
+			return s.controlPanelStrategyProxy(w), rt.RuntimeID
 		}
 	default:
 		writeErr(w, http.StatusInternalServerError, "internal: unknown strategy route resolution")
-		return nil, "", ""
+		return nil, ""
 	}
 	if err != nil {
 		if errors.Is(err, controlpanel.ErrNotConfigured) {
 			writeErr(w, http.StatusServiceUnavailable, "control-panel-service not configured")
-			return nil, "", ""
+			return nil, ""
 		}
 		code, msg := grpcToHTTP(err)
 		writeErr(w, code, msg)
-		return nil, "", ""
+		return nil, ""
 	}
 	writeErr(w, http.StatusServiceUnavailable, "control-panel-service strategy proxy not configured")
-	return nil, "", ""
+	return nil, ""
 }
 
 func (s *server) controlPanelStrategyProxy(w http.ResponseWriter) strategyv1.StrategyServiceClient {
@@ -204,43 +127,13 @@ const (
 	routeResolve
 )
 
-// strategyClient is the single seam every strategy-session handler uses
-// to obtain a runtime gRPC client. It encapsulates the feature-flag
-// branching:
-//
-//   - features.control_panel_route_resolution = false → return the
-//     legacy fixed-address strategy-service client (s.strategy).
-//   - = true → resolve a runtime via control-panel-service and return the
-//     control-panel strategy proxy client; on any control-panel/proxy failure,
-//     surface the error and return ok=false. **No silent fallback to
-//     the fixed dial when the feature flag is on** — this is the
-//     section 6.4 fail-closed contract.
-//
-// Returns (client, callerToken, ok). When ok=false, an HTTP error has
-// already been written to `w` and the caller MUST return immediately.
-func (s *server) strategyClient(ctx context.Context, w http.ResponseWriter, userID int64, resolution strategyRouteResolution, runtimeID string, policy strategyRoutePolicy) (strategyv1.StrategyServiceClient, string, string, bool) {
-	if s.controlPanelRouteFeature {
-		// Cutover path. Errors surface via writeErr inside
-		// resolveStrategyRuntime; no fallback.
-		cli, token, runtimeID := s.resolveStrategyRuntime(ctx, w, userID, resolution, runtimeID, policy)
-		if cli == nil {
-			return nil, "", "", false
-		}
-		return cli, token, runtimeID, true
+// strategyClient is the single route every strategy-session handler uses to
+// obtain a runtime RPC client. It always resolves runtime_id through
+// control-panel-service and always sends strategy RPCs via RuntimeChannel proxy.
+func (s *server) strategyClient(ctx context.Context, w http.ResponseWriter, userID int64, resolution strategyRouteResolution, runtimeID string, policy strategyRoutePolicy) (strategyv1.StrategyServiceClient, string, bool) {
+	cli, runtimeID := s.resolveStrategyRuntime(ctx, w, userID, resolution, runtimeID, policy)
+	if cli == nil {
+		return nil, "", false
 	}
-	// Legacy path: fixed STRATEGY_SERVICE_GRPC_ADDR dial.
-	if s.strategy == nil {
-		writeErr(w, http.StatusServiceUnavailable, "strategy-service not configured")
-		return nil, "", "", false
-	}
-	return s.strategy, "", "", true
-}
-
-// withCallerToken attaches caller_token only for legacy direct-dial strategy
-// calls. RuntimeChannel proxy calls leave token empty.
-func withCallerToken(ctx context.Context, token string) context.Context {
-	if token == "" {
-		return ctx
-	}
-	return metadata.AppendToOutgoingContext(ctx, callerTokenMetadataKey, token)
+	return cli, runtimeID, true
 }

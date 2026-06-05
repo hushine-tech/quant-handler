@@ -75,9 +75,6 @@ type strategyRouteJSON struct {
 }
 
 func (s *server) strategyRoutePolicyForAccount(ctx context.Context, w http.ResponseWriter, userID int64, accountID int64, runtimeID string) (strategyRoutePolicy, bool) {
-	if !s.controlPanelRouteFeature {
-		return defaultStrategyRoutePolicy(), true
-	}
 	environment := int32(0)
 	if s.accounts != nil {
 		resp, err := s.accounts.GetAccount(ctx, &accountv1.GetAccountRequest{
@@ -101,7 +98,7 @@ func (s *server) strategyRoutePolicyForAccount(ctx context.Context, w http.Respo
 
 func (s *server) strategyRoutePolicyForSelectedRuntime(ctx context.Context, w http.ResponseWriter, userID int64, runtimeID string, environment int32) (strategyRoutePolicy, bool) {
 	policy := strategyRoutePolicyForEnvironment(environment)
-	if !s.controlPanelRouteFeature || environment != 0 || runtimeID == "" {
+	if environment != 0 || runtimeID == "" {
 		return policy, true
 	}
 	runtime, err := s.controlPanel.GetRuntime(ctx, userID, runtimeID)
@@ -147,7 +144,7 @@ func (s *server) handleRunStrategy(w http.ResponseWriter, r *http.Request, accou
 	}
 
 	runtimeID := strings.TrimSpace(body.RuntimeID)
-	if s.controlPanelRouteFeature && runtimeID == "" {
+	if runtimeID == "" {
 		writeErr(w, http.StatusBadRequest, "runtime selection required")
 		return
 	}
@@ -155,12 +152,11 @@ func (s *server) handleRunStrategy(w http.ResponseWriter, r *http.Request, accou
 	if !ok {
 		return
 	}
-	cli, callerToken, _, ok := s.strategyClient(r.Context(), w, uid, routeEnsure, runtimeID, policy)
+	cli, _, ok := s.strategyClient(r.Context(), w, uid, routeEnsure, runtimeID, policy)
 	if !ok {
 		return
 	}
-	ctx := withCallerToken(r.Context(), callerToken)
-	resp, err := cli.RunStrategy(ctx, &strategyv1.RunStrategyRequest{
+	resp, err := cli.RunStrategy(r.Context(), &strategyv1.RunStrategyRequest{
 		AccountId:    accountID,
 		StrategyPath: body.StrategyPath,
 		Interval:     interval,
@@ -198,7 +194,7 @@ func (s *server) handlePreviewRunStrategy(w http.ResponseWriter, r *http.Request
 	}
 
 	runtimeID := strings.TrimSpace(body.RuntimeID)
-	if s.controlPanelRouteFeature && runtimeID == "" {
+	if runtimeID == "" {
 		writeErr(w, http.StatusBadRequest, "runtime selection required")
 		return
 	}
@@ -206,12 +202,11 @@ func (s *server) handlePreviewRunStrategy(w http.ResponseWriter, r *http.Request
 	if !ok {
 		return
 	}
-	cli, callerToken, _, ok := s.strategyClient(r.Context(), w, uid, routeEnsure, runtimeID, policy)
+	cli, _, ok := s.strategyClient(r.Context(), w, uid, routeEnsure, runtimeID, policy)
 	if !ok {
 		return
 	}
-	ctx := withCallerToken(r.Context(), callerToken)
-	resp, err := cli.PreviewRunStrategy(ctx, &strategyv1.PreviewRunStrategyRequest{
+	resp, err := cli.PreviewRunStrategy(r.Context(), &strategyv1.PreviewRunStrategyRequest{
 		AccountId:    accountID,
 		StrategyPath: body.StrategyPath,
 		StartTimeMs:  body.StartTimeMs,
@@ -354,39 +349,34 @@ func (s *server) handleStrategySession(w http.ResponseWriter, r *http.Request) {
 	// runtime as a side effect of looking up a session. In D1's
 	// hosted-only single-default-runtime model, session ownership is
 	// implicit — the user's default runtime owns all their sessions.
-	runtimeID := ""
-	policy := defaultStrategyRoutePolicy()
-	if s.controlPanelRouteFeature {
-		session, ok := s.loadSessionForRuntimeRoute(w, r, sessionID, uid)
-		if !ok {
-			return
-		}
-		runtimeID = session.GetRuntimeId()
-		if strategySessionTerminal(session.GetStatus()) {
-			writeJSON(w, http.StatusOK, map[string]any{
-				"status":         session.GetStatus(),
-				"bars_processed": session.GetBarsProcessed(),
-				"error":          session.GetError(),
-				"runtime_id":     runtimeID,
-				"runtime_source": session.GetRuntimeSource(),
-				"runtime_name":   session.GetRuntimeName(),
-			})
-			return
-		}
-		policy, ok = s.strategyRoutePolicyForSelectedRuntime(r.Context(), w, uid, runtimeID, session.GetEnvironment())
-		if !ok {
-			return
-		}
+	session, ok := s.loadSessionForRuntimeRoute(w, r, sessionID, uid)
+	if !ok {
+		return
 	}
-	cli, callerToken, selectedRuntimeID, ok := s.strategyClient(r.Context(), w, uid, routeResolve, runtimeID, policy)
+	runtimeID := session.GetRuntimeId()
+	if strategySessionTerminal(session.GetStatus()) {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status":         session.GetStatus(),
+			"bars_processed": session.GetBarsProcessed(),
+			"error":          session.GetError(),
+			"runtime_id":     runtimeID,
+			"runtime_source": session.GetRuntimeSource(),
+			"runtime_name":   session.GetRuntimeName(),
+		})
+		return
+	}
+	policy, ok := s.strategyRoutePolicyForSelectedRuntime(r.Context(), w, uid, runtimeID, session.GetEnvironment())
+	if !ok {
+		return
+	}
+	cli, selectedRuntimeID, ok := s.strategyClient(r.Context(), w, uid, routeResolve, runtimeID, policy)
 	if !ok {
 		return
 	}
 	if runtimeID == "" {
 		runtimeID = selectedRuntimeID
 	}
-	ctx := withCallerToken(r.Context(), callerToken)
-	resp, err := cli.GetStrategyStatus(ctx, &strategyv1.GetStrategyStatusRequest{
+	resp, err := cli.GetStrategyStatus(r.Context(), &strategyv1.GetStrategyStatusRequest{
 		SessionId: sessionID,
 		UserId:    uid,
 		RuntimeId: runtimeID,
@@ -420,35 +410,30 @@ func (s *server) handleStopStrategy(w http.ResponseWriter, r *http.Request, sess
 		return
 	}
 
-	runtimeID := ""
-	policy := defaultStrategyRoutePolicy()
-	if s.controlPanelRouteFeature {
-		session, ok := s.loadSessionForRuntimeRoute(w, r, sessionID, uid)
-		if !ok {
-			return
-		}
-		if strategySessionTerminal(session.GetStatus()) {
-			writeJSON(w, http.StatusOK, map[string]any{
-				"stopped": true,
-				"status":  session.GetStatus(),
-			})
-			return
-		}
-		runtimeID = session.GetRuntimeId()
-		policy, ok = s.strategyRoutePolicyForSelectedRuntime(r.Context(), w, uid, runtimeID, session.GetEnvironment())
-		if !ok {
-			return
-		}
+	session, ok := s.loadSessionForRuntimeRoute(w, r, sessionID, uid)
+	if !ok {
+		return
 	}
-	cli, callerToken, selectedRuntimeID, ok := s.strategyClient(r.Context(), w, uid, routeResolve, runtimeID, policy)
+	if strategySessionTerminal(session.GetStatus()) {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"stopped": true,
+			"status":  session.GetStatus(),
+		})
+		return
+	}
+	runtimeID := session.GetRuntimeId()
+	policy, ok := s.strategyRoutePolicyForSelectedRuntime(r.Context(), w, uid, runtimeID, session.GetEnvironment())
+	if !ok {
+		return
+	}
+	cli, selectedRuntimeID, ok := s.strategyClient(r.Context(), w, uid, routeResolve, runtimeID, policy)
 	if !ok {
 		return
 	}
 	if runtimeID == "" {
 		runtimeID = selectedRuntimeID
 	}
-	ctx := withCallerToken(r.Context(), callerToken)
-	resp, err := cli.StopStrategy(ctx, &strategyv1.StopStrategyRequest{
+	resp, err := cli.StopStrategy(r.Context(), &strategyv1.StopStrategyRequest{
 		SessionId:      sessionID,
 		ClosePositions: legacyClose,
 		StopAction:     action,

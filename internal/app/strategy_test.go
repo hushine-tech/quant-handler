@@ -2,47 +2,19 @@ package app
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/hushine-tech/quant-handler/internal/controlpanel"
 	strategyv1 "github.com/hushine-tech/strategy-service/gen/strategyv1"
-	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
-// fakeStrategyClient is a minimal gRPC client double for testing the
-// preview-run-strategy HTTP handler. It only implements the RPC methods
-// the handler actually calls, matching the interface on `server.strategy`.
-type fakeStrategyClient struct {
-	strategyv1.StrategyServiceClient
-
-	previewReq  *strategyv1.PreviewRunStrategyRequest
-	previewResp *strategyv1.PreviewRunStrategyResponse
-	previewErr  error
-	runReq      *strategyv1.RunStrategyRequest
-	runResp     *strategyv1.RunStrategyResponse
-	runErr      error
-}
-
-func (f *fakeStrategyClient) PreviewRunStrategy(_ context.Context, in *strategyv1.PreviewRunStrategyRequest, _ ...grpc.CallOption) (*strategyv1.PreviewRunStrategyResponse, error) {
-	f.previewReq = in
-	return f.previewResp, f.previewErr
-}
-
-func (f *fakeStrategyClient) RunStrategy(_ context.Context, in *strategyv1.RunStrategyRequest, _ ...grpc.CallOption) (*strategyv1.RunStrategyResponse, error) {
-	f.runReq = in
-	if f.runResp != nil || f.runErr != nil {
-		return f.runResp, f.runErr
-	}
-	return &strategyv1.RunStrategyResponse{SessionId: "sess-test"}, nil
-}
-
 func TestPreviewRunStrategy_ForwardsBodyAndReturnsJSON(t *testing.T) {
-	fake := &fakeStrategyClient{
+	proxy := &fakeControlPanelStrategyProxy{
 		previewResp: &strategyv1.PreviewRunStrategyResponse{
 			Profile:   "testnet",
 			Supported: true,
@@ -78,12 +50,16 @@ func TestPreviewRunStrategy_ForwardsBodyAndReturnsJSON(t *testing.T) {
 		},
 	}
 	s := &server{
-		strategy:    fake,
+		controlPanel: &fakeResolver{
+			resp:        controlpanel.Route{RuntimeID: "rt-preview"},
+			runtimeResp: controlpanel.Runtime{RuntimeID: "rt-preview", Role: "executor"},
+		},
+		cpRuntime:   proxy,
 		jwtSecret:   []byte("s"),
 		corsOrigins: []string{"*"},
 	}
 
-	body := `{"strategy_path":"","start_time_ms":0,"end_time_ms":0}`
+	body := `{"runtime_id":"rt-preview","strategy_path":"","start_time_ms":0,"end_time_ms":0}`
 	req := withUID(httptest.NewRequest(http.MethodPost,
 		"/api/accounts/7/preview-run-strategy", bytes.NewBufferString(body)), 17)
 	rec := httptest.NewRecorder()
@@ -93,13 +69,13 @@ func TestPreviewRunStrategy_ForwardsBodyAndReturnsJSON(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
 	}
-	if fake.previewReq == nil {
+	if proxy.previewReq == nil {
 		t.Fatal("PreviewRunStrategy gRPC was not called")
 	}
-	if got := fake.previewReq.GetAccountId(); got != 7 {
+	if got := proxy.previewReq.GetAccountId(); got != 7 {
 		t.Errorf("account_id forwarded = %d, want 7", got)
 	}
-	if got := fake.previewReq.GetUserId(); got != 17 {
+	if got := proxy.previewReq.GetUserId(); got != 17 {
 		t.Errorf("user_id forwarded = %d, want 17", got)
 	}
 
@@ -141,17 +117,21 @@ func TestPreviewRunStrategy_ForwardsBodyAndReturnsJSON(t *testing.T) {
 }
 
 func TestPreviewRunStrategy_PropagatesFailedPreconditionFromBackend(t *testing.T) {
-	fake := &fakeStrategyClient{
+	proxy := &fakeControlPanelStrategyProxy{
 		previewErr: status.Error(codes.FailedPrecondition, "strategy input declaration invalid: missing INPUTS"),
 	}
 	s := &server{
-		strategy:    fake,
+		controlPanel: &fakeResolver{
+			resp:        controlpanel.Route{RuntimeID: "rt-preview"},
+			runtimeResp: controlpanel.Runtime{RuntimeID: "rt-preview", Role: "executor"},
+		},
+		cpRuntime:   proxy,
 		jwtSecret:   []byte("s"),
 		corsOrigins: []string{"*"},
 	}
 
 	req := withUID(httptest.NewRequest(http.MethodPost,
-		"/api/accounts/7/preview-run-strategy", bytes.NewBufferString("{}")), 17)
+		"/api/accounts/7/preview-run-strategy", bytes.NewBufferString(`{"runtime_id":"rt-preview"}`)), 17)
 	rec := httptest.NewRecorder()
 
 	s.handlePreviewRunStrategy(rec, req, 7)
@@ -172,9 +152,9 @@ func TestPreviewRunStrategy_PropagatesFailedPreconditionFromBackend(t *testing.T
 }
 
 func TestPreviewRunStrategy_RejectsGETMethod(t *testing.T) {
-	fake := &fakeStrategyClient{}
+	proxy := &fakeControlPanelStrategyProxy{}
 	s := &server{
-		strategy:    fake,
+		cpRuntime:   proxy,
 		jwtSecret:   []byte("s"),
 		corsOrigins: []string{"*"},
 	}
@@ -188,7 +168,7 @@ func TestPreviewRunStrategy_RejectsGETMethod(t *testing.T) {
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("status = %d, want 405", rec.Code)
 	}
-	if fake.previewReq != nil {
+	if proxy.previewReq != nil {
 		t.Fatal("gRPC must not be called for GET")
 	}
 }

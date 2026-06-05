@@ -126,7 +126,7 @@ func (s *server) handleDownloadAndRun(w http.ResponseWriter, r *http.Request, ac
 	}
 
 	runtimeID := strings.TrimSpace(body.RuntimeID)
-	if s.controlPanelRouteFeature && runtimeID == "" {
+	if runtimeID == "" {
 		writeErr(w, http.StatusBadRequest, "runtime selection required")
 		return
 	}
@@ -134,13 +134,13 @@ func (s *server) handleDownloadAndRun(w http.ResponseWriter, r *http.Request, ac
 	if !ok {
 		return
 	}
-	cli, callerToken, _, ok := s.strategyClient(r.Context(), w, uid, routeEnsure, runtimeID, policy)
+	cli, _, ok := s.strategyClient(r.Context(), w, uid, routeEnsure, runtimeID, policy)
 	if !ok {
 		return
 	}
 
 	job := s.downloadJobs().create()
-	go s.runDownloadAndRunJob(context.Background(), job.JobID, cli, callerToken, uid, accountID, runtimeID, body)
+	go s.runDownloadAndRunJob(context.Background(), job.JobID, cli, uid, accountID, runtimeID, body)
 	writeJSON(w, http.StatusAccepted, job)
 }
 
@@ -163,7 +163,7 @@ func (s *server) handleDownloadRunJobStatus(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, job)
 }
 
-func (s *server) runDownloadAndRunJob(ctx context.Context, jobID string, cli strategyv1.StrategyServiceClient, callerToken string, uid int64, accountID int64, runtimeID string, body downloadAndRunRequest) {
+func (s *server) runDownloadAndRunJob(ctx context.Context, jobID string, cli strategyv1.StrategyServiceClient, uid int64, accountID int64, runtimeID string, body downloadAndRunRequest) {
 	store := s.downloadJobs()
 	fail := func(err error) {
 		store.update(jobID, func(job *downloadRunJob) {
@@ -178,7 +178,6 @@ func (s *server) runDownloadAndRunJob(ctx context.Context, jobID string, cli str
 
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
 	defer cancel()
-	ctx = withCallerToken(ctx, callerToken)
 
 	preview, err := cli.PreviewRunStrategy(ctx, &strategyv1.PreviewRunStrategyRequest{
 		AccountId:    accountID,

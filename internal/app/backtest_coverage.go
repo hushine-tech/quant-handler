@@ -86,7 +86,7 @@ func decodeCoveragePreviewRequest(w http.ResponseWriter, r *http.Request) (cover
 
 func (s *server) previewStrategyForCoverage(w http.ResponseWriter, r *http.Request, uid int64, accountID int64, body coveragePreviewRequest) (*strategyv1.PreviewRunStrategyResponse, bool) {
 	runtimeID := strings.TrimSpace(body.RuntimeID)
-	if s.controlPanelRouteFeature && runtimeID == "" {
+	if runtimeID == "" {
 		writeErr(w, http.StatusBadRequest, "runtime selection required")
 		return nil, false
 	}
@@ -94,12 +94,11 @@ func (s *server) previewStrategyForCoverage(w http.ResponseWriter, r *http.Reque
 	if !ok {
 		return nil, false
 	}
-	cli, callerToken, _, ok := s.strategyClient(r.Context(), w, uid, routeEnsure, runtimeID, policy)
+	cli, _, ok := s.strategyClient(r.Context(), w, uid, routeEnsure, runtimeID, policy)
 	if !ok {
 		return nil, false
 	}
-	ctx := withCallerToken(r.Context(), callerToken)
-	resp, err := cli.PreviewRunStrategy(ctx, &strategyv1.PreviewRunStrategyRequest{
+	resp, err := cli.PreviewRunStrategy(r.Context(), &strategyv1.PreviewRunStrategyRequest{
 		AccountId:    accountID,
 		StrategyPath: body.StrategyPath,
 		StartTimeMs:  body.StartTimeMS,

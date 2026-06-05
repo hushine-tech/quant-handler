@@ -13,7 +13,6 @@ type Config struct {
 	Server       ServerConfig       `yaml:"server"`
 	Dependencies DependenciesConfig `yaml:"dependencies"`
 	Auth         AuthConfig         `yaml:"auth"`
-	Features     FeaturesConfig     `yaml:"features"`
 	Log          elog.Config        `yaml:"log"`
 }
 
@@ -23,17 +22,8 @@ type ServerConfig struct {
 
 type DependenciesConfig struct {
 	AccountServiceGRPC      string `yaml:"account_service_grpc"`
-	StrategyServiceGRPC     string `yaml:"strategy_service_grpc"`
 	OrderServiceGRPC        string `yaml:"order_service_grpc"`
 	ControlPanelServiceGRPC string `yaml:"control_panel_service_grpc"`
-}
-
-// FeaturesConfig holds operator-toggleable runtime routing flags.
-type FeaturesConfig struct {
-	// ControlPanelRouteResolution gates /api/_debug/runtime-route and strategy
-	// run/preview/stop/status routing through control-panel-service. Hosted
-	// and self-hosted runtimes both use the RuntimeChannel proxy path.
-	ControlPanelRouteResolution bool `yaml:"control_panel_route_resolution"`
 }
 
 type AuthConfig struct {
@@ -58,9 +48,8 @@ func Default() *Config {
 			HTTPAddr: ":8090",
 		},
 		Dependencies: DependenciesConfig{
-			AccountServiceGRPC:  "127.0.0.1:50051",
-			StrategyServiceGRPC: "127.0.0.1:50053",
-			OrderServiceGRPC:    "127.0.0.1:50051",
+			AccountServiceGRPC: "127.0.0.1:50051",
+			OrderServiceGRPC:   "127.0.0.1:50051",
 		},
 		Auth: AuthConfig{
 			CORSOrigins: []string{"http://localhost:5173"},
@@ -97,11 +86,6 @@ func (c *Config) ApplyEnvOverrides() {
 	} else if v := os.Getenv("ACCOUNT_SERVICE_GRPC_ADDR"); v != "" {
 		c.Dependencies.AccountServiceGRPC = v
 	}
-	if v := os.Getenv("DEPENDENCIES_STRATEGY_SERVICE_GRPC"); v != "" {
-		c.Dependencies.StrategyServiceGRPC = v
-	} else if v := os.Getenv("STRATEGY_SERVICE_GRPC_ADDR"); v != "" {
-		c.Dependencies.StrategyServiceGRPC = v
-	}
 	if v := os.Getenv("DEPENDENCIES_ORDER_SERVICE_GRPC"); v != "" {
 		c.Dependencies.OrderServiceGRPC = v
 	} else if v := os.Getenv("ORDER_SERVICE_GRPC_ADDR"); v != "" {
@@ -111,15 +95,6 @@ func (c *Config) ApplyEnvOverrides() {
 		c.Dependencies.ControlPanelServiceGRPC = v
 	} else if v := os.Getenv("CONTROL_PANEL_SERVICE_GRPC_ADDR"); v != "" {
 		c.Dependencies.ControlPanelServiceGRPC = v
-	}
-
-	if v := os.Getenv("FEATURES_CONTROL_PANEL_ROUTE_RESOLUTION"); v != "" {
-		switch strings.ToLower(strings.TrimSpace(v)) {
-		case "1", "true", "yes", "on":
-			c.Features.ControlPanelRouteResolution = true
-		case "0", "false", "no", "off", "":
-			c.Features.ControlPanelRouteResolution = false
-		}
 	}
 
 	if v := os.Getenv("AUTH_JWT_SECRET"); v != "" {
