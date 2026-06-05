@@ -23,8 +23,7 @@ type runStrategyRequest struct {
 }
 
 type stopStrategyRequest struct {
-	StopAction     string `json:"stop_action"`
-	ClosePositions *bool  `json:"close_positions,omitempty"`
+	StopAction string `json:"stop_action"`
 }
 
 type previewRunStrategyRequest struct {
@@ -404,7 +403,7 @@ func (s *server) handleStopStrategy(w http.ResponseWriter, r *http.Request, sess
 		return
 	}
 
-	action, legacyClose, err := normalizeStopAction(body)
+	action, err := normalizeStopAction(body)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
@@ -434,11 +433,10 @@ func (s *server) handleStopStrategy(w http.ResponseWriter, r *http.Request, sess
 		runtimeID = selectedRuntimeID
 	}
 	resp, err := cli.StopStrategy(r.Context(), &strategyv1.StopStrategyRequest{
-		SessionId:      sessionID,
-		ClosePositions: legacyClose,
-		StopAction:     action,
-		UserId:         uid,
-		RuntimeId:      runtimeID,
+		SessionId:  sessionID,
+		StopAction: action,
+		UserId:     uid,
+		RuntimeId:  runtimeID,
 	})
 	if err != nil {
 		code, msg := grpcToHTTP(err)
@@ -446,10 +444,9 @@ func (s *server) handleStopStrategy(w http.ResponseWriter, r *http.Request, sess
 		return
 	}
 	out := map[string]any{
-		"stopped":         resp.GetStopped(),
-		"stop_action":     action.String(),
-		"close_positions": legacyClose,
-		"runtime_id":      runtimeID,
+		"stopped":     resp.GetStopped(),
+		"stop_action": action.String(),
+		"runtime_id":  runtimeID,
 	}
 	if s.accounts != nil {
 		if current, err := s.accounts.GetSession(r.Context(), &accountv1.GetSessionRequest{SessionId: sessionID, UserId: uid}); err == nil {
@@ -493,25 +490,22 @@ func strategySessionTerminal(status string) bool {
 	}
 }
 
-func normalizeStopAction(body stopStrategyRequest) (strategyv1.StopAction, bool, error) {
+func normalizeStopAction(body stopStrategyRequest) (strategyv1.StopAction, error) {
 	raw := strings.ToUpper(strings.TrimSpace(body.StopAction))
 	if raw == "" {
-		if body.ClosePositions != nil && *body.ClosePositions {
-			return strategyv1.StopAction_STOP_ACTION_STOP_AND_CLOSE_POSITIONS, true, nil
-		}
-		return strategyv1.StopAction_STOP_ACTION_STOP_ONLY, false, nil
+		return strategyv1.StopAction_STOP_ACTION_STOP_ONLY, nil
 	}
 
 	switch raw {
 	case "STOP_ACTION_CANCEL", "CANCEL":
-		return strategyv1.StopAction_STOP_ACTION_CANCEL, false, nil
+		return strategyv1.StopAction_STOP_ACTION_CANCEL, nil
 	case "STOP_ACTION_FINISH", "FINISH":
-		return strategyv1.StopAction_STOP_ACTION_FINISH, false, nil
+		return strategyv1.StopAction_STOP_ACTION_FINISH, nil
 	case "STOP_ACTION_STOP_ONLY", "STOP_ONLY":
-		return strategyv1.StopAction_STOP_ACTION_STOP_ONLY, false, nil
+		return strategyv1.StopAction_STOP_ACTION_STOP_ONLY, nil
 	case "STOP_ACTION_STOP_AND_CLOSE_POSITIONS", "STOP_AND_CLOSE_POSITIONS":
-		return strategyv1.StopAction_STOP_ACTION_STOP_AND_CLOSE_POSITIONS, true, nil
+		return strategyv1.StopAction_STOP_ACTION_STOP_AND_CLOSE_POSITIONS, nil
 	default:
-		return strategyv1.StopAction_STOP_ACTION_UNSPECIFIED, false, errors.New("invalid stop_action")
+		return strategyv1.StopAction_STOP_ACTION_UNSPECIFIED, errors.New("invalid stop_action")
 	}
 }

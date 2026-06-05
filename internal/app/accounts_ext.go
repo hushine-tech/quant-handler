@@ -1,7 +1,6 @@
 package app
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -53,131 +52,10 @@ func (s *server) handleSymbols(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *server) getWallet(w http.ResponseWriter, r *http.Request, id int64) {
-	uid, ok := userIDFromRequest(r)
-	if !ok {
-		writeErr(w, http.StatusUnauthorized, "missing user context")
-		return
-	}
-	ctx := r.Context()
-	resp, err := s.accounts.GetPortfolioSnapshot(ctx, &accountv1.GetPortfolioSnapshotRequest{
-		AccountId: id,
-		UserId:    uid,
-	})
-	if err != nil {
-		code, msg := grpcToHTTP(err)
-		writeErr(w, code, msg)
-		return
-	}
-	snapshot := resp.GetSnapshot()
-	if snapshot == nil {
-		writeErr(w, http.StatusNotFound, "no portfolio snapshot")
-		return
-	}
-	wal := portfolioSnapshotWalletToAccountWallet(snapshot)
-	if wal == nil {
-		writeErr(w, http.StatusNotFound, "no wallet")
-		return
-	}
-	writeJSON(w, http.StatusOK, accountWalletStateToJSON(wal))
-}
-
-type accountVenueWalletItemJSON struct {
-	Venue  venueJSON      `json:"venue"`
-	Wallet map[string]any `json:"wallet,omitempty"`
-	Error  string         `json:"error,omitempty"`
-}
-
 type accountPortfolioSnapshotItemJSON struct {
 	Venue    venueJSON      `json:"venue"`
 	Snapshot map[string]any `json:"snapshot"`
 	Wallet   map[string]any `json:"wallet,omitempty"`
-}
-
-const accountVenueWalletTimeout = 5 * time.Second
-
-func (s *server) getAccountVenueWallets(w http.ResponseWriter, r *http.Request, accountID int64) {
-	uid, ok := userIDFromRequest(r)
-	if !ok {
-		writeErr(w, http.StatusUnauthorized, "missing user context")
-		return
-	}
-	ctx := r.Context()
-	var venues []*accountv1.VenueEntry
-	var offset int32
-	const limit int32 = 100
-	for {
-		resp, err := s.accounts.ListVenues(ctx, &accountv1.ListVenuesRequest{
-			UserId:          uid,
-			AccountId:       accountID,
-			IncludeInactive: false,
-			Limit:           limit,
-			Offset:          offset,
-		})
-		if err != nil {
-			code, msg := grpcToHTTP(err)
-			writeErr(w, code, msg)
-			return
-		}
-		page := resp.GetVenues()
-		venues = append(venues, page...)
-		if !resp.GetHasMore() || len(page) == 0 {
-			break
-		}
-		offset += int32(len(page))
-	}
-
-	items := make([]accountVenueWalletItemJSON, 0, len(venues))
-	var totalValue float64
-	var successful int
-	var failed int
-	var latest time.Time
-	for _, venue := range venues {
-		item := accountVenueWalletItemJSON{Venue: venueToJSON(venue)}
-		venueCtx, cancel := context.WithTimeout(ctx, accountVenueWalletTimeout)
-		resp, err := s.accounts.GetVenueOnlineInfo(venueCtx, &accountv1.GetVenueOnlineInfoRequest{
-			UserId:  uid,
-			VenueId: venue.GetVenueId(),
-		})
-		cancel()
-		if err != nil {
-			_, msg := grpcToHTTP(err)
-			item.Error = msg
-			failed++
-			items = append(items, item)
-			continue
-		}
-		wallet := resp.GetWallet()
-		if wallet == nil {
-			item.Error = "no venue wallet"
-			failed++
-			items = append(items, item)
-			continue
-		}
-		item.Wallet = accountWalletStateToJSON(wallet)
-		totalValue += wallet.GetTotalValue()
-		if ts := wallet.GetUpdatedAt(); ts != nil {
-			t := ts.AsTime().UTC()
-			if latest.IsZero() || t.After(latest) {
-				latest = t
-			}
-		}
-		successful++
-		items = append(items, item)
-	}
-
-	updatedAt := ""
-	if !latest.IsZero() {
-		updatedAt = latest.Format(time.RFC3339Nano)
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"items":       items,
-		"venue_count": len(items),
-		"successful":  successful,
-		"failed":      failed,
-		"total_value": totalValue,
-		"updated_at":  updatedAt,
-	})
 }
 
 func (s *server) getAccountPortfolioSnapshot(w http.ResponseWriter, r *http.Request, accountID int64) {
@@ -214,7 +92,7 @@ func portfolioSnapshotToJSON(snapshot *accountv1.PortfolioSnapshot) map[string]a
 			Venue:    venueFromSnapshotToJSON(snapshot.GetUserId(), snapshot.GetAccountId(), venueSnapshot),
 			Snapshot: venueSnapshotToJSON(venueSnapshot),
 		}
-		if wallet := venueSnapshotWalletToAccountWallet(venueSnapshot); wallet != nil {
+		if wallet := venueSnapshot.GetWallet(); wallet != nil {
 			item.Wallet = accountWalletStateToJSON(wallet)
 		}
 		items = append(items, item)
@@ -302,115 +180,6 @@ func venueSnapshotToJSON(snap *accountv1.VenueSnapshot) map[string]any {
 	}
 }
 
-func venueSnapshotWalletToAccountWallet(snap *accountv1.VenueSnapshot) *accountv1.AccountWalletState {
-	if snap == nil {
-		return nil
-	}
-	return &accountv1.AccountWalletState{
-		Environment: snap.GetEnvironment(),
-		UpdatedAt:   snap.GetUpdatedAt(),
-		TotalValue:  snap.GetTotalValue(),
-		Futures: &accountv1.FuturesWallet{
-			WalletBalance:    snap.GetWalletBalance(),
-			AvailableBalance: snap.GetAvailableBalance(),
-			Positions:        venueSnapshotPositionsToFutures(snap.GetPositions()),
-		},
-	}
-}
-
-func portfolioSnapshotWalletToAccountWallet(snapshot *accountv1.PortfolioSnapshot) *accountv1.AccountWalletState {
-	if snapshot == nil {
-		return nil
-	}
-	if wal := snapshot.GetWallet(); wal != nil {
-		return wal
-	}
-	wal := &accountv1.AccountWalletState{
-		Environment: portfolioSnapshotEnvironment(snapshot),
-		UpdatedAt:   snapshot.GetUpdatedAt(),
-		TotalValue:  snapshot.GetTotalValue(),
-		Futures: &accountv1.FuturesWallet{
-			WalletBalance:    snapshot.GetWalletBalance(),
-			AvailableBalance: snapshot.GetAvailableBalance(),
-		},
-	}
-	var spotAssets []*accountv1.SpotAsset
-	for _, venue := range snapshot.GetVenues() {
-		if venueWallet := venue.GetWallet(); venueWallet != nil {
-			if spot := venueWallet.GetSpot(); spot != nil {
-				if wal.Spot == nil {
-					wal.Spot = &accountv1.SpotWallet{}
-				}
-				wal.Spot.Free += spot.GetFree()
-				wal.Spot.Locked += spot.GetLocked()
-				wal.Spot.Assets = append(wal.Spot.Assets, spot.GetAssets()...)
-			}
-			if futures := venueWallet.GetFutures(); futures != nil {
-				wal.Futures.MarginMode = futures.GetMarginMode()
-				wal.Futures.PositionMode = futures.GetPositionMode()
-				wal.Futures.MarginBalance += futures.GetMarginBalance()
-				wal.Futures.TotalMarginBalance += futures.GetTotalMarginBalance()
-				wal.Futures.UnrealizedPnl += futures.GetUnrealizedPnl()
-				wal.Futures.TotalUnrealizedPnl += futures.GetTotalUnrealizedPnl()
-				wal.Futures.Positions = append(wal.Futures.Positions, futures.GetPositions()...)
-			}
-			continue
-		}
-		switch venue.GetMarket() {
-		case 1: // spot
-			for _, balance := range venue.GetBalances() {
-				if strings.EqualFold(balance.GetAsset(), "USDT") {
-					continue
-				}
-				price := float64(0)
-				if balance.GetWalletBalance() != 0 {
-					price = balance.GetValueUsdt() / balance.GetWalletBalance()
-				}
-				spotAssets = append(spotAssets, &accountv1.SpotAsset{
-					Symbol: strings.ToUpper(balance.GetAsset()),
-					Qty:    balance.GetWalletBalance(),
-					Locked: balance.GetLocked(),
-					Price:  &price,
-				})
-			}
-		case 2, 3: // futures
-			wal.Futures.Positions = append(wal.Futures.Positions, venueSnapshotPositionsToFutures(venue.GetPositions())...)
-		}
-	}
-	if len(spotAssets) > 0 {
-		if wal.Spot == nil {
-			wal.Spot = &accountv1.SpotWallet{}
-		}
-		wal.Spot.Assets = append(wal.Spot.Assets, spotAssets...)
-	}
-	return wal
-}
-
-func portfolioSnapshotEnvironment(snapshot *accountv1.PortfolioSnapshot) int32 {
-	for _, venue := range snapshot.GetVenues() {
-		if venue.GetEnvironment() != 0 {
-			return venue.GetEnvironment()
-		}
-	}
-	return 0
-}
-
-func venueSnapshotPositionsToFutures(positions []*accountv1.PositionEntry) []*accountv1.FuturesPosition {
-	out := make([]*accountv1.FuturesPosition, 0, len(positions))
-	for _, position := range positions {
-		out = append(out, &accountv1.FuturesPosition{
-			Symbol:        position.GetSymbol(),
-			PositionSide:  position.GetPositionSide(),
-			Qty:           position.GetQty(),
-			PositionQty:   position.GetQty(),
-			EntryPrice:    position.GetEntryPrice(),
-			MarkPrice:     position.GetMarkPrice(),
-			UnrealizedPnl: position.GetUnrealizedPnl(),
-		})
-	}
-	return out
-}
-
 func accountWalletStateToJSON(wal *accountv1.AccountWalletState) map[string]any {
 	if wal == nil {
 		return nil
@@ -458,17 +227,7 @@ func accountWalletStateToJSON(wal *accountv1.AccountWalletState) map[string]any 
 		"spot":                 protoSpotToJSON(wal.GetSpot()),
 		"futures":              protoFuturesToJSON(fw),
 		// ── namespaced display surface ──
-		// Prefer ``display.*`` for new UI code. The flat top-level display
-		// duplicates below are kept for backward compat with existing
-		// frontend readers; they are deprecated and will be removed in a
-		// follow-up.
 		"display": display,
-		// Legacy flat display fields (deprecated — read from ``display.*``).
-		"total_value":             wal.GetTotalValue(),
-		"spot_estimated_value":    se,
-		"futures_position_equity": feq,
-		"metrics_authoritative":   auth,
-		"futures_display_usd":     protoFuturesDisplayUSDToJSON(wal.GetEnvironment(), fw),
 	}
 }
 

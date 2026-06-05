@@ -374,22 +374,6 @@ func (s *server) handleAccountsByID() http.Handler {
 			s.getAccount(w, r, id)
 			return
 		}
-		if len(parts) == 2 && parts[1] == "wallet" {
-			if r.Method != http.MethodGet {
-				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-				return
-			}
-			s.getWallet(w, r, id)
-			return
-		}
-		if len(parts) == 2 && parts[1] == "venue-wallets" {
-			if r.Method != http.MethodGet {
-				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-				return
-			}
-			s.getAccountVenueWallets(w, r, id)
-			return
-		}
 		if len(parts) == 2 && parts[1] == "portfolio-snapshot" {
 			if r.Method != http.MethodGet {
 				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)

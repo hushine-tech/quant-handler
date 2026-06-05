@@ -6,7 +6,7 @@ HTTP BFF for the quant portal: JWT login, CORS for the React app, and gRPC fan-o
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `CORE_SERVICE_GRPC_ADDR` / `ACCOUNT_SERVICE_GRPC_ADDR` | yes | gRPC address for core-service (e.g. `127.0.0.1:50051`); old env name remains compatible |
+| `CORE_SERVICE_GRPC_ADDR` | yes | gRPC address for core-service (e.g. `127.0.0.1:50051`) |
 | `QUANT_HANDLER_JWT_SECRET` | yes | HMAC secret for signing portal JWTs |
 | `HTTP_ADDR` | no | Listen address (default `:8090`) |
 | `HANDLER_CORS_ORIGINS` | no | Comma-separated allowed `Origin` values (default `http://localhost:5173`) |
@@ -34,7 +34,6 @@ go run ./cmd/quant-handler -config ./config.yaml
 - `GET /api/accounts` — Bearer JWT → JSON array of accounts.
 - `POST /api/accounts` — Bearer JWT → create an account context. Body: `name`, `environment`, optional `description`. Exchange credentials and simulated wallet state are managed as venues and then bound to accounts; account wallet display is read from `GetPortfolioSnapshot`.
 - `GET /api/accounts/{id}` — Bearer JWT → registry JSON.
-- `GET /api/accounts/{id}/wallet` — Bearer JWT → portfolio wallet JSON from `GetPortfolioSnapshot`, including aggregate wallet fields plus venue snapshots.
 - `GET /api/accounts/{id}/portfolio-snapshot` — Bearer JWT → portfolio aggregate plus venue snapshots from `GetPortfolioSnapshot`.
 - `GET /api/symbols?market=spot|usdm_futures&q=&limit=` — Bearer JWT → `{ "symbols": [], "stale": bool }`. **`market` is required** (returns `400` if omitted).
 
