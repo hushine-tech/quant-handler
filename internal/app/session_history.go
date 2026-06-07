@@ -852,6 +852,7 @@ func (s *server) getSessionReconciliation(w http.ResponseWriter, r *http.Request
 		AdvisoryDiffs        []fieldDiffJSON `json:"advisory_diffs"`
 		LocalSnapshotJSON    string          `json:"local_snapshot_json"`
 		ExchangeSnapshotJSON string          `json:"exchange_snapshot_json"`
+		VenueDiffsJSON       string          `json:"venue_diffs_json"`
 	}
 
 	decodeThreshold := func(raw string) any {
@@ -920,6 +921,7 @@ func (s *server) getSessionReconciliation(w http.ResponseWriter, r *http.Request
 			AdvisoryDiffs:        advisoryDiffs,
 			LocalSnapshotJSON:    run.GetLocalSnapshotJson(),
 			ExchangeSnapshotJSON: run.GetExchangeSnapshotJson(),
+			VenueDiffsJSON:       run.GetVenueDiffsJson(),
 		})
 	}
 	writeJSON(w, http.StatusOK, pagedResponse{

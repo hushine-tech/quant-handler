@@ -62,12 +62,15 @@ func TestNotificationsGetSettings(t *testing.T) {
 	if body.BotUsername != "hushine_bot" || body.Telegram.Status != "bound" {
 		t.Fatalf("body = %+v", body)
 	}
+	if body.Preferences.Enabled == nil || !*body.Preferences.Enabled {
+		t.Fatalf("preferences.enabled = %v, want true", body.Preferences.Enabled)
+	}
 }
 
 func TestNotificationsUpdatePreferences(t *testing.T) {
 	fake := &fakeNotificationAccountClient{resp: notificationTestSettings()}
 	s := &server{accounts: fake, jwtSecret: []byte("s"), corsOrigins: []string{"*"}}
-	req := withUID(httptest.NewRequest(http.MethodPatch, "/api/notifications/preferences", bytes.NewBufferString(`{"system_enabled":true,"strategy_enabled":false,"custom_enabled":true}`)), 42)
+	req := withUID(httptest.NewRequest(http.MethodPatch, "/api/notifications/preferences", bytes.NewBufferString(`{"enabled":false,"system_enabled":true,"strategy_enabled":false,"custom_enabled":true}`)), 42)
 	rec := httptest.NewRecorder()
 
 	s.handleNotifications(rec, req)
@@ -80,6 +83,9 @@ func TestNotificationsUpdatePreferences(t *testing.T) {
 	}
 	if fake.updateReq.GetPreferences().GetStrategyEnabled() {
 		t.Fatalf("strategy_enabled = true, want false")
+	}
+	if fake.updateReq.GetPreferences().GetEnabled() {
+		t.Fatalf("enabled = true, want false")
 	}
 }
 
@@ -109,6 +115,7 @@ func TestNotificationsCreateBindCode(t *testing.T) {
 func notificationTestSettings() *accountv1.GetNotificationSettingsResponse {
 	return &accountv1.GetNotificationSettingsResponse{
 		Preferences: &accountv1.NotificationPreferences{
+			Enabled:         boolPtr(true),
 			SystemEnabled:   true,
 			StrategyEnabled: true,
 			CustomEnabled:   false,

@@ -11,9 +11,10 @@ import (
 )
 
 type notificationPreferencesJSON struct {
-	SystemEnabled   bool `json:"system_enabled"`
-	StrategyEnabled bool `json:"strategy_enabled"`
-	CustomEnabled   bool `json:"custom_enabled"`
+	Enabled         *bool `json:"enabled,omitempty"`
+	SystemEnabled   bool  `json:"system_enabled"`
+	StrategyEnabled bool  `json:"strategy_enabled"`
+	CustomEnabled   bool  `json:"custom_enabled"`
 }
 
 type notificationPlanJSON struct {
@@ -116,13 +117,17 @@ func (s *server) updateNotificationPreferences(w http.ResponseWriter, r *http.Re
 		writeErr(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
+	preferences := &accountv1.NotificationPreferences{
+		SystemEnabled:   body.SystemEnabled,
+		StrategyEnabled: body.StrategyEnabled,
+		CustomEnabled:   body.CustomEnabled,
+	}
+	if body.Enabled != nil {
+		preferences.Enabled = body.Enabled
+	}
 	resp, err := s.accounts.UpdateNotificationPreferences(r.Context(), &accountv1.UpdateNotificationPreferencesRequest{
-		UserId: userID,
-		Preferences: &accountv1.NotificationPreferences{
-			SystemEnabled:   body.SystemEnabled,
-			StrategyEnabled: body.StrategyEnabled,
-			CustomEnabled:   body.CustomEnabled,
-		},
+		UserId:      userID,
+		Preferences: preferences,
 	})
 	if err != nil {
 		code, msg := grpcToHTTP(err)
@@ -197,6 +202,7 @@ func notificationSettingsToJSON(resp *accountv1.GetNotificationSettingsResponse)
 	telegram := resp.GetTelegram()
 	return notificationSettingsJSON{
 		Preferences: notificationPreferencesJSON{
+			Enabled:         boolPtr(pref.GetEnabled()),
 			SystemEnabled:   pref.GetSystemEnabled(),
 			StrategyEnabled: pref.GetStrategyEnabled(),
 			CustomEnabled:   pref.GetCustomEnabled(),
@@ -222,6 +228,10 @@ func notificationSettingsToJSON(resp *accountv1.GetNotificationSettingsResponse)
 		},
 		BotUsername: resp.GetBotUsername(),
 	}
+}
+
+func boolPtr(value bool) *bool {
+	return &value
 }
 
 func protoTimeToJSON(ts *timestamppb.Timestamp) string {
