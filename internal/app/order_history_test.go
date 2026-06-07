@@ -6,9 +6,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	orderv1 "github.com/hushine-tech/core-service/gen/orderv1"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // fakeOrdersClient records the last QueryOrders / QueryOrderFills request and
@@ -122,11 +124,31 @@ func TestOrderHistory_offsetAndLimitForwarded(t *testing.T) {
 }
 
 func TestOrderHistory_envelopeShape(t *testing.T) {
+	goodTillDate := timestamppb.New(time.Unix(1893456000, 0).UTC())
+	nextCheckAt := timestamppb.New(time.Unix(1893456060, 0).UTC())
+	recoveryDeadlineAt := timestamppb.New(time.Unix(1894665600, 0).UTC())
+	forceClosedAt := timestamppb.New(time.Unix(1894665660, 0).UTC())
 	fake := &fakeOrdersClient{
 		ordersResp: &orderv1.QueryOrdersResponse{
 			Total: 42,
 			Orders: []*orderv1.ExchangeOrderEntry{
-				{OrderId: "o1", AccountId: 3, Symbol: "BTCUSDT", Side: "BUY", OrigQty: 0.1, ExecutedQty: 0.05, AvgPrice: 50000},
+				{
+					OrderId:            "o1",
+					AccountId:          3,
+					Symbol:             "BTCUSDT",
+					Side:               "BUY",
+					OrigQty:            0.1,
+					ExecutedQty:        0.05,
+					AvgPrice:           50000,
+					PostOnly:           true,
+					GoodTillDate:       goodTillDate,
+					ReduceOnly:         true,
+					RecoveryStatus:     "PARTIALLY_FILLED",
+					NextCheckAt:        nextCheckAt,
+					RecoveryDeadlineAt: recoveryDeadlineAt,
+					LastRecoveryError:  "trade fee pending",
+					ForceClosedAt:      forceClosedAt,
+				},
 			},
 		},
 	}
@@ -141,12 +163,20 @@ func TestOrderHistory_envelopeShape(t *testing.T) {
 	}
 	var body struct {
 		Items []struct {
-			OrderID     string  `json:"order_id"`
-			AccountID   int64   `json:"account_id"`
-			Symbol      string  `json:"symbol"`
-			OrigQty     float64 `json:"orig_qty"`
-			ExecutedQty float64 `json:"executed_qty"`
-			AvgPrice    float64 `json:"avg_price"`
+			OrderID            string  `json:"order_id"`
+			AccountID          int64   `json:"account_id"`
+			Symbol             string  `json:"symbol"`
+			OrigQty            float64 `json:"orig_qty"`
+			ExecutedQty        float64 `json:"executed_qty"`
+			AvgPrice           float64 `json:"avg_price"`
+			PostOnly           bool    `json:"post_only"`
+			GoodTill           string  `json:"good_till_date"`
+			ReduceOnly         bool    `json:"reduce_only"`
+			RecoveryStatus     string  `json:"recovery_status"`
+			NextCheckAt        string  `json:"next_check_at"`
+			RecoveryDeadlineAt string  `json:"recovery_deadline_at"`
+			LastRecoveryError  string  `json:"last_recovery_error"`
+			ForceClosedAt      string  `json:"force_closed_at"`
 		} `json:"items"`
 		Total int64 `json:"total"`
 	}
@@ -164,6 +194,16 @@ func TestOrderHistory_envelopeShape(t *testing.T) {
 	}
 	if body.Items[0].OrigQty != 0.1 || body.Items[0].ExecutedQty != 0.05 || body.Items[0].AvgPrice != 50000 {
 		t.Errorf("unexpected quantitative fields: %+v", body.Items[0])
+	}
+	if !body.Items[0].PostOnly || !body.Items[0].ReduceOnly || body.Items[0].GoodTill != "2030-01-01T00:00:00Z" {
+		t.Errorf("unexpected order semantics: %+v", body.Items[0])
+	}
+	if body.Items[0].RecoveryStatus != "PARTIALLY_FILLED" ||
+		body.Items[0].NextCheckAt != "2030-01-01T00:01:00Z" ||
+		body.Items[0].RecoveryDeadlineAt != "2030-01-15T00:00:00Z" ||
+		body.Items[0].LastRecoveryError != "trade fee pending" ||
+		body.Items[0].ForceClosedAt != "2030-01-15T00:01:00Z" {
+		t.Errorf("unexpected recovery fields: %+v", body.Items[0])
 	}
 }
 
@@ -207,11 +247,24 @@ func TestOrderHistory_rejectsNonGET(t *testing.T) {
 }
 
 func TestOrderAttempts_envelopeShape(t *testing.T) {
+	goodTillDate := timestamppb.New(time.Unix(1893456000, 0).UTC())
 	fake := &fakeOrdersClient{
 		attemptsResp: &orderv1.QueryOrderAttemptsResponse{
 			Total: 7,
 			Attempts: []*orderv1.OrderAttemptEntry{
-				{AttemptId: "a1", AccountId: 3, Symbol: "BTCUSDT", Side: "BUY", RequestedQty: 0.1, Status: "FAILED"},
+				{
+					AttemptId:       "a1",
+					AccountId:       3,
+					Symbol:          "BTCUSDT",
+					Side:            "BUY",
+					RequestedQty:    0.1,
+					Status:          "FAILED",
+					PostOnly:        true,
+					GoodTillDate:    goodTillDate,
+					ReduceOnly:      true,
+					RiskStatus:      "REJECT",
+					RiskReasonsJson: `[{"code":"ROUTE_PENDING_EXECUTION","message":"route has pending execution"}]`,
+				},
 			},
 		},
 	}
@@ -230,6 +283,14 @@ func TestOrderAttempts_envelopeShape(t *testing.T) {
 			AccountID    int64   `json:"account_id"`
 			RequestedQty float64 `json:"requested_qty"`
 			Status       string  `json:"status"`
+			PostOnly     bool    `json:"post_only"`
+			GoodTill     string  `json:"good_till_date"`
+			ReduceOnly   bool    `json:"reduce_only"`
+			RiskStatus   string  `json:"risk_status"`
+			RiskReasons  []struct {
+				Code    string `json:"code"`
+				Message string `json:"message"`
+			} `json:"risk_reasons"`
 		} `json:"items"`
 		Total int64 `json:"total"`
 	}
@@ -241,6 +302,14 @@ func TestOrderAttempts_envelopeShape(t *testing.T) {
 	}
 	if body.Items[0].AttemptID != "a1" || body.Items[0].RequestedQty != 0.1 || body.Items[0].Status != "FAILED" {
 		t.Errorf("unexpected attempt item: %+v", body.Items[0])
+	}
+	if !body.Items[0].PostOnly || !body.Items[0].ReduceOnly || body.Items[0].GoodTill != "2030-01-01T00:00:00Z" {
+		t.Errorf("unexpected attempt semantics: %+v", body.Items[0])
+	}
+	if body.Items[0].RiskStatus != "REJECT" || len(body.Items[0].RiskReasons) != 1 ||
+		body.Items[0].RiskReasons[0].Code != "ROUTE_PENDING_EXECUTION" ||
+		body.Items[0].RiskReasons[0].Message != "route has pending execution" {
+		t.Errorf("unexpected risk fields: %+v", body.Items[0])
 	}
 }
 
@@ -348,11 +417,24 @@ func TestOrderFills_flatQueryDoesNotDefaultAncestorIDs(t *testing.T) {
 }
 
 func TestOrderIntents_envelopeShape(t *testing.T) {
+	goodTillDate := timestamppb.New(time.Unix(1893456000, 0).UTC())
 	fake := &fakeOrdersClient{
 		intentsResp: &orderv1.QueryOrderIntentsResponse{
 			Total: 3,
 			Intents: []*orderv1.OrderIntentEntry{
-				{IntentId: "i1", AccountId: 9, Symbol: "BTCUSDT", Side: "BUY", RequestedQty: 0.1, RequestedPrice: 50000, StrategyId: 5, Market: 2},
+				{
+					IntentId:       "i1",
+					AccountId:      9,
+					Symbol:         "BTCUSDT",
+					Side:           "BUY",
+					RequestedQty:   0.1,
+					RequestedPrice: 50000,
+					StrategyId:     5,
+					Market:         2,
+					PostOnly:       true,
+					GoodTillDate:   goodTillDate,
+					ReduceOnly:     true,
+				},
 			},
 		},
 	}
@@ -386,6 +468,9 @@ func TestOrderIntents_envelopeShape(t *testing.T) {
 			RequestedPrice float64 `json:"requested_price"`
 			StrategyID     int64   `json:"strategy_id"`
 			Market         string  `json:"market"`
+			PostOnly       bool    `json:"post_only"`
+			GoodTill       string  `json:"good_till_date"`
+			ReduceOnly     bool    `json:"reduce_only"`
 		} `json:"items"`
 		Total int64 `json:"total"`
 	}
@@ -401,6 +486,9 @@ func TestOrderIntents_envelopeShape(t *testing.T) {
 	}
 	if got.RequestedQty != 0.1 || got.RequestedPrice != 50000 || got.StrategyID != 5 || got.Market != "perpetual_futures" {
 		t.Errorf("unexpected item fields: %+v", got)
+	}
+	if !got.PostOnly || !got.ReduceOnly || got.GoodTill != "2030-01-01T00:00:00Z" {
+		t.Errorf("unexpected order semantics: %+v", got)
 	}
 }
 
