@@ -47,6 +47,10 @@ func TestPreviewRunStrategy_ForwardsBodyAndReturnsJSON(t *testing.T) {
 				Exchange: "binance",
 				Market:   "perpetual_futures",
 			}},
+			RiskControls: &strategyv1.RiskControls{
+				MaxLossClosePct:    0.2,
+				MaxLossCloseSource: "strategy",
+			},
 		},
 	}
 	s := &server{
@@ -59,7 +63,7 @@ func TestPreviewRunStrategy_ForwardsBodyAndReturnsJSON(t *testing.T) {
 		corsOrigins: []string{"*"},
 	}
 
-	body := `{"runtime_id":"rt-preview","strategy_path":"","start_time_ms":0,"end_time_ms":0}`
+	body := `{"runtime_id":"rt-preview","strategy_path":"","start_time_ms":0,"end_time_ms":0,"max_loss_close_pct":0.25}`
 	req := withUID(httptest.NewRequest(http.MethodPost,
 		"/api/accounts/7/preview-run-strategy", bytes.NewBufferString(body)), 17)
 	rec := httptest.NewRecorder()
@@ -77,6 +81,9 @@ func TestPreviewRunStrategy_ForwardsBodyAndReturnsJSON(t *testing.T) {
 	}
 	if got := proxy.previewReq.GetUserId(); got != 17 {
 		t.Errorf("user_id forwarded = %d, want 17", got)
+	}
+	if got := proxy.previewReq.GetMaxLossClosePct(); got != 0.25 {
+		t.Errorf("max_loss_close_pct forwarded = %v, want 0.25", got)
 	}
 
 	var resp previewRunStrategyResponse
@@ -113,6 +120,32 @@ func TestPreviewRunStrategy_ForwardsBodyAndReturnsJSON(t *testing.T) {
 	}
 	if len(resp.RequiredRoutes) != 1 || resp.RequiredRoutes[0].Market != "perpetual_futures" {
 		t.Fatalf("required_routes = %+v, want binance/perpetual_futures", resp.RequiredRoutes)
+	}
+	if resp.RiskControls.MaxLossClosePct != 0.2 || resp.RiskControls.MaxLossCloseSource != "strategy" {
+		t.Fatalf("risk_controls = %+v, want strategy 0.2", resp.RiskControls)
+	}
+}
+
+func TestPreviewRunStrategy_RejectsInvalidJSON(t *testing.T) {
+	proxy := &fakeControlPanelStrategyProxy{}
+	s := &server{
+		cpRuntime:   proxy,
+		jwtSecret:   []byte("s"),
+		corsOrigins: []string{"*"},
+	}
+
+	req := withUID(httptest.NewRequest(http.MethodPost,
+		"/api/accounts/7/preview-run-strategy",
+		bytes.NewBufferString(`{"runtime_id":"rt-preview","max_loss_close_pct":"bad"}`)), 17)
+	rec := httptest.NewRecorder()
+
+	s.handlePreviewRunStrategy(rec, req, 7)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+	}
+	if proxy.previewReq != nil {
+		t.Fatal("PreviewRunStrategy gRPC should not be called for invalid JSON")
 	}
 }
 

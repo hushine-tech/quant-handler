@@ -351,7 +351,7 @@ func TestRunStrategy_SelfHostedUsesControlPanelProxy(t *testing.T) {
 		corsOrigins:  []string{"*"},
 	}
 	req := withUID(httptest.NewRequest(http.MethodPost,
-		"/api/accounts/7/run-strategy", bytes.NewBufferString(`{"runtime_id":"rt_self","start_time_ms":1,"end_time_ms":2}`)), 42)
+		"/api/accounts/7/run-strategy", bytes.NewBufferString(`{"runtime_id":"rt_self","start_time_ms":1,"end_time_ms":2,"max_loss_close_pct":0.25}`)), 42)
 	rec := httptest.NewRecorder()
 	s.handleRunStrategy(rec, req, 7)
 
@@ -363,6 +363,9 @@ func TestRunStrategy_SelfHostedUsesControlPanelProxy(t *testing.T) {
 	}
 	if proxy.runReq.GetAccountId() != 7 || proxy.runReq.GetUserId() != 42 {
 		t.Fatalf("proxy request = %+v", proxy.runReq)
+	}
+	if got := proxy.runReq.GetMaxLossClosePct(); got != 0.25 {
+		t.Fatalf("max_loss_close_pct = %v, want 0.25", got)
 	}
 	if resolver.ensureCalls != 0 {
 		t.Fatalf("EnsureHostedRuntime calls = %d, want 0 for self-hosted route", resolver.ensureCalls)

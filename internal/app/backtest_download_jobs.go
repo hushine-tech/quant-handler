@@ -24,11 +24,12 @@ const (
 )
 
 type downloadAndRunRequest struct {
-	StrategyPath string `json:"strategy_path"`
-	Interval     string `json:"interval"`
-	StartTimeMS  int64  `json:"start_time_ms"`
-	EndTimeMS    int64  `json:"end_time_ms"`
-	RuntimeID    string `json:"runtime_id"`
+	StrategyPath    string  `json:"strategy_path"`
+	Interval        string  `json:"interval"`
+	StartTimeMS     int64   `json:"start_time_ms"`
+	EndTimeMS       int64   `json:"end_time_ms"`
+	RuntimeID       string  `json:"runtime_id"`
+	MaxLossClosePct float64 `json:"max_loss_close_pct"`
 }
 
 type downloadRunJob struct {
@@ -180,12 +181,13 @@ func (s *server) runDownloadAndRunJob(ctx context.Context, jobID string, cli str
 	defer cancel()
 
 	preview, err := cli.PreviewRunStrategy(ctx, &strategyv1.PreviewRunStrategyRequest{
-		AccountId:    accountID,
-		StrategyPath: body.StrategyPath,
-		StartTimeMs:  body.StartTimeMS,
-		EndTimeMs:    body.EndTimeMS,
-		UserId:       uid,
-		RuntimeId:    runtimeID,
+		AccountId:       accountID,
+		StrategyPath:    body.StrategyPath,
+		StartTimeMs:     body.StartTimeMS,
+		EndTimeMs:       body.EndTimeMS,
+		UserId:          uid,
+		RuntimeId:       runtimeID,
+		MaxLossClosePct: body.MaxLossClosePct,
 	})
 	if err != nil {
 		fail(err)
@@ -216,13 +218,14 @@ func (s *server) runDownloadAndRunJob(ctx context.Context, jobID string, cli str
 	store.update(jobID, func(job *downloadRunJob) { job.Progress = 0.9 })
 
 	run, err := cli.RunStrategy(ctx, &strategyv1.RunStrategyRequest{
-		AccountId:    accountID,
-		StrategyPath: body.StrategyPath,
-		Interval:     body.Interval,
-		StartTimeMs:  body.StartTimeMS,
-		EndTimeMs:    body.EndTimeMS,
-		UserId:       uid,
-		RuntimeId:    runtimeID,
+		AccountId:       accountID,
+		StrategyPath:    body.StrategyPath,
+		Interval:        body.Interval,
+		StartTimeMs:     body.StartTimeMS,
+		EndTimeMs:       body.EndTimeMS,
+		UserId:          uid,
+		RuntimeId:       runtimeID,
+		MaxLossClosePct: body.MaxLossClosePct,
 	})
 	if err != nil {
 		fail(err)
