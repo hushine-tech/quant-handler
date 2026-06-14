@@ -122,7 +122,7 @@ func TestDownloadAndRunCreatesJob(t *testing.T) {
 		downloadRunJobs: newDownloadRunJobStore(),
 	}
 
-	body := bytes.NewBufferString(`{"runtime_id":"rt-download","start_time_ms":1779033600000,"end_time_ms":1779037200000,"interval":"1m"}`)
+	body := bytes.NewBufferString(`{"runtime_id":"rt-download","start_time_ms":1779033600000,"end_time_ms":1779037200000,"interval":"1m","max_loss_close_pct":0.25}`)
 	req := withUID(httptest.NewRequest(http.MethodPost, "/api/accounts/7/strategy/download-and-run", body), 6)
 	rec := httptest.NewRecorder()
 
@@ -137,6 +137,22 @@ func TestDownloadAndRunCreatesJob(t *testing.T) {
 	}
 	if job.JobID == "" {
 		t.Fatal("job_id is empty")
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if proxy.runReq != nil {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if proxy.previewReq == nil || proxy.runReq == nil {
+		t.Fatalf("strategy proxy requests not completed: preview=%v run=%v", proxy.previewReq != nil, proxy.runReq != nil)
+	}
+	if got := proxy.previewReq.GetMaxLossClosePct(); got != 0.25 {
+		t.Fatalf("preview max_loss_close_pct=%v want 0.25", got)
+	}
+	if got := proxy.runReq.GetMaxLossClosePct(); got != 0.25 {
+		t.Fatalf("run max_loss_close_pct=%v want 0.25", got)
 	}
 }
 

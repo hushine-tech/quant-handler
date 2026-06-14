@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 
@@ -15,11 +16,12 @@ import (
 // ── Request / Response types ─────────────────────────────────────────────────
 
 type runStrategyRequest struct {
-	StrategyPath string `json:"strategy_path"`
-	Interval     string `json:"interval"`
-	StartTimeMs  int64  `json:"start_time_ms"`
-	EndTimeMs    int64  `json:"end_time_ms"`
-	RuntimeID    string `json:"runtime_id"`
+	StrategyPath    string  `json:"strategy_path"`
+	Interval        string  `json:"interval"`
+	StartTimeMs     int64   `json:"start_time_ms"`
+	EndTimeMs       int64   `json:"end_time_ms"`
+	RuntimeID       string  `json:"runtime_id"`
+	MaxLossClosePct float64 `json:"max_loss_close_pct"`
 }
 
 type stopStrategyRequest struct {
@@ -27,10 +29,11 @@ type stopStrategyRequest struct {
 }
 
 type previewRunStrategyRequest struct {
-	StrategyPath string `json:"strategy_path"`
-	StartTimeMs  int64  `json:"start_time_ms"`
-	EndTimeMs    int64  `json:"end_time_ms"`
-	RuntimeID    string `json:"runtime_id"`
+	StrategyPath    string  `json:"strategy_path"`
+	StartTimeMs     int64   `json:"start_time_ms"`
+	EndTimeMs       int64   `json:"end_time_ms"`
+	RuntimeID       string  `json:"runtime_id"`
+	MaxLossClosePct float64 `json:"max_loss_close_pct"`
 }
 
 // Shape of the preview-run JSON response — mirrors PreviewRunStrategyResponse.
@@ -60,6 +63,12 @@ type previewRunStrategyResponse struct {
 	OrderTargets         []strategyOrderTargetJSON `json:"order_targets"`
 	DeclaredOrderTargets []strategyOrderTargetJSON `json:"declared_order_targets"`
 	RequiredRoutes       []strategyRouteJSON       `json:"required_routes"`
+	RiskControls         riskControlsJSON          `json:"risk_controls"`
+}
+
+type riskControlsJSON struct {
+	MaxLossClosePct    float64 `json:"max_loss_close_pct"`
+	MaxLossCloseSource string  `json:"max_loss_close_source"`
 }
 
 type strategyOrderTargetJSON struct {
@@ -156,13 +165,14 @@ func (s *server) handleRunStrategy(w http.ResponseWriter, r *http.Request, accou
 		return
 	}
 	resp, err := cli.RunStrategy(r.Context(), &strategyv1.RunStrategyRequest{
-		AccountId:    accountID,
-		StrategyPath: body.StrategyPath,
-		Interval:     interval,
-		StartTimeMs:  body.StartTimeMs,
-		EndTimeMs:    body.EndTimeMs,
-		UserId:       uid,
-		RuntimeId:    runtimeID,
+		AccountId:       accountID,
+		StrategyPath:    body.StrategyPath,
+		Interval:        interval,
+		StartTimeMs:     body.StartTimeMs,
+		EndTimeMs:       body.EndTimeMs,
+		UserId:          uid,
+		RuntimeId:       runtimeID,
+		MaxLossClosePct: body.MaxLossClosePct,
 	})
 	if err != nil {
 		code, msg := grpcToHTTP(err)
@@ -184,7 +194,10 @@ func (s *server) handlePreviewRunStrategy(w http.ResponseWriter, r *http.Request
 	var body previewRunStrategyRequest
 	// Optional body: empty body is valid (backtest with zero time range → the
 	// evaluator returns an INVALID_REQUEST failure, which is the right signal).
-	_ = json.NewDecoder(r.Body).Decode(&body)
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil && !errors.Is(err, io.EOF) {
+		writeErr(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
 
 	uid, ok := userIDFromRequest(r)
 	if !ok {
@@ -206,12 +219,13 @@ func (s *server) handlePreviewRunStrategy(w http.ResponseWriter, r *http.Request
 		return
 	}
 	resp, err := cli.PreviewRunStrategy(r.Context(), &strategyv1.PreviewRunStrategyRequest{
-		AccountId:    accountID,
-		StrategyPath: body.StrategyPath,
-		StartTimeMs:  body.StartTimeMs,
-		EndTimeMs:    body.EndTimeMs,
-		UserId:       uid,
-		RuntimeId:    runtimeID,
+		AccountId:       accountID,
+		StrategyPath:    body.StrategyPath,
+		StartTimeMs:     body.StartTimeMs,
+		EndTimeMs:       body.EndTimeMs,
+		UserId:          uid,
+		RuntimeId:       runtimeID,
+		MaxLossClosePct: body.MaxLossClosePct,
 	})
 	if err != nil {
 		code, msg := grpcToHTTP(err)
@@ -253,6 +267,10 @@ func (s *server) handlePreviewRunStrategy(w http.ResponseWriter, r *http.Request
 		OrderTargets:         orderTargets,
 		DeclaredOrderTargets: orderTargets,
 		RequiredRoutes:       routes,
+		RiskControls: riskControlsJSON{
+			MaxLossClosePct:    resp.GetRiskControls().GetMaxLossClosePct(),
+			MaxLossCloseSource: resp.GetRiskControls().GetMaxLossCloseSource(),
+		},
 	})
 }
 
