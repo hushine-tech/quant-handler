@@ -136,7 +136,7 @@ func (f *fakeResolver) EnsureHostedRuntime(_ context.Context, userID int64, name
 
 func TestRuntimeRouteByNameReturnsGone(t *testing.T) {
 	resolver := &fakeResolver{
-		resp: controlpanel.Route{RuntimeID: "rt_x", GRPCEndpoint: "10.0.0.1:50053"},
+		resp: controlpanel.Route{RuntimeID: "rt_x"},
 	}
 	s := &server{
 		controlPanel: resolver,

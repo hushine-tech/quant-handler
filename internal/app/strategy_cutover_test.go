@@ -116,12 +116,12 @@ func TestRunStrategy_ControlPanelResourceExhausted(t *testing.T) {
 	}
 }
 
-// TestRunStrategy_HostedEmptyEndpointUsesProxy: hosted runtime
-// routeability is runtime_id + RuntimeChannel owner, not grpc_endpoint.
-func TestRunStrategy_HostedEmptyEndpointUsesProxy(t *testing.T) {
+// TestRunStrategy_HostedRouteUsesProxy: hosted runtime routeability is
+// runtime_id + RuntimeChannel owner.
+func TestRunStrategy_HostedRouteUsesProxy(t *testing.T) {
 	proxy := &fakeControlPanelStrategyProxy{}
 	resolver := &fakeResolver{
-		resolveByIDResp: controlpanel.Route{RuntimeID: "rt_empty", Source: "hosted", GRPCEndpoint: ""},
+		resolveByIDResp: controlpanel.Route{RuntimeID: "rt_empty", Source: "hosted"},
 	}
 	s := &server{
 		controlPanel: resolver,
@@ -338,10 +338,9 @@ func TestRunStrategy_SelfHostedUsesControlPanelProxy(t *testing.T) {
 	proxy := &fakeControlPanelStrategyProxy{}
 	resolver := &fakeResolver{
 		resolveByIDResp: controlpanel.Route{
-			RuntimeID:    "rt_self",
-			Name:         "default",
-			Source:       "self_hosted",
-			GRPCEndpoint: "",
+			RuntimeID: "rt_self",
+			Name:      "default",
+			Source:    "self_hosted",
 		},
 	}
 	s := &server{
@@ -515,11 +514,9 @@ func TestRunStrategy_HostedUsesControlPanelProxy(t *testing.T) {
 	proxy := &fakeControlPanelStrategyProxy{}
 	resolver := &fakeResolver{
 		resolveByIDResp: controlpanel.Route{
-			RuntimeID:    "rt_hosted",
-			Name:         "default",
-			Source:       "hosted",
-			GRPCEndpoint: "",
-			CallerToken:  "compat-debug-only",
+			RuntimeID: "rt_hosted",
+			Name:      "default",
+			Source:    "hosted",
 		},
 	}
 	s := &server{

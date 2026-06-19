@@ -30,19 +30,12 @@ type Resolver interface {
 	EnsureHostedRuntime(ctx context.Context, userID int64, name, resourceProfile string) (EnsureResult, error)
 }
 
-// Route is the resolved runtime metadata. Endpoint/token fields are retained
-// only for compatibility/debug visibility; they are not routing authority for
-// normal strategy session traffic.
-// Mirrors ResolveRuntimeRouteResponse but stays insulated from the proto type
-// so the rest of the handler doesn't import controlpanelv1.
+// Route is the resolved runtime identity. Strategy RPC traffic is always sent
+// to control-panel-service, which proxies it over RuntimeChannel.
 type Route struct {
-	RuntimeID            string
-	Name                 string
-	Source               string
-	GRPCEndpoint         string
-	DebugEndpoint        string
-	CallerToken          string
-	CallerTokenExpiresAt time.Time
+	RuntimeID string
+	Name      string
+	Source    string
 }
 
 type Runtime struct {
@@ -268,18 +261,15 @@ func debugDatasetFromProto(ds *controlpanelv1.DebugDatasetState) *DebugDatasetSt
 }
 
 func routeFromResponse(resp *controlpanelv1.ResolveRuntimeRouteResponse) Route {
-	r := Route{
-		GRPCEndpoint:  resp.GetGrpcEndpoint(),
-		DebugEndpoint: resp.GetDebugEndpoint(),
-		CallerToken:   resp.GetCallerToken(),
-	}
-	if rt := resp.GetRuntime(); rt != nil {
+	return routeFromRuntime(resp.GetRuntime())
+}
+
+func routeFromRuntime(rt *controlpanelv1.Runtime) Route {
+	r := Route{}
+	if rt != nil {
 		r.RuntimeID = rt.GetRuntimeId()
 		r.Name = rt.GetName()
 		r.Source = rt.GetSource()
-	}
-	if ts := resp.GetCallerTokenExpiresAt(); ts != nil && ts.IsValid() {
-		r.CallerTokenExpiresAt = ts.AsTime()
 	}
 	return r
 }
@@ -448,20 +438,8 @@ func (c *Client) EnsureHostedRuntime(ctx context.Context, userID int64, name, re
 		return EnsureResult{}, err
 	}
 	r := EnsureResult{
-		Route: Route{
-			GRPCEndpoint:  resp.GetGrpcEndpoint(),
-			DebugEndpoint: resp.GetDebugEndpoint(),
-			CallerToken:   resp.GetCallerToken(),
-		},
+		Route:       routeFromRuntime(resp.GetRuntime()),
 		Provisioned: resp.GetProvisioned(),
-	}
-	if rt := resp.GetRuntime(); rt != nil {
-		r.RuntimeID = rt.GetRuntimeId()
-		r.Name = rt.GetName()
-		r.Source = rt.GetSource()
-	}
-	if ts := resp.GetCallerTokenExpiresAt(); ts != nil && ts.IsValid() {
-		r.CallerTokenExpiresAt = ts.AsTime()
 	}
 	return r, nil
 }
