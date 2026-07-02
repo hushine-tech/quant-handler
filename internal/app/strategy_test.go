@@ -50,6 +50,8 @@ func TestPreviewRunStrategy_ForwardsBodyAndReturnsJSON(t *testing.T) {
 			RiskControls: &strategyv1.RiskControls{
 				MaxLossClosePct:    0.2,
 				MaxLossCloseSource: "strategy",
+				Leverage:           3,
+				LeverageSource:     "request_default",
 			},
 		},
 	}
@@ -63,7 +65,7 @@ func TestPreviewRunStrategy_ForwardsBodyAndReturnsJSON(t *testing.T) {
 		corsOrigins: []string{"*"},
 	}
 
-	body := `{"runtime_id":"rt-preview","strategy_path":"","start_time_ms":0,"end_time_ms":0,"max_loss_close_pct":0.25}`
+	body := `{"runtime_id":"rt-preview","strategy_path":"","start_time_ms":0,"end_time_ms":0,"max_loss_close_pct":0.25,"leverage":3}`
 	req := withUID(httptest.NewRequest(http.MethodPost,
 		"/api/accounts/7/preview-run-strategy", bytes.NewBufferString(body)), 17)
 	rec := httptest.NewRecorder()
@@ -84,6 +86,9 @@ func TestPreviewRunStrategy_ForwardsBodyAndReturnsJSON(t *testing.T) {
 	}
 	if got := proxy.previewReq.GetMaxLossClosePct(); got != 0.25 {
 		t.Errorf("max_loss_close_pct forwarded = %v, want 0.25", got)
+	}
+	if got := proxy.previewReq.GetLeverage(); got != 3 {
+		t.Errorf("leverage forwarded = %v, want 3", got)
 	}
 
 	var resp previewRunStrategyResponse
@@ -123,6 +128,38 @@ func TestPreviewRunStrategy_ForwardsBodyAndReturnsJSON(t *testing.T) {
 	}
 	if resp.RiskControls.MaxLossClosePct != 0.2 || resp.RiskControls.MaxLossCloseSource != "strategy" {
 		t.Fatalf("risk_controls = %+v, want strategy 0.2", resp.RiskControls)
+	}
+	if resp.RiskControls.Leverage != 3 || resp.RiskControls.LeverageSource != "request_default" {
+		t.Fatalf("risk_controls leverage = %+v, want request_default 3", resp.RiskControls)
+	}
+}
+
+func TestPreviewRunStrategy_UsesRuntimeProxyDeadline(t *testing.T) {
+	proxy := &fakeControlPanelStrategyProxy{}
+	s := &server{
+		controlPanel: &fakeResolver{
+			resp:        controlpanel.Route{RuntimeID: "rt-preview"},
+			runtimeResp: controlpanel.Runtime{RuntimeID: "rt-preview", Role: "executor"},
+		},
+		cpRuntime:   proxy,
+		jwtSecret:   []byte("s"),
+		corsOrigins: []string{"*"},
+	}
+
+	req := withUID(httptest.NewRequest(http.MethodPost,
+		"/api/accounts/7/preview-run-strategy", bytes.NewBufferString(`{"runtime_id":"rt-preview"}`)), 17)
+	rec := httptest.NewRecorder()
+
+	s.handlePreviewRunStrategy(rec, req, 7)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if !proxy.previewDeadlineSet {
+		t.Fatal("PreviewRunStrategy downstream call had no deadline")
+	}
+	if proxy.previewDeadlineUntil <= 0 || proxy.previewDeadlineUntil > previewRunStrategyRPCTimeout {
+		t.Fatalf("PreviewRunStrategy deadline remaining = %v, want within %v", proxy.previewDeadlineUntil, previewRunStrategyRPCTimeout)
 	}
 }
 
@@ -203,6 +240,16 @@ func TestPreviewRunStrategy_RejectsGETMethod(t *testing.T) {
 	}
 	if proxy.previewReq != nil {
 		t.Fatal("gRPC must not be called for GET")
+	}
+}
+
+func TestGrpcToHTTPMapsDeadlineExceededToGatewayTimeout(t *testing.T) {
+	code, msg := grpcToHTTP(status.Error(codes.DeadlineExceeded, "runtime proxy deadline exceeded"))
+	if code != http.StatusGatewayTimeout {
+		t.Fatalf("status = %d, want 504", code)
+	}
+	if !contains(msg, "Runtime did not respond in time") {
+		t.Fatalf("message = %q, want friendly runtime timeout", msg)
 	}
 }
 

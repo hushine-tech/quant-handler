@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -30,16 +31,19 @@ type downloadAndRunRequest struct {
 	EndTimeMS       int64   `json:"end_time_ms"`
 	RuntimeID       string  `json:"runtime_id"`
 	MaxLossClosePct float64 `json:"max_loss_close_pct"`
+	Leverage        float64 `json:"leverage"`
 }
 
 type downloadRunJob struct {
-	JobID     string               `json:"job_id"`
-	Status    downloadRunJobStatus `json:"status"`
-	Progress  float64              `json:"progress"`
-	SessionID string               `json:"session_id,omitempty"`
-	Error     string               `json:"error,omitempty"`
-	CreatedAt time.Time            `json:"created_at"`
-	UpdatedAt time.Time            `json:"updated_at"`
+	JobID     string                  `json:"job_id"`
+	Status    downloadRunJobStatus    `json:"status"`
+	Progress  float64                 `json:"progress"`
+	Message   string                  `json:"message,omitempty"`
+	Requests  []marketDataRequestJSON `json:"requests,omitempty"`
+	SessionID string                  `json:"session_id,omitempty"`
+	Error     string                  `json:"error,omitempty"`
+	CreatedAt time.Time               `json:"created_at"`
+	UpdatedAt time.Time               `json:"updated_at"`
 }
 
 type downloadRunJobStore struct {
@@ -188,6 +192,7 @@ func (s *server) runDownloadAndRunJob(ctx context.Context, jobID string, cli str
 		UserId:          uid,
 		RuntimeId:       runtimeID,
 		MaxLossClosePct: body.MaxLossClosePct,
+		Leverage:        body.Leverage,
 	})
 	if err != nil {
 		fail(err)
@@ -211,11 +216,14 @@ func (s *server) runDownloadAndRunJob(ctx context.Context, jobID string, cli str
 	}
 	store.update(jobID, func(job *downloadRunJob) { job.Progress = 0.35 })
 
-	if err := s.waitForCoverageValidation(ctx, uid, requestIDs, declared, body); err != nil {
+	if err := s.waitForCoverageValidation(ctx, jobID, uid, requestIDs, declared, body); err != nil {
 		fail(err)
 		return
 	}
-	store.update(jobID, func(job *downloadRunJob) { job.Progress = 0.9 })
+	store.update(jobID, func(job *downloadRunJob) {
+		job.Progress = 0.9
+		job.Message = "historical coverage is ready; starting backtest"
+	})
 
 	run, err := cli.RunStrategy(ctx, &strategyv1.RunStrategyRequest{
 		AccountId:       accountID,
@@ -226,6 +234,7 @@ func (s *server) runDownloadAndRunJob(ctx context.Context, jobID string, cli str
 		UserId:          uid,
 		RuntimeId:       runtimeID,
 		MaxLossClosePct: body.MaxLossClosePct,
+		Leverage:        body.Leverage,
 	})
 	if err != nil {
 		fail(err)
@@ -234,6 +243,7 @@ func (s *server) runDownloadAndRunJob(ctx context.Context, jobID string, cli str
 	store.update(jobID, func(job *downloadRunJob) {
 		job.Status = downloadRunReady
 		job.Progress = 1
+		job.Message = "backtest session started"
 		job.SessionID = run.GetSessionId()
 		job.Error = ""
 	})
@@ -275,7 +285,7 @@ func (s *server) createMissingCoverageRequests(ctx context.Context, uid int64, a
 	return requestIDs, nil
 }
 
-func (s *server) waitForCoverageValidation(ctx context.Context, uid int64, requestIDs map[int64]struct{}, declared []*strategyv1.LiveStreamBinding, body downloadAndRunRequest) error {
+func (s *server) waitForCoverageValidation(ctx context.Context, jobID string, uid int64, requestIDs map[int64]struct{}, declared []*strategyv1.LiveStreamBinding, body downloadAndRunRequest) error {
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 	for {
@@ -290,7 +300,17 @@ func (s *server) waitForCoverageValidation(ctx context.Context, uid int64, reque
 			return fmt.Errorf("market-data coverage validation failed")
 		}
 		if len(requestIDs) > 0 {
-			if err := s.failOnHistoricalRequestError(ctx, uid, requestIDs); err != nil {
+			requests, err := s.downloadRunHistoricalRequests(ctx, uid, requestIDs)
+			if err != nil {
+				return err
+			}
+			s.downloadJobs().update(jobID, func(job *downloadRunJob) {
+				job.Status = downloadRunRunning
+				job.Progress = maxDownloadRunProgress(job.Progress, progressFromHistoricalRequests(requests))
+				job.Message = messageFromHistoricalRequests(requests)
+				job.Requests = requests
+			})
+			if err := failOnHistoricalRequestError(requests); err != nil {
 				return err
 			}
 		}
@@ -302,25 +322,105 @@ func (s *server) waitForCoverageValidation(ctx context.Context, uid int64, reque
 	}
 }
 
-func (s *server) failOnHistoricalRequestError(ctx context.Context, uid int64, requestIDs map[int64]struct{}) error {
+func (s *server) downloadRunHistoricalRequests(ctx context.Context, uid int64, requestIDs map[int64]struct{}) ([]marketDataRequestJSON, error) {
 	resp, err := s.marketData.ListMarketDataRequests(ctx, &mdv1.ListMarketDataRequestsRequest{UserId: uid})
 	if err != nil {
-		return err
+		return nil, err
 	}
+	out := make([]marketDataRequestJSON, 0, len(requestIDs))
 	for _, entry := range resp.GetEntries() {
 		req := entry.GetRequest()
 		if _, ok := requestIDs[req.GetRequestId()]; !ok {
 			continue
 		}
-		status := strings.ToLower(strings.TrimSpace(req.GetStatus()))
+		out = append(out, requestToJSON(req))
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].RequestID < out[j].RequestID
+	})
+	return out, nil
+}
+
+func failOnHistoricalRequestError(requests []marketDataRequestJSON) error {
+	for _, req := range requests {
+		status := strings.ToLower(strings.TrimSpace(req.Status))
 		if status == "error" || status == "cancelled" {
-			if req.GetLastError() != "" {
-				return fmt.Errorf("historical request %d %s: %s", req.GetRequestId(), status, req.GetLastError())
+			if req.LastError != "" {
+				return fmt.Errorf("historical request %d %s: %s", req.RequestID, status, req.LastError)
 			}
-			return fmt.Errorf("historical request %d %s", req.GetRequestId(), status)
+			return fmt.Errorf("historical request %d %s", req.RequestID, status)
 		}
 	}
 	return nil
+}
+
+func progressFromHistoricalRequests(requests []marketDataRequestJSON) float64 {
+	if len(requests) == 0 {
+		return 0.36
+	}
+	var weight float64
+	for _, req := range requests {
+		switch strings.ToLower(strings.TrimSpace(req.Status)) {
+		case "ready":
+			weight += 1
+		case "verifying":
+			weight += 0.75
+		case "running", "active":
+			weight += 0.35
+		case "pending":
+			weight += 0.1
+		case "error", "cancelled":
+			weight += 1
+		default:
+			weight += 0.2
+		}
+	}
+	progress := 0.35 + 0.53*(weight/float64(len(requests)))
+	if progress > 0.88 {
+		return 0.88
+	}
+	if progress < 0.36 {
+		return 0.36
+	}
+	return progress
+}
+
+func maxDownloadRunProgress(previous, next float64) float64 {
+	if next > previous {
+		return next
+	}
+	return previous
+}
+
+func messageFromHistoricalRequests(requests []marketDataRequestJSON) string {
+	if len(requests) == 0 {
+		return "waiting for historical request state"
+	}
+	if len(requests) == 1 {
+		req := requests[0]
+		label := strings.TrimSpace(req.Key.Symbol + " " + req.Key.Interval)
+		if label == "" {
+			label = "historical data"
+		}
+		if req.LastError != "" {
+			return fmt.Sprintf("historical request %d %s: %s", req.RequestID, req.Status, req.LastError)
+		}
+		return fmt.Sprintf("historical request %d %s: %s", req.RequestID, req.Status, label)
+	}
+	counts := make(map[string]int, len(requests))
+	for _, req := range requests {
+		status := strings.ToLower(strings.TrimSpace(req.Status))
+		if status == "" {
+			status = "unknown"
+		}
+		counts[status]++
+	}
+	parts := make([]string, 0, len(counts))
+	for status, count := range counts {
+		parts = append(parts, fmt.Sprintf("%s=%d", status, count))
+	}
+	sort.Strings(parts)
+	return fmt.Sprintf("historical download requests: %s", strings.Join(parts, ", "))
 }
 
 func (s *server) validateDeclaredCoverage(ctx context.Context, declared []*strategyv1.LiveStreamBinding, body downloadAndRunRequest) (bool, error) {

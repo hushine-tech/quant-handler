@@ -107,6 +107,63 @@ func TestOrderHistory_accountIDFilterForwarded(t *testing.T) {
 	}
 }
 
+func TestOrderHistory_sessionIDFilterForwardedToAllQueryEndpoints(t *testing.T) {
+	fake := &fakeOrdersClient{
+		ordersResp:   &orderv1.QueryOrdersResponse{Total: 0},
+		intentsResp:  &orderv1.QueryOrderIntentsResponse{Total: 0},
+		attemptsResp: &orderv1.QueryOrderAttemptsResponse{Total: 0},
+		fillsResp:    &orderv1.QueryOrderFillsResponse{Total: 0},
+	}
+	s := newOrderHistoryServer(fake)
+
+	cases := []struct {
+		name string
+		path string
+		call func(http.ResponseWriter, *http.Request)
+		got  func() string
+	}{
+		{
+			name: "orders",
+			path: "/api/orders?session_id=sess-abc",
+			call: s.handleOrderHistory,
+			got:  func() string { return fake.lastOrdersReq.GetSessionId() },
+		},
+		{
+			name: "intents",
+			path: "/api/orders/intents?session_id=sess-abc",
+			call: s.handleOrderIntents,
+			got:  func() string { return fake.lastIntentsReq.GetSessionId() },
+		},
+		{
+			name: "attempts",
+			path: "/api/orders/attempts?session_id=sess-abc",
+			call: s.handleOrderAttempts,
+			got:  func() string { return fake.lastAttemptsReq.GetSessionId() },
+		},
+		{
+			name: "fills",
+			path: "/api/orders/fills?session_id=sess-abc",
+			call: s.handleOrderFills,
+			got:  func() string { return fake.lastFillsReq.GetSessionId() },
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := withOrderUID(httptest.NewRequest(http.MethodGet, tc.path, nil), 7)
+			rec := httptest.NewRecorder()
+			tc.call(rec, req)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+			}
+			if got := tc.got(); got != "sess-abc" {
+				t.Fatalf("session_id = %q, want sess-abc", got)
+			}
+		})
+	}
+}
+
 func TestOrderHistory_offsetAndLimitForwarded(t *testing.T) {
 	fake := &fakeOrdersClient{ordersResp: &orderv1.QueryOrdersResponse{Total: 100}}
 	s := newOrderHistoryServer(fake)
@@ -431,6 +488,9 @@ func TestOrderIntents_envelopeShape(t *testing.T) {
 					RequestedPrice: 50000,
 					StrategyId:     5,
 					Market:         2,
+					Status:         "REJECTED",
+					RejectCode:     "MIN_NOTIONAL_VIOLATION",
+					RejectMessage:  "notional 16.8809 is below min_notional 20",
 					PostOnly:       true,
 					GoodTillDate:   goodTillDate,
 					ReduceOnly:     true,
@@ -468,6 +528,9 @@ func TestOrderIntents_envelopeShape(t *testing.T) {
 			RequestedPrice float64 `json:"requested_price"`
 			StrategyID     int64   `json:"strategy_id"`
 			Market         string  `json:"market"`
+			Status         string  `json:"status"`
+			RejectCode     string  `json:"reject_code"`
+			RejectMessage  string  `json:"reject_message"`
 			PostOnly       bool    `json:"post_only"`
 			GoodTill       string  `json:"good_till_date"`
 			ReduceOnly     bool    `json:"reduce_only"`
@@ -486,6 +549,9 @@ func TestOrderIntents_envelopeShape(t *testing.T) {
 	}
 	if got.RequestedQty != 0.1 || got.RequestedPrice != 50000 || got.StrategyID != 5 || got.Market != "perpetual_futures" {
 		t.Errorf("unexpected item fields: %+v", got)
+	}
+	if got.Status != "REJECTED" || got.RejectCode != "MIN_NOTIONAL_VIOLATION" || got.RejectMessage != "notional 16.8809 is below min_notional 20" {
+		t.Errorf("unexpected reject fields: %+v", got)
 	}
 	if !got.PostOnly || !got.ReduceOnly || got.GoodTill != "2030-01-01T00:00:00Z" {
 		t.Errorf("unexpected order semantics: %+v", got)

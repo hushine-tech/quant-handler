@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	cerrors "github.com/hushine-tech/golang-lib/pkg/errors"
+	errorcodes "github.com/hushine-tech/golang-lib/pkg/errors/codes"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -89,6 +90,38 @@ func TestGrpcToHTTPMapsCommonErrorFirst(t *testing.T) {
 	}
 	if msg == "" {
 		t.Fatal("expected non-empty message")
+	}
+}
+
+func TestGrpcToHTTPSanitizesCommonTimeout(t *testing.T) {
+	err := cerrors.New(errorcodes.Timeout, http.StatusGatewayTimeout, "stream terminated by RST_STREAM with error code: CANCEL")
+
+	code, msg := grpcToHTTP(err)
+
+	if code != http.StatusGatewayTimeout {
+		t.Fatalf("code = %d, want %d", code, http.StatusGatewayTimeout)
+	}
+	if contains(msg, "10002") || contains(msg, "RST_STREAM") || contains(msg, "CANCEL") {
+		t.Fatalf("message leaks low-level transport detail: %q", msg)
+	}
+	if !contains(msg, "Runtime did not respond in time") {
+		t.Fatalf("message = %q, want friendly runtime timeout", msg)
+	}
+}
+
+func TestGrpcToHTTPSanitizesActiveSessionPreflight(t *testing.T) {
+	err := cerrors.New(errorcodes.Unknown, http.StatusBadRequest, "account preflight failed: ACTIVE_SESSION_EXISTS: account already has an active session exchange=0 market=0")
+
+	code, msg := grpcToHTTP(err)
+
+	if code != http.StatusBadRequest {
+		t.Fatalf("code = %d, want %d", code, http.StatusBadRequest)
+	}
+	if contains(msg, "10000") || contains(msg, "exchange=0") || contains(msg, "ACTIVE_SESSION_EXISTS") {
+		t.Fatalf("message leaks internal preflight detail: %q", msg)
+	}
+	if !contains(msg, "Another session is already running") {
+		t.Fatalf("message = %q, want active session guidance", msg)
 	}
 }
 

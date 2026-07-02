@@ -25,6 +25,7 @@ type fakeSessionAccountsClient struct {
 	lastGetSessionReq            *accountv1.GetSessionRequest
 	lastGetAccountReq            *accountv1.GetAccountRequest
 	lastListSessionsReq          *accountv1.ListSessionsRequest
+	lastUpdateSessionReq         *accountv1.UpdateSessionRequest
 
 	// Canned responses.
 	snapshotsResp             *accountv1.ListSessionSnapshotsResponse
@@ -36,6 +37,7 @@ type fakeSessionAccountsClient struct {
 	getAccountErr             error
 	listSessionsResp          *accountv1.ListSessionsResponse
 	listSessionsErr           error
+	updateSessionErr          error
 	accountEnvironment        int32
 	reconciliationSummaryErr  error
 }
@@ -79,6 +81,14 @@ func (f *fakeSessionAccountsClient) ListSessions(_ context.Context, in *accountv
 		return f.listSessionsResp, nil
 	}
 	return &accountv1.ListSessionsResponse{}, nil
+}
+
+func (f *fakeSessionAccountsClient) UpdateSession(_ context.Context, in *accountv1.UpdateSessionRequest, _ ...grpc.CallOption) (*accountv1.UpdateSessionResponse, error) {
+	f.lastUpdateSessionReq = in
+	if f.updateSessionErr != nil {
+		return nil, f.updateSessionErr
+	}
+	return &accountv1.UpdateSessionResponse{}, nil
 }
 
 func (f *fakeSessionAccountsClient) ListSessionSnapshots(_ context.Context, in *accountv1.ListSessionSnapshotsRequest, _ ...grpc.CallOption) (*accountv1.ListSessionSnapshotsResponse, error) {
@@ -750,7 +760,15 @@ func TestGetSessionIntents_HasMoreComputedFromTotal(t *testing.T) {
 	orders := &fakeOrdersClient{
 		intentsResp: &orderv1.QueryOrderIntentsResponse{
 			Intents: []*orderv1.OrderIntentEntry{
-				{IntentId: "i-1", Symbol: "BTCUSDT", Side: "BUY", RequestedQty: 1},
+				{
+					IntentId:      "i-1",
+					Symbol:        "BTCUSDT",
+					Side:          "BUY",
+					RequestedQty:  1,
+					Status:        "REJECTED",
+					RejectCode:    "MIN_NOTIONAL_VIOLATION",
+					RejectMessage: "notional 16.8809 is below min_notional 20",
+				},
 				{IntentId: "i-2", Symbol: "ETHUSDT", Side: "SELL", RequestedQty: 2},
 			},
 			Total: 50,
@@ -785,6 +803,9 @@ func TestGetSessionIntents_HasMoreComputedFromTotal(t *testing.T) {
 	}
 	if body.Items[0]["intent_id"] != "i-1" {
 		t.Errorf("first item intent_id = %v, want i-1", body.Items[0]["intent_id"])
+	}
+	if body.Items[0]["reject_code"] != "MIN_NOTIONAL_VIOLATION" || body.Items[0]["reject_message"] != "notional 16.8809 is below min_notional 20" {
+		t.Errorf("first item reject fields = %+v", body.Items[0])
 	}
 }
 

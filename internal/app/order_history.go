@@ -15,6 +15,7 @@ type orderHistoryFilters struct {
 	userID     int64
 	accountID  int64
 	strategyID int64
+	sessionID  string
 	intentID   string
 	attemptID  string
 	orderID    string
@@ -54,6 +55,7 @@ func (s *server) handleOrderIntents(w http.ResponseWriter, r *http.Request) {
 	resp, err := s.orders.QueryOrderIntents(r.Context(), &orderv1.QueryOrderIntentsRequest{
 		AccountId:  filters.accountID,
 		StrategyId: filters.strategyID,
+		SessionId:  filters.sessionID,
 		Limit:      filters.limit,
 		Offset:     filters.offset,
 		UserId:     filters.userID,
@@ -80,6 +82,9 @@ func (s *server) handleOrderIntents(w http.ResponseWriter, r *http.Request) {
 		ExchangeLabel  string  `json:"exchange_label"`
 		PositionSide   string  `json:"position_side"`
 		SessionID      string  `json:"session_id,omitempty"`
+		Status         string  `json:"status,omitempty"`
+		RejectCode     string  `json:"reject_code,omitempty"`
+		RejectMessage  string  `json:"reject_message,omitempty"`
 		PostOnly       bool    `json:"post_only"`
 		GoodTillDate   string  `json:"good_till_date,omitempty"`
 		ReduceOnly     bool    `json:"reduce_only"`
@@ -103,6 +108,9 @@ func (s *server) handleOrderIntents(w http.ResponseWriter, r *http.Request) {
 			ExchangeLabel:  orderExchangeLabel(it.GetExchange()),
 			PositionSide:   orderPositionSideLabel(it.GetPositionSide()),
 			SessionID:      it.GetSessionId(),
+			Status:         it.GetStatus(),
+			RejectCode:     it.GetRejectCode(),
+			RejectMessage:  it.GetRejectMessage(),
 			PostOnly:       it.GetPostOnly(),
 			GoodTillDate:   protoTime(it.GetGoodTillDate()),
 			ReduceOnly:     it.GetReduceOnly(),
@@ -124,6 +132,7 @@ func (s *server) handleOrderHistory(w http.ResponseWriter, r *http.Request) {
 	resp, err := s.orders.QueryOrders(r.Context(), &orderv1.QueryOrdersRequest{
 		AccountId:  filters.accountID,
 		StrategyId: filters.strategyID,
+		SessionId:  filters.sessionID,
 		IntentId:   filters.intentID,
 		AttemptId:  filters.attemptID,
 		Limit:      filters.limit,
@@ -224,6 +233,7 @@ func (s *server) handleOrderAttempts(w http.ResponseWriter, r *http.Request) {
 	resp, err := s.orders.QueryOrderAttempts(r.Context(), &orderv1.QueryOrderAttemptsRequest{
 		AccountId:  filters.accountID,
 		StrategyId: filters.strategyID,
+		SessionId:  filters.sessionID,
 		IntentId:   filters.intentID,
 		Limit:      filters.limit,
 		Offset:     filters.offset,
@@ -315,6 +325,7 @@ func (s *server) handleOrderFills(w http.ResponseWriter, r *http.Request) {
 	resp, err := s.orders.QueryOrderFills(r.Context(), &orderv1.QueryOrderFillsRequest{
 		AccountId:  filters.accountID,
 		StrategyId: filters.strategyID,
+		SessionId:  filters.sessionID,
 		IntentId:   filters.intentID,
 		AttemptId:  filters.attemptID,
 		OrderId:    filters.orderID,
@@ -441,6 +452,7 @@ func (s *server) parseOrderHistoryFilters(w http.ResponseWriter, r *http.Request
 		userID:     uid,
 		accountID:  accountID,
 		strategyID: strategyID,
+		sessionID:  strings.TrimSpace(q.Get("session_id")),
 		intentID:   strings.TrimSpace(q.Get("intent_id")),
 		attemptID:  strings.TrimSpace(q.Get("attempt_id")),
 		orderID:    strings.TrimSpace(q.Get("order_id")),

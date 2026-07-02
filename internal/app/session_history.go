@@ -337,6 +337,9 @@ func (s *server) getSessionIntents(w http.ResponseWriter, r *http.Request, sessi
 		ExchangeLabel  string  `json:"exchange_label"`
 		PositionSide   string  `json:"position_side"`
 		SessionID      string  `json:"session_id,omitempty"`
+		Status         string  `json:"status,omitempty"`
+		RejectCode     string  `json:"reject_code,omitempty"`
+		RejectMessage  string  `json:"reject_message,omitempty"`
 	}
 
 	intents := resp.GetIntents()
@@ -358,6 +361,9 @@ func (s *server) getSessionIntents(w http.ResponseWriter, r *http.Request, sessi
 			ExchangeLabel:  orderExchangeLabel(it.GetExchange()),
 			PositionSide:   orderPositionSideLabel(it.GetPositionSide()),
 			SessionID:      it.GetSessionId(),
+			Status:         it.GetStatus(),
+			RejectCode:     it.GetRejectCode(),
+			RejectMessage:  it.GetRejectMessage(),
 		})
 	}
 	nextOffset := int32(int(offset) + len(intents))

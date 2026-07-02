@@ -18,6 +18,7 @@ import (
 	grpcclientmw "github.com/hushine-tech/golang-lib/middleware/grpcclient"
 	httpmw "github.com/hushine-tech/golang-lib/middleware/httpserver"
 	cerrors "github.com/hushine-tech/golang-lib/pkg/errors"
+	errorcodes "github.com/hushine-tech/golang-lib/pkg/errors/codes"
 	"github.com/hushine-tech/quant-handler/internal/config"
 	"github.com/hushine-tech/quant-handler/internal/controlpanel"
 	"github.com/hushine-tech/quant-handler/internal/logger"
@@ -499,6 +500,12 @@ func registryEntryToJSON(e *accountv1.AccountRegistryEntry) accountJSON {
 func grpcToHTTP(err error) (int, string) {
 	// Check for CommonError first (grpcclient interceptor converts gRPC errors to CommonError)
 	if httpStatus := cerrors.HTTPStatus(err); httpStatus != 0 {
+		if msg, ok := friendlyTransientRPCMessage(err); ok {
+			return httpStatus, msg
+		}
+		if msg, ok := friendlyKnownBusinessErrorMessage(err); ok {
+			return httpStatus, msg
+		}
 		return httpStatus, err.Error()
 	}
 
@@ -513,7 +520,11 @@ func grpcToHTTP(err error) (int, string) {
 	case codes.InvalidArgument:
 		return http.StatusBadRequest, st.Message()
 	case codes.Unavailable:
-		return http.StatusBadGateway, st.Message()
+		return http.StatusBadGateway, friendlyRuntimeUnavailableMessage
+	case codes.DeadlineExceeded:
+		return http.StatusGatewayTimeout, friendlyRuntimeTimeoutMessage
+	case codes.Canceled:
+		return http.StatusBadGateway, friendlyRuntimeCanceledMessage
 	case codes.Internal:
 		return http.StatusInternalServerError, st.Message()
 	case codes.PermissionDenied:
@@ -525,6 +536,30 @@ func grpcToHTTP(err error) (int, string) {
 	default:
 		return http.StatusBadGateway, st.Message()
 	}
+}
+
+const (
+	friendlyRuntimeTimeoutMessage     = "Runtime did not respond in time. It may be starting, busy with another session, or temporarily unreachable; retry in a few seconds or choose another runtime."
+	friendlyRuntimeCanceledMessage    = "Runtime request was canceled before it completed. Retry in a few seconds or choose another runtime."
+	friendlyRuntimeUnavailableMessage = "Runtime is temporarily unavailable. Retry in a few seconds or choose another runtime."
+)
+
+func friendlyTransientRPCMessage(err error) (string, bool) {
+	if cerrors.Code(err) == errorcodes.Timeout {
+		return friendlyRuntimeTimeoutMessage, true
+	}
+	if cerrors.HTTPStatus(err) == http.StatusServiceUnavailable {
+		return friendlyRuntimeUnavailableMessage, true
+	}
+	return "", false
+}
+
+func friendlyKnownBusinessErrorMessage(err error) (string, bool) {
+	raw := err.Error()
+	if strings.Contains(raw, "ACTIVE_SESSION_EXISTS") {
+		return "Another session is already running for this account. Finish or stop the running session before starting a new one.", true
+	}
+	return "", false
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

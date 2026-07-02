@@ -3,6 +3,7 @@
 /logs
 /.run.pid
 /quant-handler
+/quant-handler.out
 config.local.yaml
 .DS_Store
 .pytest_cache/

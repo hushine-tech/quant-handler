@@ -46,11 +46,16 @@ type issueRuntimeCredentialBody struct {
 // the ONLY response that ever does. The frontend MUST trigger a download
 // and clear the value from memory immediately.
 type issueRuntimeCredentialResponseJSON struct {
-	KeyID         string `json:"key_id"`
-	PrivateKeyPEM string `json:"private_key_pem"`
-	PublicKeyPEM  string `json:"public_key_pem"`
-	CreatedAt     string `json:"created_at"`
-	Role          string `json:"role"`
+	Version             int    `json:"version"`
+	KeyID               string `json:"key_id"`
+	PrivateKeyPEM       string `json:"private_key_pem"`
+	PublicKeyPEM        string `json:"public_key_pem"`
+	CreatedAt           string `json:"created_at"`
+	Role                string `json:"role"`
+	ClientCertPEM       string `json:"client_cert_pem,omitempty"`
+	ClientKeyPEM        string `json:"client_key_pem,omitempty"`
+	ServerCAPEM         string `json:"server_ca_pem,omitempty"`
+	ClientCertExpiresAt string `json:"client_cert_expires_at,omitempty"`
 }
 
 type revokeRuntimeCredentialResponseJSON struct {
@@ -160,13 +165,20 @@ func (s *server) issueRuntimeCredential(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	out := issueRuntimeCredentialResponseJSON{
+		Version:       1,
 		KeyID:         resp.GetKeyId(),
 		PrivateKeyPEM: resp.GetPrivateKeyPem(),
 		PublicKeyPEM:  resp.GetPublicKeyPem(),
 		Role:          resp.GetRole(),
+		ClientCertPEM: resp.GetClientCertPem(),
+		ClientKeyPEM:  resp.GetClientKeyPem(),
+		ServerCAPEM:   resp.GetServerCaPem(),
 	}
 	if resp.GetCreatedAt() != nil {
 		out.CreatedAt = resp.GetCreatedAt().AsTime().UTC().Format(time.RFC3339Nano)
+	}
+	if resp.GetClientCertExpiresAt() != nil {
+		out.ClientCertExpiresAt = resp.GetClientCertExpiresAt().AsTime().UTC().Format(time.RFC3339Nano)
 	}
 	writeJSON(w, http.StatusCreated, out)
 }

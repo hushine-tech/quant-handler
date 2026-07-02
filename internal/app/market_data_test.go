@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 
 	mdv1 "github.com/hushine-tech/control-panel-service/gen/marketdatav1"
@@ -23,6 +24,7 @@ import (
 
 type fakeMarketDataClient struct {
 	mdv1.MarketDataControlPlaneServiceClient // unused methods panic as nil-interface calls
+	mu                                       sync.Mutex
 
 	// Capture last request seen for assertions.
 	lastCreateReq   *mdv1.CreateMarketDataRequestRequest
@@ -35,29 +37,35 @@ type fakeMarketDataClient struct {
 	lastKlinesReq   *mdv1.QueryMarketDataKlinesRequest
 
 	// Canned return values / errors.
-	createResp   *mdv1.CreateMarketDataRequestResponse
-	createErr    error
-	cancelErr    error
-	listResp     *mdv1.ListMarketDataRequestsResponse
-	listErr      error
-	getResp      *mdv1.GetMarketDataStreamStatusResponse
-	getErr       error
-	healthResp   *mdv1.ListSessionDeliveryHealthResponse
-	healthErr    error
-	coverageResp *mdv1.QueryMarketDataCoverageResponse
-	coverageErr  error
-	validateResp *mdv1.ValidateMarketDataCoverageResponse
-	validateErr  error
-	klinesResp   *mdv1.QueryMarketDataKlinesResponse
-	klinesErr    error
+	createResp        *mdv1.CreateMarketDataRequestResponse
+	createErr         error
+	cancelErr         error
+	listResp          *mdv1.ListMarketDataRequestsResponse
+	listErr           error
+	getResp           *mdv1.GetMarketDataStreamStatusResponse
+	getErr            error
+	healthResp        *mdv1.ListSessionDeliveryHealthResponse
+	healthErr         error
+	coverageResp      *mdv1.QueryMarketDataCoverageResponse
+	coverageErr       error
+	validateResp      *mdv1.ValidateMarketDataCoverageResponse
+	validateResponses []*mdv1.ValidateMarketDataCoverageResponse
+	validateErr       error
+	klinesResp        *mdv1.QueryMarketDataKlinesResponse
+	klinesErr         error
+	listCalled        chan struct{}
 }
 
 func (f *fakeMarketDataClient) CreateMarketDataRequest(_ context.Context, in *mdv1.CreateMarketDataRequestRequest, _ ...grpc.CallOption) (*mdv1.CreateMarketDataRequestResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.lastCreateReq = in
 	return f.createResp, f.createErr
 }
 
 func (f *fakeMarketDataClient) CancelMarketDataRequest(_ context.Context, in *mdv1.CancelMarketDataRequestRequest, _ ...grpc.CallOption) (*mdv1.CancelMarketDataRequestResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.lastCancelReq = in
 	if f.cancelErr != nil {
 		return nil, f.cancelErr
@@ -66,21 +74,35 @@ func (f *fakeMarketDataClient) CancelMarketDataRequest(_ context.Context, in *md
 }
 
 func (f *fakeMarketDataClient) ListMarketDataRequests(_ context.Context, in *mdv1.ListMarketDataRequestsRequest, _ ...grpc.CallOption) (*mdv1.ListMarketDataRequestsResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.lastListReq = in
+	if f.listCalled != nil {
+		select {
+		case f.listCalled <- struct{}{}:
+		default:
+		}
+	}
 	return f.listResp, f.listErr
 }
 
 func (f *fakeMarketDataClient) GetMarketDataStreamStatus(_ context.Context, in *mdv1.GetMarketDataStreamStatusRequest, _ ...grpc.CallOption) (*mdv1.GetMarketDataStreamStatusResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.lastGetReq = in
 	return f.getResp, f.getErr
 }
 
 func (f *fakeMarketDataClient) ListSessionDeliveryHealth(_ context.Context, in *mdv1.ListSessionDeliveryHealthRequest, _ ...grpc.CallOption) (*mdv1.ListSessionDeliveryHealthResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.lastHealthReq = in
 	return f.healthResp, f.healthErr
 }
 
 func (f *fakeMarketDataClient) QueryMarketDataCoverage(_ context.Context, in *mdv1.QueryMarketDataCoverageRequest, _ ...grpc.CallOption) (*mdv1.QueryMarketDataCoverageResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.lastCoverageReq = in
 	if f.coverageResp != nil || f.coverageErr != nil {
 		return f.coverageResp, f.coverageErr
@@ -99,7 +121,14 @@ func (f *fakeMarketDataClient) QueryMarketDataCoverage(_ context.Context, in *md
 }
 
 func (f *fakeMarketDataClient) ValidateMarketDataCoverage(_ context.Context, in *mdv1.ValidateMarketDataCoverageRequest, _ ...grpc.CallOption) (*mdv1.ValidateMarketDataCoverageResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.lastValidateReq = in
+	if len(f.validateResponses) > 0 {
+		resp := f.validateResponses[0]
+		f.validateResponses = f.validateResponses[1:]
+		return resp, nil
+	}
 	if f.validateResp != nil || f.validateErr != nil {
 		return f.validateResp, f.validateErr
 	}
@@ -112,6 +141,8 @@ func (f *fakeMarketDataClient) ValidateMarketDataCoverage(_ context.Context, in 
 }
 
 func (f *fakeMarketDataClient) QueryMarketDataKlines(_ context.Context, in *mdv1.QueryMarketDataKlinesRequest, _ ...grpc.CallOption) (*mdv1.QueryMarketDataKlinesResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.lastKlinesReq = in
 	if f.klinesResp != nil || f.klinesErr != nil {
 		return f.klinesResp, f.klinesErr

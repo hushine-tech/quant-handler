@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -51,7 +52,10 @@ func (s *server) handleCoveragePreview(w http.ResponseWriter, r *http.Request, a
 		writeErr(w, http.StatusUnauthorized, "missing user context")
 		return
 	}
-	resp, ok := s.previewStrategyForCoverage(w, r, uid, accountID, body)
+	rpcCtx, cancel := context.WithTimeout(r.Context(), previewRunStrategyRPCTimeout)
+	defer cancel()
+
+	resp, ok := s.previewStrategyForCoverage(rpcCtx, w, r, uid, accountID, body)
 	if !ok {
 		return
 	}
@@ -60,7 +64,7 @@ func (s *server) handleCoveragePreview(w http.ResponseWriter, r *http.Request, a
 		return
 	}
 
-	out, ok := s.buildCoveragePreview(w, r, resp.GetDeclaredInputs(), body)
+	out, ok := s.buildCoveragePreview(rpcCtx, w, resp.GetDeclaredInputs(), body)
 	if !ok {
 		return
 	}
@@ -84,21 +88,21 @@ func decodeCoveragePreviewRequest(w http.ResponseWriter, r *http.Request) (cover
 	return body, true
 }
 
-func (s *server) previewStrategyForCoverage(w http.ResponseWriter, r *http.Request, uid int64, accountID int64, body coveragePreviewRequest) (*strategyv1.PreviewRunStrategyResponse, bool) {
+func (s *server) previewStrategyForCoverage(ctx context.Context, w http.ResponseWriter, r *http.Request, uid int64, accountID int64, body coveragePreviewRequest) (*strategyv1.PreviewRunStrategyResponse, bool) {
 	runtimeID := strings.TrimSpace(body.RuntimeID)
 	if runtimeID == "" {
 		writeErr(w, http.StatusBadRequest, "runtime selection required")
 		return nil, false
 	}
-	policy, ok := s.strategyRoutePolicyForAccount(r.Context(), w, uid, accountID, runtimeID)
+	policy, ok := s.strategyRoutePolicyForAccount(ctx, w, uid, accountID, runtimeID)
 	if !ok {
 		return nil, false
 	}
-	cli, _, ok := s.strategyClient(r.Context(), w, uid, routeEnsure, runtimeID, policy)
+	cli, _, ok := s.strategyClient(ctx, w, uid, routeEnsure, runtimeID, policy)
 	if !ok {
 		return nil, false
 	}
-	resp, err := cli.PreviewRunStrategy(r.Context(), &strategyv1.PreviewRunStrategyRequest{
+	resp, err := cli.PreviewRunStrategy(ctx, &strategyv1.PreviewRunStrategyRequest{
 		AccountId:    accountID,
 		StrategyPath: body.StrategyPath,
 		StartTimeMs:  body.StartTimeMS,
@@ -114,7 +118,7 @@ func (s *server) previewStrategyForCoverage(w http.ResponseWriter, r *http.Reque
 	return resp, true
 }
 
-func (s *server) buildCoveragePreview(w http.ResponseWriter, r *http.Request, declared []*strategyv1.LiveStreamBinding, body coveragePreviewRequest) (coveragePreviewResponse, bool) {
+func (s *server) buildCoveragePreview(ctx context.Context, w http.ResponseWriter, declared []*strategyv1.LiveStreamBinding, body coveragePreviewRequest) (coveragePreviewResponse, bool) {
 	out := coveragePreviewResponse{
 		Complete:        true,
 		CanAutoDownload: true,
@@ -129,7 +133,7 @@ func (s *server) buildCoveragePreview(w http.ResponseWriter, r *http.Request, de
 			Symbol:   key.GetSymbol(),
 			Interval: key.GetInterval(),
 		}
-		resp, err := s.marketData.QueryMarketDataCoverage(r.Context(), &mdv1.QueryMarketDataCoverageRequest{
+		resp, err := s.marketData.QueryMarketDataCoverage(ctx, &mdv1.QueryMarketDataCoverageRequest{
 			Key:     key,
 			StartAt: timestamppb.New(time.UnixMilli(body.StartTimeMS).UTC()),
 			EndAt:   timestamppb.New(time.UnixMilli(body.EndTimeMS).UTC()),

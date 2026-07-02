@@ -50,6 +50,12 @@ strategy proxy; the proxy sends REQUEST frames over the runtime's outbound
 The old name-based debug endpoint `GET /api/_debug/runtime-route` remains
 only as a removal marker and returns `410 Gone`; routing uses `runtime_id` only.
 
+Session status is DB-authoritative after creation. Backtest status/detail reads
+the persisted `strategy_sessions` row directly; demo/live status still attempts
+a runtime refresh, but `DeadlineExceeded` / `Unavailable` falls back to the
+persisted row and returns `status_stale` plus `status_refresh_error` instead of
+surfacing a 504 to the page.
+
 ## Manual stack check (wallet wizard)
 
 1. Run **core-service** (Binance public `exchangeInfo` used for symbol cache; set `SYMBOL_CACHE_TTL` if needed).

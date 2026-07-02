@@ -9,6 +9,8 @@ import (
 	"time"
 
 	mdv1 "github.com/hushine-tech/control-panel-service/gen/marketdatav1"
+	cerrors "github.com/hushine-tech/golang-lib/pkg/errors"
+	errorcodes "github.com/hushine-tech/golang-lib/pkg/errors/codes"
 	"github.com/hushine-tech/quant-handler/internal/controlpanel"
 	strategyv1 "github.com/hushine-tech/strategy-service/gen/strategyv1"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -98,6 +100,83 @@ func TestCoveragePreviewUsesDeclaredInputs(t *testing.T) {
 	}
 }
 
+func TestCoveragePreviewUsesRuntimeProxyDeadline(t *testing.T) {
+	body := bytes.NewBufferString(`{"runtime_id":"rt-coverage","start_time_ms":1779033600000,"end_time_ms":1779037200000}`)
+	req := withUID(httptest.NewRequest(http.MethodPost, "/api/accounts/7/strategy/coverage-preview", body), 6)
+	rec := httptest.NewRecorder()
+	proxy := &fakeControlPanelStrategyProxy{previewResp: &strategyv1.PreviewRunStrategyResponse{
+		Profile:   "backtest",
+		Supported: true,
+		Ok:        true,
+		DeclaredInputs: []*strategyv1.LiveStreamBinding{{
+			Exchange: "binance",
+			Market:   "perpetual_futures",
+			Kind:     "kline",
+			Symbol:   "ETHUSDT",
+			Interval: "1m",
+		}},
+	}}
+	s := &server{
+		jwtSecret:   []byte("s"),
+		corsOrigins: []string{"*"},
+		marketData:  &fakeMarketDataClient{},
+		controlPanel: &fakeResolver{
+			resp:        controlpanel.Route{RuntimeID: "rt-coverage"},
+			runtimeResp: controlpanel.Runtime{RuntimeID: "rt-coverage", Role: "executor"},
+		},
+		cpRuntime: proxy,
+	}
+
+	s.handleCoveragePreview(rec, req, 7)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if !proxy.previewDeadlineSet {
+		t.Fatal("coverage preview downstream call had no deadline")
+	}
+	if proxy.previewDeadlineUntil <= 0 || proxy.previewDeadlineUntil > previewRunStrategyRPCTimeout {
+		t.Fatalf("coverage preview deadline remaining = %v, want within %v", proxy.previewDeadlineUntil, previewRunStrategyRPCTimeout)
+	}
+}
+
+func TestCoveragePreviewSanitizesRuntimeTimeout(t *testing.T) {
+	body := bytes.NewBufferString(`{"runtime_id":"rt-coverage","start_time_ms":1779033600000,"end_time_ms":1779037200000}`)
+	req := withUID(httptest.NewRequest(http.MethodPost, "/api/accounts/7/strategy/coverage-preview", body), 6)
+	rec := httptest.NewRecorder()
+	proxy := &fakeControlPanelStrategyProxy{
+		previewErr: cerrors.New(errorcodes.Timeout, http.StatusGatewayTimeout, "stream terminated by RST_STREAM with error code: CANCEL"),
+	}
+	s := &server{
+		jwtSecret:   []byte("s"),
+		corsOrigins: []string{"*"},
+		marketData:  &fakeMarketDataClient{},
+		controlPanel: &fakeResolver{
+			resp:        controlpanel.Route{RuntimeID: "rt-coverage"},
+			runtimeResp: controlpanel.Runtime{RuntimeID: "rt-coverage", Role: "executor"},
+		},
+		cpRuntime: proxy,
+	}
+
+	s.handleCoveragePreview(rec, req, 7)
+
+	if rec.Code != http.StatusGatewayTimeout {
+		t.Fatalf("status=%d want 504 body=%s", rec.Code, rec.Body.String())
+	}
+	var bodyJSON struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &bodyJSON); err != nil {
+		t.Fatal(err)
+	}
+	if contains(bodyJSON.Error, "10002") || contains(bodyJSON.Error, "RST_STREAM") || contains(bodyJSON.Error, "CANCEL") {
+		t.Fatalf("coverage error leaks transport detail: %q", bodyJSON.Error)
+	}
+	if !contains(bodyJSON.Error, "Runtime did not respond in time") {
+		t.Fatalf("coverage error = %q, want friendly runtime timeout", bodyJSON.Error)
+	}
+}
+
 func TestDownloadAndRunCreatesJob(t *testing.T) {
 	fakeMarket := &fakeMarketDataClient{
 		coverageResp: &mdv1CoverageComplete,
@@ -154,6 +233,116 @@ func TestDownloadAndRunCreatesJob(t *testing.T) {
 	if got := proxy.runReq.GetMaxLossClosePct(); got != 0.25 {
 		t.Fatalf("run max_loss_close_pct=%v want 0.25", got)
 	}
+}
+
+func TestDownloadAndRunJobStatusSurfacesHistoricalRequestState(t *testing.T) {
+	start := time.UnixMilli(1779033600000).UTC()
+	end := time.UnixMilli(1779037200000).UTC()
+	key := &mdv1.StreamKey{Exchange: "binance", Market: "futures", Kind: "kline", Symbol: "ETHUSDT", Interval: "1m"}
+	fakeMarket := &fakeMarketDataClient{
+		createResp: &mdv1.CreateMarketDataRequestResponse{
+			Request: &mdv1.MarketDataRequest{
+				RequestId:        77,
+				UserId:           6,
+				Scope:            "historical",
+				Status:           "pending",
+				Key:              key,
+				RequestedStartAt: timestamppb.New(start),
+				RequestedEndAt:   timestamppb.New(end),
+				CreatedAt:        timestamppb.New(start),
+				UpdatedAt:        timestamppb.New(start),
+			},
+		},
+		listResp: &mdv1.ListMarketDataRequestsResponse{
+			Entries: []*mdv1.MarketDataRequestWithStream{{
+				Request: &mdv1.MarketDataRequest{
+					RequestId:        77,
+					UserId:           6,
+					Scope:            "historical",
+					Status:           "running",
+					Key:              key,
+					RequestedStartAt: timestamppb.New(start),
+					RequestedEndAt:   timestamppb.New(end),
+					CreatedAt:        timestamppb.New(start),
+					UpdatedAt:        timestamppb.New(start.Add(10 * time.Second)),
+				},
+			}},
+		},
+		listCalled: make(chan struct{}, 1),
+		validateResponses: []*mdv1.ValidateMarketDataCoverageResponse{
+			{Ok: false, Key: key, RequestedStartAt: timestamppb.New(start), RequestedEndAt: timestamppb.New(end)},
+			{Ok: true, Key: key, RequestedStartAt: timestamppb.New(start), RequestedEndAt: timestamppb.New(end)},
+		},
+	}
+	proxy := &fakeControlPanelStrategyProxy{previewResp: &strategyv1.PreviewRunStrategyResponse{
+		Profile:   "backtest",
+		Supported: true,
+		Ok:        true,
+		DeclaredInputs: []*strategyv1.LiveStreamBinding{{
+			Exchange: "binance", Market: "perpetual_futures", Kind: "kline", Symbol: "ETHUSDT", Interval: "1m",
+		}},
+	}}
+	s := &server{
+		jwtSecret:   []byte("s"),
+		corsOrigins: []string{"*"},
+		marketData:  fakeMarket,
+		controlPanel: &fakeResolver{
+			resp:        controlpanel.Route{RuntimeID: "rt-download"},
+			runtimeResp: controlpanel.Runtime{RuntimeID: "rt-download", Role: "executor"},
+		},
+		cpRuntime:       proxy,
+		downloadRunJobs: newDownloadRunJobStore(),
+	}
+
+	body := bytes.NewBufferString(`{"runtime_id":"rt-download","start_time_ms":1779033600000,"end_time_ms":1779037200000,"interval":"1m","max_loss_close_pct":0.25}`)
+	req := withUID(httptest.NewRequest(http.MethodPost, "/api/accounts/7/strategy/download-and-run", body), 6)
+	rec := httptest.NewRecorder()
+
+	s.handleDownloadAndRun(rec, req, 7)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var created downloadRunJob
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-fakeMarket.listCalled:
+	case <-time.After(time.Second):
+		t.Fatal("download job did not query historical request state")
+	}
+
+	statusReq := withUID(httptest.NewRequest(http.MethodGet, "/api/strategy/download-and-run-jobs/"+created.JobID, nil), 6)
+	statusRec := httptest.NewRecorder()
+	s.handleDownloadRunJobStatus(statusRec, statusReq)
+	if statusRec.Code != http.StatusOK {
+		t.Fatalf("status endpoint code=%d body=%s", statusRec.Code, statusRec.Body.String())
+	}
+	var statusBody map[string]any
+	if err := json.Unmarshal(statusRec.Body.Bytes(), &statusBody); err != nil {
+		t.Fatal(err)
+	}
+	if statusBody["message"] == "" {
+		t.Fatalf("job status should include a live progress message, body=%s", statusRec.Body.String())
+	}
+	requests, ok := statusBody["requests"].([]any)
+	if !ok || len(requests) != 1 {
+		t.Fatalf("job status should expose historical request details, body=%s", statusRec.Body.String())
+	}
+	first, _ := requests[0].(map[string]any)
+	if first["status"] != "running" || first["request_id"].(float64) != 77 {
+		t.Fatalf("request status = %#v, want request_id=77 status=running", first)
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if proxy.runReq != nil {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("download job did not finish after coverage became valid")
 }
 
 var mdv1CoverageComplete = mdv1.QueryMarketDataCoverageResponse{

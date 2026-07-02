@@ -3,9 +3,11 @@ package app
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	controlpanelv1 "github.com/hushine-tech/control-panel-service/gen/controlpanelv1"
 	accountv1 "github.com/hushine-tech/core-service/gen/accountv1"
@@ -19,20 +21,33 @@ import (
 
 type fakeControlPanelStrategyProxy struct {
 	controlpanelv1.ControlPanelServiceClient
-	runReq      *strategyv1.RunStrategyRequest
-	runResp     *strategyv1.RunStrategyResponse
-	runErr      error
-	statusReq   *strategyv1.GetStrategyStatusRequest
-	statusErr   error
-	stopReq     *strategyv1.StopStrategyRequest
-	stopErr     error
-	previewReq  *strategyv1.PreviewRunStrategyRequest
-	previewResp *strategyv1.PreviewRunStrategyResponse
-	previewErr  error
+	runReq                  *strategyv1.RunStrategyRequest
+	runResp                 *strategyv1.RunStrategyResponse
+	runErr                  error
+	statusReq               *strategyv1.GetStrategyStatusRequest
+	statusErr               error
+	statusBlockUntilContext bool
+	statusDeadlineSet       bool
+	statusDeadlineRemaining time.Duration
+	stopReq                 *strategyv1.StopStrategyRequest
+	stopResp                *strategyv1.StopStrategyResponse
+	stopErr                 error
+	previewReq              *strategyv1.PreviewRunStrategyRequest
+	previewResp             *strategyv1.PreviewRunStrategyResponse
+	previewErr              error
+
+	runDeadlineSet       bool
+	runDeadlineRemaining time.Duration
+	previewDeadlineSet   bool
+	previewDeadlineUntil time.Duration
 }
 
 func (f *fakeControlPanelStrategyProxy) RunStrategy(ctx context.Context, in *strategyv1.RunStrategyRequest, _ ...grpc.CallOption) (*strategyv1.RunStrategyResponse, error) {
 	f.runReq = in
+	if deadline, ok := ctx.Deadline(); ok {
+		f.runDeadlineSet = true
+		f.runDeadlineRemaining = time.Until(deadline)
+	}
 	if f.runErr != nil {
 		return nil, f.runErr
 	}
@@ -44,6 +59,14 @@ func (f *fakeControlPanelStrategyProxy) RunStrategy(ctx context.Context, in *str
 
 func (f *fakeControlPanelStrategyProxy) GetStrategyStatus(ctx context.Context, in *strategyv1.GetStrategyStatusRequest, _ ...grpc.CallOption) (*strategyv1.GetStrategyStatusResponse, error) {
 	f.statusReq = in
+	if deadline, ok := ctx.Deadline(); ok {
+		f.statusDeadlineSet = true
+		f.statusDeadlineRemaining = time.Until(deadline)
+	}
+	if f.statusBlockUntilContext {
+		<-ctx.Done()
+		return nil, status.Error(codes.DeadlineExceeded, ctx.Err().Error())
+	}
 	if f.statusErr != nil {
 		return nil, f.statusErr
 	}
@@ -55,11 +78,18 @@ func (f *fakeControlPanelStrategyProxy) StopStrategy(ctx context.Context, in *st
 	if f.stopErr != nil {
 		return nil, f.stopErr
 	}
+	if f.stopResp != nil {
+		return f.stopResp, nil
+	}
 	return &strategyv1.StopStrategyResponse{Stopped: true}, nil
 }
 
 func (f *fakeControlPanelStrategyProxy) PreviewRunStrategy(ctx context.Context, in *strategyv1.PreviewRunStrategyRequest, _ ...grpc.CallOption) (*strategyv1.PreviewRunStrategyResponse, error) {
 	f.previewReq = in
+	if deadline, ok := ctx.Deadline(); ok {
+		f.previewDeadlineSet = true
+		f.previewDeadlineUntil = time.Until(deadline)
+	}
 	if f.previewErr != nil {
 		return nil, f.previewErr
 	}
@@ -159,7 +189,7 @@ func TestRunStrategy_ExplicitRuntimeIDRoutesByID(t *testing.T) {
 	}
 	req := withUID(httptest.NewRequest(http.MethodPost,
 		"/api/accounts/7/run-strategy",
-		bytes.NewBufferString(`{"runtime_id":"rt_self","start_time_ms":1,"end_time_ms":2}`)), 42)
+		bytes.NewBufferString(`{"runtime_id":"rt_self","start_time_ms":1,"end_time_ms":2,"leverage":5}`)), 42)
 	rec := httptest.NewRecorder()
 	s.handleRunStrategy(rec, req, 7)
 
@@ -174,6 +204,9 @@ func TestRunStrategy_ExplicitRuntimeIDRoutesByID(t *testing.T) {
 	}
 	if proxy.runReq.GetRuntimeId() != "rt_self" {
 		t.Fatalf("proxy RunStrategy runtime_id = %q", proxy.runReq.GetRuntimeId())
+	}
+	if proxy.runReq.GetLeverage() != 5 {
+		t.Fatalf("proxy RunStrategy leverage = %v, want 5", proxy.runReq.GetLeverage())
 	}
 }
 
@@ -419,6 +452,7 @@ func TestStatus_RuntimeOfflineSurfacesProxyError(t *testing.T) {
 			RuntimeId:     "rt_self",
 			Status:        "running",
 			BarsProcessed: 12,
+			Environment:   1,
 		}},
 	}
 	s := &server{
@@ -433,14 +467,82 @@ func TestStatus_RuntimeOfflineSurfacesProxyError(t *testing.T) {
 	rec := httptest.NewRecorder()
 	s.handleStrategySession(rec, req)
 
-	if rec.Code != http.StatusBadGateway {
-		t.Fatalf("status = %d, want 502; body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 stale fallback; body=%s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Status             string `json:"status"`
+		BarsProcessed      int32  `json:"bars_processed"`
+		StatusStale        bool   `json:"status_stale"`
+		StatusRefreshError string `json:"status_refresh_error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Status != "running" || body.BarsProcessed != 12 || !body.StatusStale {
+		t.Fatalf("body = %+v, want persisted running status with stale marker", body)
+	}
+	if contains(body.StatusRefreshError, "runtime stream disconnected") || !contains(body.StatusRefreshError, "Runtime is temporarily unavailable") {
+		t.Fatalf("status_refresh_error = %q, want friendly unavailable message", body.StatusRefreshError)
 	}
 	if proxy.statusReq == nil || proxy.statusReq.GetRuntimeId() != "rt_self" {
 		t.Fatalf("proxy status req = %+v, want rt_self", proxy.statusReq)
 	}
 	if resolver.resolveByIDCalls != 1 || resolver.ensureCalls != 0 {
 		t.Fatalf("resolver calls resolve=%d ensure=%d, want 1/0", resolver.resolveByIDCalls, resolver.ensureCalls)
+	}
+}
+
+func TestStatus_BacktestUsesPersistedSessionWithoutRuntimeStatusRPC(t *testing.T) {
+	proxy := &fakeControlPanelStrategyProxy{}
+	resolver := &fakeResolver{
+		resolveByIDResp: controlpanel.Route{
+			RuntimeID: "rt_backtest",
+			Name:      "hosted",
+			Source:    "hosted",
+		},
+	}
+	accounts := &fakeSessionAccountsClient{
+		getSessionResp: &accountv1.GetSessionResponse{Session: &accountv1.StrategySessionEntry{
+			SessionId:     "sess_backtest",
+			UserId:        42,
+			RuntimeId:     "rt_backtest",
+			Status:        "running",
+			BarsProcessed: 2048,
+			Environment:   0,
+		}},
+	}
+	s := &server{
+		accounts:     accounts,
+		controlPanel: resolver,
+		cpRuntime:    proxy,
+		jwtSecret:    []byte("s"),
+		corsOrigins:  []string{"*"},
+	}
+	req := withUID(httptest.NewRequest(http.MethodGet, "/api/strategy-sessions/sess_backtest", nil), 42)
+	rec := httptest.NewRecorder()
+
+	s.handleStrategySession(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if proxy.statusReq != nil {
+		t.Fatalf("GetStrategyStatus should not be called for backtest session: %+v", proxy.statusReq)
+	}
+	if resolver.resolveByIDCalls != 0 {
+		t.Fatalf("ResolveRouteByID calls=%d, want 0 for persisted backtest status", resolver.resolveByIDCalls)
+	}
+	var body struct {
+		Status        string `json:"status"`
+		BarsProcessed int32  `json:"bars_processed"`
+		StatusStale   bool   `json:"status_stale"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Status != "running" || body.BarsProcessed != 2048 || body.StatusStale {
+		t.Fatalf("body = %+v, want persisted backtest status without stale marker", body)
 	}
 }
 
@@ -460,6 +562,7 @@ func TestStatus_UsesSessionRuntimeID(t *testing.T) {
 			RuntimeId:     "rt_session",
 			Status:        "running",
 			BarsProcessed: 9,
+			Environment:   1,
 		}},
 	}
 	s := &server{
@@ -481,6 +584,65 @@ func TestStatus_UsesSessionRuntimeID(t *testing.T) {
 	}
 	if proxy.statusReq == nil || proxy.statusReq.GetRuntimeId() != "rt_session" {
 		t.Fatalf("proxy status req = %+v, want rt_session", proxy.statusReq)
+	}
+}
+
+func TestStatus_RuntimeStatusCallHasDeadline(t *testing.T) {
+	proxy := &fakeControlPanelStrategyProxy{statusBlockUntilContext: true}
+	resolver := &fakeResolver{
+		resolveByIDResp: controlpanel.Route{
+			RuntimeID: "rt_session",
+			Name:      "default",
+			Source:    "hosted",
+		},
+	}
+	accounts := &fakeSessionAccountsClient{
+		getSessionResp: &accountv1.GetSessionResponse{Session: &accountv1.StrategySessionEntry{
+			SessionId:     "sess_abc",
+			UserId:        42,
+			RuntimeId:     "rt_session",
+			Status:        "running",
+			BarsProcessed: 9,
+			Environment:   1,
+		}},
+	}
+	s := &server{
+		accounts:     accounts,
+		controlPanel: resolver,
+		cpRuntime:    proxy,
+		jwtSecret:    []byte("s"),
+		corsOrigins:  []string{"*"},
+	}
+
+	start := time.Now()
+	req := withUID(httptest.NewRequest(http.MethodGet, "/api/strategy-sessions/sess_abc", nil), 42)
+	rec := httptest.NewRecorder()
+	s.handleStrategySession(rec, req)
+	elapsed := time.Since(start)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 stale status fallback; body=%s", rec.Code, rec.Body.String())
+	}
+	if !proxy.statusDeadlineSet {
+		t.Fatal("GetStrategyStatus downstream call had no deadline")
+	}
+	if proxy.statusDeadlineRemaining <= 0 || proxy.statusDeadlineRemaining > statusStrategyRPCTimeout {
+		t.Fatalf("GetStrategyStatus deadline remaining = %v, want within %v", proxy.statusDeadlineRemaining, statusStrategyRPCTimeout)
+	}
+	if elapsed > statusStrategyRPCTimeout+time.Second {
+		t.Fatalf("status call elapsed = %v, want bounded by %v", elapsed, statusStrategyRPCTimeout)
+	}
+	var body struct {
+		Status             string `json:"status"`
+		BarsProcessed      int64  `json:"bars_processed"`
+		StatusStale        bool   `json:"status_stale"`
+		StatusRefreshError string `json:"status_refresh_error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Status != "running" || body.BarsProcessed != 9 || !body.StatusStale || body.StatusRefreshError == "" {
+		t.Fatalf("body = %+v, want stale persisted running status with refresh error", body)
 	}
 }
 
@@ -542,6 +704,38 @@ func TestRunStrategy_HostedUsesControlPanelProxy(t *testing.T) {
 	}
 	if resolver.ensureCalls != 0 {
 		t.Fatalf("EnsureHostedRuntime calls = %d, want 0 for healthy hosted route", resolver.ensureCalls)
+	}
+}
+
+func TestRunStrategy_UsesRuntimeProxyDeadline(t *testing.T) {
+	proxy := &fakeControlPanelStrategyProxy{}
+	resolver := &fakeResolver{
+		resolveByIDResp: controlpanel.Route{
+			RuntimeID: "rt_exec",
+			Name:      "default",
+			Source:    "hosted",
+		},
+	}
+	s := &server{
+		controlPanel: resolver,
+		cpRuntime:    proxy,
+		jwtSecret:    []byte("s"),
+		corsOrigins:  []string{"*"},
+	}
+
+	req := withUID(httptest.NewRequest(http.MethodPost,
+		"/api/accounts/7/run-strategy", bytes.NewBufferString(`{"runtime_id":"rt_exec","start_time_ms":1,"end_time_ms":2}`)), 42)
+	rec := httptest.NewRecorder()
+	s.handleRunStrategy(rec, req, 7)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if !proxy.runDeadlineSet {
+		t.Fatal("RunStrategy downstream call had no deadline")
+	}
+	if proxy.runDeadlineRemaining <= 0 || proxy.runDeadlineRemaining > runStrategyRPCTimeout {
+		t.Fatalf("RunStrategy deadline remaining = %v, want within %v", proxy.runDeadlineRemaining, runStrategyRPCTimeout)
 	}
 }
 
@@ -718,5 +912,117 @@ func TestStop_UsesSessionRuntimeID(t *testing.T) {
 	}
 	if proxy.stopReq == nil || proxy.stopReq.GetRuntimeId() != "rt_session" {
 		t.Fatalf("proxy stop req = %+v", proxy.stopReq)
+	}
+}
+
+func TestStop_StaleRuntimeSessionMarksRecoverable(t *testing.T) {
+	proxy := &fakeControlPanelStrategyProxy{
+		stopErr: status.Error(codes.NotFound, "session sess_abc not found"),
+	}
+	resolver := &fakeResolver{
+		resolveByIDResp: controlpanel.Route{
+			RuntimeID: "rt_session",
+			Name:      "default",
+			Source:    "hosted",
+		},
+	}
+	accounts := &fakeSessionAccountsClient{
+		getSessionResp: &accountv1.GetSessionResponse{Session: &accountv1.StrategySessionEntry{
+			SessionId:     "sess_abc",
+			UserId:        42,
+			Status:        "running",
+			RuntimeId:     "rt_session",
+			BarsProcessed: 17,
+		}},
+	}
+	s := &server{
+		accounts:     accounts,
+		controlPanel: resolver,
+		cpRuntime:    proxy,
+		jwtSecret:    []byte("s"),
+		corsOrigins:  []string{"*"},
+	}
+	req := withUID(httptest.NewRequest(http.MethodPost,
+		"/api/strategy-sessions/sess_abc/stop", bytes.NewBufferString(`{}`)), 42)
+	rec := httptest.NewRecorder()
+	s.handleStrategySession(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if accounts.lastUpdateSessionReq == nil {
+		t.Fatal("UpdateSession was not called")
+	}
+	if got := accounts.lastUpdateSessionReq.GetStatus(); got != "recoverable" {
+		t.Fatalf("UpdateSession status = %q, want recoverable", got)
+	}
+	if got := accounts.lastUpdateSessionReq.GetRuntimeId(); got != "rt_session" {
+		t.Fatalf("UpdateSession runtime_id = %q, want rt_session", got)
+	}
+	if got := accounts.lastUpdateSessionReq.GetBarsProcessed(); got != 17 {
+		t.Fatalf("UpdateSession bars_processed = %d, want 17", got)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("response json: %v; body=%s", err, rec.Body.String())
+	}
+	if stopped, _ := out["stopped"].(bool); !stopped {
+		t.Fatalf("stopped = %v, want true; body=%s", out["stopped"], rec.Body.String())
+	}
+	if status, _ := out["status"].(string); status != "recoverable" {
+		t.Fatalf("status = %q, want recoverable; body=%s", status, rec.Body.String())
+	}
+}
+
+func TestStop_RuntimeRejectsWithoutErrorMarksRecoverable(t *testing.T) {
+	proxy := &fakeControlPanelStrategyProxy{
+		stopResp: &strategyv1.StopStrategyResponse{Stopped: false},
+	}
+	resolver := &fakeResolver{
+		resolveByIDResp: controlpanel.Route{
+			RuntimeID: "rt_session",
+			Name:      "default",
+			Source:    "hosted",
+		},
+	}
+	accounts := &fakeSessionAccountsClient{
+		getSessionResp: &accountv1.GetSessionResponse{Session: &accountv1.StrategySessionEntry{
+			SessionId:     "sess_abc",
+			UserId:        42,
+			Status:        "running",
+			RuntimeId:     "rt_session",
+			BarsProcessed: 17,
+		}},
+	}
+	s := &server{
+		accounts:     accounts,
+		controlPanel: resolver,
+		cpRuntime:    proxy,
+		jwtSecret:    []byte("s"),
+		corsOrigins:  []string{"*"},
+	}
+	req := withUID(httptest.NewRequest(http.MethodPost,
+		"/api/strategy-sessions/sess_abc/stop", bytes.NewBufferString(`{}`)), 42)
+	rec := httptest.NewRecorder()
+	s.handleStrategySession(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if accounts.lastUpdateSessionReq == nil {
+		t.Fatal("UpdateSession was not called")
+	}
+	if got := accounts.lastUpdateSessionReq.GetStatus(); got != "recoverable" {
+		t.Fatalf("UpdateSession status = %q, want recoverable", got)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("response json: %v; body=%s", err, rec.Body.String())
+	}
+	if stopped, _ := out["stopped"].(bool); !stopped {
+		t.Fatalf("stopped = %v, want true; body=%s", out["stopped"], rec.Body.String())
+	}
+	if status, _ := out["status"].(string); status != "recoverable" {
+		t.Fatalf("status = %q, want recoverable; body=%s", status, rec.Body.String())
 	}
 }

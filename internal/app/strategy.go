@@ -7,10 +7,19 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	accountv1 "github.com/hushine-tech/core-service/gen/accountv1"
 	"github.com/hushine-tech/quant-handler/internal/controlpanel"
 	strategyv1 "github.com/hushine-tech/strategy-service/gen/strategyv1"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+)
+
+const (
+	previewRunStrategyRPCTimeout = 15 * time.Second
+	runStrategyRPCTimeout        = 30 * time.Second
+	statusStrategyRPCTimeout     = 3 * time.Second
 )
 
 // ── Request / Response types ─────────────────────────────────────────────────
@@ -22,6 +31,7 @@ type runStrategyRequest struct {
 	EndTimeMs       int64   `json:"end_time_ms"`
 	RuntimeID       string  `json:"runtime_id"`
 	MaxLossClosePct float64 `json:"max_loss_close_pct"`
+	Leverage        float64 `json:"leverage"`
 }
 
 type stopStrategyRequest struct {
@@ -34,6 +44,7 @@ type previewRunStrategyRequest struct {
 	EndTimeMs       int64   `json:"end_time_ms"`
 	RuntimeID       string  `json:"runtime_id"`
 	MaxLossClosePct float64 `json:"max_loss_close_pct"`
+	Leverage        float64 `json:"leverage"`
 }
 
 // Shape of the preview-run JSON response — mirrors PreviewRunStrategyResponse.
@@ -69,6 +80,8 @@ type previewRunStrategyResponse struct {
 type riskControlsJSON struct {
 	MaxLossClosePct    float64 `json:"max_loss_close_pct"`
 	MaxLossCloseSource string  `json:"max_loss_close_source"`
+	Leverage           float64 `json:"leverage"`
+	LeverageSource     string  `json:"leverage_source"`
 }
 
 type strategyOrderTargetJSON struct {
@@ -164,7 +177,9 @@ func (s *server) handleRunStrategy(w http.ResponseWriter, r *http.Request, accou
 	if !ok {
 		return
 	}
-	resp, err := cli.RunStrategy(r.Context(), &strategyv1.RunStrategyRequest{
+	rpcCtx, cancel := context.WithTimeout(r.Context(), runStrategyRPCTimeout)
+	defer cancel()
+	resp, err := cli.RunStrategy(rpcCtx, &strategyv1.RunStrategyRequest{
 		AccountId:       accountID,
 		StrategyPath:    body.StrategyPath,
 		Interval:        interval,
@@ -173,6 +188,7 @@ func (s *server) handleRunStrategy(w http.ResponseWriter, r *http.Request, accou
 		UserId:          uid,
 		RuntimeId:       runtimeID,
 		MaxLossClosePct: body.MaxLossClosePct,
+		Leverage:        body.Leverage,
 	})
 	if err != nil {
 		code, msg := grpcToHTTP(err)
@@ -218,7 +234,9 @@ func (s *server) handlePreviewRunStrategy(w http.ResponseWriter, r *http.Request
 	if !ok {
 		return
 	}
-	resp, err := cli.PreviewRunStrategy(r.Context(), &strategyv1.PreviewRunStrategyRequest{
+	rpcCtx, cancel := context.WithTimeout(r.Context(), previewRunStrategyRPCTimeout)
+	defer cancel()
+	resp, err := cli.PreviewRunStrategy(rpcCtx, &strategyv1.PreviewRunStrategyRequest{
 		AccountId:       accountID,
 		StrategyPath:    body.StrategyPath,
 		StartTimeMs:     body.StartTimeMs,
@@ -226,6 +244,7 @@ func (s *server) handlePreviewRunStrategy(w http.ResponseWriter, r *http.Request
 		UserId:          uid,
 		RuntimeId:       runtimeID,
 		MaxLossClosePct: body.MaxLossClosePct,
+		Leverage:        body.Leverage,
 	})
 	if err != nil {
 		code, msg := grpcToHTTP(err)
@@ -270,6 +289,8 @@ func (s *server) handlePreviewRunStrategy(w http.ResponseWriter, r *http.Request
 		RiskControls: riskControlsJSON{
 			MaxLossClosePct:    resp.GetRiskControls().GetMaxLossClosePct(),
 			MaxLossCloseSource: resp.GetRiskControls().GetMaxLossCloseSource(),
+			Leverage:           resp.GetRiskControls().GetLeverage(),
+			LeverageSource:     resp.GetRiskControls().GetLeverageSource(),
 		},
 	})
 }
@@ -372,14 +393,11 @@ func (s *server) handleStrategySession(w http.ResponseWriter, r *http.Request) {
 	}
 	runtimeID := session.GetRuntimeId()
 	if strategySessionTerminal(session.GetStatus()) {
-		writeJSON(w, http.StatusOK, map[string]any{
-			"status":         session.GetStatus(),
-			"bars_processed": session.GetBarsProcessed(),
-			"error":          session.GetError(),
-			"runtime_id":     runtimeID,
-			"runtime_source": session.GetRuntimeSource(),
-			"runtime_name":   session.GetRuntimeName(),
-		})
+		writeSessionStatusJSON(w, session, runtimeID, "")
+		return
+	}
+	if session.GetEnvironment() == 0 {
+		writeSessionStatusJSON(w, session, runtimeID, "")
 		return
 	}
 	policy, ok := s.strategyRoutePolicyForSelectedRuntime(r.Context(), w, uid, runtimeID, session.GetEnvironment())
@@ -393,12 +411,19 @@ func (s *server) handleStrategySession(w http.ResponseWriter, r *http.Request) {
 	if runtimeID == "" {
 		runtimeID = selectedRuntimeID
 	}
-	resp, err := cli.GetStrategyStatus(r.Context(), &strategyv1.GetStrategyStatusRequest{
+	rpcCtx, cancel := context.WithTimeout(r.Context(), statusStrategyRPCTimeout)
+	defer cancel()
+	resp, err := cli.GetStrategyStatus(rpcCtx, &strategyv1.GetStrategyStatusRequest{
 		SessionId: sessionID,
 		UserId:    uid,
 		RuntimeId: runtimeID,
 	})
 	if err != nil {
+		if shouldServePersistedSessionStatus(err) {
+			_, msg := grpcToHTTP(err)
+			writeSessionStatusJSON(w, session, runtimeID, msg)
+			return
+		}
 		code, msg := grpcToHTTP(err)
 		writeErr(w, code, msg)
 		return
@@ -410,6 +435,31 @@ func (s *server) handleStrategySession(w http.ResponseWriter, r *http.Request) {
 		"error":          resp.GetError(),
 		"runtime_id":     runtimeID,
 	})
+}
+
+func shouldServePersistedSessionStatus(err error) bool {
+	switch status.Code(err) {
+	case codes.DeadlineExceeded, codes.Unavailable:
+		return true
+	default:
+		return false
+	}
+}
+
+func writeSessionStatusJSON(w http.ResponseWriter, session *accountv1.StrategySessionEntry, runtimeID string, refreshErr string) {
+	payload := map[string]any{
+		"status":         session.GetStatus(),
+		"bars_processed": session.GetBarsProcessed(),
+		"error":          session.GetError(),
+		"runtime_id":     runtimeID,
+		"runtime_source": session.GetRuntimeSource(),
+		"runtime_name":   session.GetRuntimeName(),
+	}
+	if refreshErr != "" {
+		payload["status_stale"] = true
+		payload["status_refresh_error"] = refreshErr
+	}
+	writeJSON(w, http.StatusOK, payload)
 }
 
 func (s *server) handleStopStrategy(w http.ResponseWriter, r *http.Request, sessionID string) {
@@ -457,9 +507,31 @@ func (s *server) handleStopStrategy(w http.ResponseWriter, r *http.Request, sess
 		RuntimeId:  runtimeID,
 	})
 	if err != nil {
+		if reason, ok := s.markRecoverableForStaleRuntimeStop(r.Context(), session, runtimeID, err); ok {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"stopped":     true,
+				"stop_action": action.String(),
+				"runtime_id":  runtimeID,
+				"status":      "recoverable",
+				"error":       reason,
+			})
+			return
+		}
 		code, msg := grpcToHTTP(err)
 		writeErr(w, code, msg)
 		return
+	}
+	if !resp.GetStopped() && action != strategyv1.StopAction_STOP_ACTION_CANCEL {
+		if reason, ok := s.markRecoverableForRejectedRuntimeStop(r.Context(), session, runtimeID); ok {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"stopped":     true,
+				"stop_action": action.String(),
+				"runtime_id":  runtimeID,
+				"status":      "recoverable",
+				"error":       reason,
+			})
+			return
+		}
 	}
 	out := map[string]any{
 		"stopped":     resp.GetStopped(),
@@ -475,6 +547,54 @@ func (s *server) handleStopStrategy(w http.ResponseWriter, r *http.Request, sess
 		}
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *server) markRecoverableForStaleRuntimeStop(ctx context.Context, session *accountv1.StrategySessionEntry, runtimeID string, stopErr error) (string, bool) {
+	if s.accounts == nil || session == nil || !isStaleRuntimeStopError(stopErr) {
+		return "", false
+	}
+	reason := "stop_recovered:runtime_session_missing: runtime no longer owns this session; marked recoverable"
+	if msg := strings.TrimSpace(status.Convert(stopErr).Message()); msg != "" {
+		reason += ": " + msg
+	}
+	return reason, s.markSessionRecoverableForStop(ctx, session, runtimeID, reason)
+}
+
+func (s *server) markRecoverableForRejectedRuntimeStop(ctx context.Context, session *accountv1.StrategySessionEntry, runtimeID string) (string, bool) {
+	if s.accounts == nil || session == nil {
+		return "", false
+	}
+	reason := "stop_recovered:runtime_stop_not_accepted: runtime returned stopped=false without a terminal DB update; marked recoverable"
+	return reason, s.markSessionRecoverableForStop(ctx, session, runtimeID, reason)
+}
+
+func (s *server) markSessionRecoverableForStop(ctx context.Context, session *accountv1.StrategySessionEntry, runtimeID string, reason string) bool {
+	if runtimeID == "" {
+		runtimeID = session.GetRuntimeId()
+	}
+	updateCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	_, err := s.accounts.UpdateSession(updateCtx, &accountv1.UpdateSessionRequest{
+		SessionId:     session.GetSessionId(),
+		Status:        "recoverable",
+		BarsProcessed: session.GetBarsProcessed(),
+		Error:         reason,
+		RuntimeId:     runtimeID,
+	})
+	return err == nil
+}
+
+func isStaleRuntimeStopError(err error) bool {
+	code := status.Code(err)
+	if code == codes.NotFound {
+		return true
+	}
+	if code != codes.FailedPrecondition && code != codes.Unavailable {
+		return false
+	}
+	msg := strings.ToLower(status.Convert(err).Message())
+	return strings.Contains(msg, "session") && strings.Contains(msg, "not found") ||
+		strings.Contains(msg, "runtime already ended")
 }
 
 func (s *server) loadSessionForRuntimeRoute(w http.ResponseWriter, r *http.Request, sessionID string, userID int64) (*accountv1.StrategySessionEntry, bool) {
