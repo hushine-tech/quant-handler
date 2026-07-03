@@ -26,6 +26,8 @@ type fakeSessionAccountsClient struct {
 	lastGetAccountReq            *accountv1.GetAccountRequest
 	lastListSessionsReq          *accountv1.ListSessionsRequest
 	lastUpdateSessionReq         *accountv1.UpdateSessionRequest
+	lastIndicatorDefinitionsReq  *accountv1.ListStrategyIndicatorsRequest
+	lastIndicatorChunksReq       *accountv1.ListStrategyIndicatorChunksRequest
 
 	// Canned responses.
 	snapshotsResp             *accountv1.ListSessionSnapshotsResponse
@@ -38,6 +40,10 @@ type fakeSessionAccountsClient struct {
 	listSessionsResp          *accountv1.ListSessionsResponse
 	listSessionsErr           error
 	updateSessionErr          error
+	indicatorDefinitionsResp  *accountv1.ListStrategyIndicatorsResponse
+	indicatorDefinitionsErr   error
+	indicatorChunksResp       *accountv1.ListStrategyIndicatorChunksResponse
+	indicatorChunksErr        error
 	accountEnvironment        int32
 	reconciliationSummaryErr  error
 }
@@ -107,6 +113,28 @@ func (f *fakeSessionAccountsClient) GetSessionReconciliationSummary(_ context.Co
 		return nil, f.reconciliationSummaryErr
 	}
 	return f.reconciliationSummaryResp, nil
+}
+
+func (f *fakeSessionAccountsClient) ListStrategyIndicators(_ context.Context, in *accountv1.ListStrategyIndicatorsRequest, _ ...grpc.CallOption) (*accountv1.ListStrategyIndicatorsResponse, error) {
+	f.lastIndicatorDefinitionsReq = in
+	if f.indicatorDefinitionsErr != nil {
+		return nil, f.indicatorDefinitionsErr
+	}
+	if f.indicatorDefinitionsResp != nil {
+		return f.indicatorDefinitionsResp, nil
+	}
+	return &accountv1.ListStrategyIndicatorsResponse{}, nil
+}
+
+func (f *fakeSessionAccountsClient) ListStrategyIndicatorChunks(_ context.Context, in *accountv1.ListStrategyIndicatorChunksRequest, _ ...grpc.CallOption) (*accountv1.ListStrategyIndicatorChunksResponse, error) {
+	f.lastIndicatorChunksReq = in
+	if f.indicatorChunksErr != nil {
+		return nil, f.indicatorChunksErr
+	}
+	if f.indicatorChunksResp != nil {
+		return f.indicatorChunksResp, nil
+	}
+	return &accountv1.ListStrategyIndicatorChunksResponse{}, nil
 }
 
 // Reuse ``fakeOrdersClient`` defined in order_history_test.go — it already

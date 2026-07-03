@@ -128,6 +128,12 @@ func (s *server) handleSessions(w http.ResponseWriter, r *http.Request) {
 		case "lifecycle-events":
 			s.getSessionLifecycleEvents(w, r, sessionID)
 			return
+		case "indicators":
+			s.getSessionIndicators(w, r, sessionID)
+			return
+		case "indicators/chunks":
+			s.getSessionIndicatorChunks(w, r, sessionID)
+			return
 		}
 	}
 
