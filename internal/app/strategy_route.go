@@ -6,8 +6,6 @@ import (
 	"net/http"
 
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 
 	controlpanelv1 "github.com/hushine-tech/control-panel-service/gen/controlpanelv1"
 	"github.com/hushine-tech/quant-handler/internal/controlpanel"
@@ -32,14 +30,6 @@ func (c controlPanelStrategyClient) GetStrategyStatus(ctx context.Context, in *s
 
 func (c controlPanelStrategyClient) StopStrategy(ctx context.Context, in *strategyv1.StopStrategyRequest, opts ...grpc.CallOption) (*strategyv1.StopStrategyResponse, error) {
 	return c.rpc.StopStrategy(ctx, in, opts...)
-}
-
-func (c controlPanelStrategyClient) GetLiveConsumptionDiagnostics(ctx context.Context, in *strategyv1.GetLiveConsumptionDiagnosticsRequest, opts ...grpc.CallOption) (*strategyv1.GetLiveConsumptionDiagnosticsResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "control-panel proxy does not implement live diagnostics")
-}
-
-func (c controlPanelStrategyClient) ValidateStrategyCode(ctx context.Context, in *strategyv1.ValidateStrategyCodeRequest, opts ...grpc.CallOption) (*strategyv1.ValidateStrategyCodeResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "control-panel proxy does not implement strategy validation")
 }
 
 // resolveStrategyRuntime resolves a runtime route via control-panel and returns
