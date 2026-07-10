@@ -34,7 +34,7 @@ type coveragePreviewInputJSON struct {
 	NonDownloadableReason string                    `json:"non_downloadable_reason,omitempty"`
 }
 
-func (s *server) handleCoveragePreview(w http.ResponseWriter, r *http.Request, accountID int64) {
+func (s *server) handleCoveragePreview(w http.ResponseWriter, r *http.Request, portfolioID int64) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -55,7 +55,7 @@ func (s *server) handleCoveragePreview(w http.ResponseWriter, r *http.Request, a
 	rpcCtx, cancel := context.WithTimeout(r.Context(), previewRunStrategyRPCTimeout)
 	defer cancel()
 
-	resp, ok := s.previewStrategyForCoverage(rpcCtx, w, r, uid, accountID, body)
+	resp, ok := s.previewStrategyForCoverage(rpcCtx, w, r, uid, portfolioID, body)
 	if !ok {
 		return
 	}
@@ -88,13 +88,13 @@ func decodeCoveragePreviewRequest(w http.ResponseWriter, r *http.Request) (cover
 	return body, true
 }
 
-func (s *server) previewStrategyForCoverage(ctx context.Context, w http.ResponseWriter, r *http.Request, uid int64, accountID int64, body coveragePreviewRequest) (*strategyv1.PreviewRunStrategyResponse, bool) {
+func (s *server) previewStrategyForCoverage(ctx context.Context, w http.ResponseWriter, r *http.Request, uid int64, portfolioID int64, body coveragePreviewRequest) (*strategyv1.PreviewRunStrategyResponse, bool) {
 	runtimeID := strings.TrimSpace(body.RuntimeID)
 	if runtimeID == "" {
 		writeErr(w, http.StatusBadRequest, "runtime selection required")
 		return nil, false
 	}
-	policy, ok := s.strategyRoutePolicyForAccount(ctx, w, uid, accountID, runtimeID)
+	policy, ok := s.strategyRoutePolicyForPortfolio(ctx, w, uid, portfolioID, runtimeID)
 	if !ok {
 		return nil, false
 	}
@@ -103,7 +103,7 @@ func (s *server) previewStrategyForCoverage(ctx context.Context, w http.Response
 		return nil, false
 	}
 	resp, err := cli.PreviewRunStrategy(ctx, &strategyv1.PreviewRunStrategyRequest{
-		AccountId:    accountID,
+		PortfolioId:    portfolioID,
 		StrategyPath: body.StrategyPath,
 		StartTimeMs:  body.StartTimeMS,
 		EndTimeMs:    body.EndTimeMS,

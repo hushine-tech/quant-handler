@@ -17,7 +17,7 @@ type loadDebugDatasetBody struct {
 	EndTimeMS   int64  `json:"end_time_ms"`
 }
 
-func (s *server) handleAccountDebugDataset(w http.ResponseWriter, r *http.Request, accountID int64) {
+func (s *server) handlePortfolioDebugDataset(w http.ResponseWriter, r *http.Request, portfolioID int64) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -50,7 +50,7 @@ func (s *server) handleAccountDebugDataset(w http.ResponseWriter, r *http.Reques
 	}
 	state, err := s.controlPanel.LoadDebugDataset(r.Context(), controlpanel.LoadDebugDatasetArgs{
 		UserID:      uid,
-		AccountID:   accountID,
+		PortfolioID:   portfolioID,
 		RuntimeID:   runtimeID,
 		Market:      market,
 		Symbol:      symbol,

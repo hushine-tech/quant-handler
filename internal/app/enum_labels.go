@@ -1,6 +1,6 @@
 package app
 
-func accountEnvironmentFromBody(body createAccountBodyExt) int32 {
+func portfolioEnvironmentFromBody(body createPortfolioBodyExt) int32 {
 	switch body.Environment {
 	case 1, 2:
 		return body.Environment

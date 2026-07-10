@@ -11,7 +11,7 @@ import (
 	"time"
 
 	mdv1 "github.com/hushine-tech/control-panel-service/gen/marketdatav1"
-	accountv1 "github.com/hushine-tech/core-service/gen/accountv1"
+	portfoliov1 "github.com/hushine-tech/core-service/gen/portfoliov1"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -43,7 +43,7 @@ type debugPackageBody struct {
 	InitialBalance float64 `json:"initial_balance"`
 }
 
-func (s *server) handleAccountDebugPackage(w http.ResponseWriter, r *http.Request, accountID int64) {
+func (s *server) handlePortfolioDebugPackage(w http.ResponseWriter, r *http.Request, portfolioID int64) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -57,7 +57,7 @@ func (s *server) handleAccountDebugPackage(w http.ResponseWriter, r *http.Reques
 		writeErr(w, http.StatusUnauthorized, "missing user context")
 		return
 	}
-	if !s.ensureDebugPackageAccountAccess(w, r, uid, accountID) {
+	if !s.ensureDebugPackagePortfolioAccess(w, r, uid, portfolioID) {
 		return
 	}
 	var body debugPackageBody
@@ -66,8 +66,8 @@ func (s *server) handleAccountDebugPackage(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	normalizeDebugPackageBody(&body)
-	if uid <= 0 || accountID <= 0 || body.Exchange != "binance" || body.Market != debugPackageStrategyMarket || body.Symbol == "" || body.Interval == "" {
-		writeErr(w, http.StatusBadRequest, "account_id, binance perpetual_futures market, symbol, and interval are required")
+	if uid <= 0 || portfolioID <= 0 || body.Exchange != "binance" || body.Market != debugPackageStrategyMarket || body.Symbol == "" || body.Interval == "" {
+		writeErr(w, http.StatusBadRequest, "portfolio_id, binance perpetual_futures market, symbol, and interval are required")
 		return
 	}
 	if body.StartTimeMS <= 0 || body.EndTimeMS <= body.StartTimeMS {
@@ -126,12 +126,12 @@ func (s *server) handleAccountDebugPackage(w http.ResponseWriter, r *http.Reques
 	_ = addZipFile(zw, "data.parquet", parquetBytes)
 }
 
-func (s *server) ensureDebugPackageAccountAccess(w http.ResponseWriter, r *http.Request, uid int64, accountID int64) bool {
-	if s.accounts == nil {
+func (s *server) ensureDebugPackagePortfolioAccess(w http.ResponseWriter, r *http.Request, uid int64, portfolioID int64) bool {
+	if s.portfolios == nil {
 		return true
 	}
-	resp, err := s.accounts.GetAccount(r.Context(), &accountv1.GetAccountRequest{
-		AccountId: accountID,
+	resp, err := s.portfolios.GetPortfolio(r.Context(), &portfoliov1.GetPortfolioRequest{
+		PortfolioId: portfolioID,
 		UserId:    uid,
 	})
 	if err != nil {
@@ -139,8 +139,8 @@ func (s *server) ensureDebugPackageAccountAccess(w http.ResponseWriter, r *http.
 		writeErr(w, code, msg)
 		return false
 	}
-	if resp.GetAccount() == nil {
-		writeErr(w, http.StatusNotFound, "account not found")
+	if resp.GetPortfolio() == nil {
+		writeErr(w, http.StatusNotFound, "portfolio not found")
 		return false
 	}
 	return true

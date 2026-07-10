@@ -23,7 +23,7 @@ func TestCORSPreflightBypassesAuth(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})))
 
-	req := httptest.NewRequest(http.MethodOptions, "/api/accounts", nil)
+	req := httptest.NewRequest(http.MethodOptions, "/api/portfolios", nil)
 	req.Header.Set("Origin", "http://localhost:5173")
 	rec := httptest.NewRecorder()
 
@@ -70,7 +70,7 @@ func TestAuthRejectsMissingBearerToken(t *testing.T) {
 		t.Fatal("downstream handler should not be called")
 	}))
 
-	req := httptest.NewRequest(http.MethodGet, "/api/accounts", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/portfolios", nil)
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
@@ -109,8 +109,22 @@ func TestGrpcToHTTPSanitizesCommonTimeout(t *testing.T) {
 	}
 }
 
+func TestGrpcToHTTPMapsUnavailableToBackendServiceMessage(t *testing.T) {
+	code, msg := grpcToHTTP(status.Error(codes.Unavailable, "connection refused"))
+
+	if code != http.StatusBadGateway {
+		t.Fatalf("code = %d, want %d", code, http.StatusBadGateway)
+	}
+	if contains(msg, "Runtime") {
+		t.Fatalf("message = %q, should not describe a generic backend outage as runtime-specific", msg)
+	}
+	if !contains(msg, "Backend service") {
+		t.Fatalf("message = %q, want backend service unavailable guidance", msg)
+	}
+}
+
 func TestGrpcToHTTPSanitizesActiveSessionPreflight(t *testing.T) {
-	err := cerrors.New(errorcodes.Unknown, http.StatusBadRequest, "account preflight failed: ACTIVE_SESSION_EXISTS: account already has an active session exchange=0 market=0")
+	err := cerrors.New(errorcodes.Unknown, http.StatusBadRequest, "portfolio preflight failed: ACTIVE_SESSION_EXISTS: portfolio already has an active session exchange=0 market=0")
 
 	code, msg := grpcToHTTP(err)
 
@@ -125,15 +139,32 @@ func TestGrpcToHTTPSanitizesActiveSessionPreflight(t *testing.T) {
 	}
 }
 
+func TestGrpcToHTTPSanitizesVenueCredentialPrecondition(t *testing.T) {
+	err := cerrors.New(errorcodes.Unknown, http.StatusBadRequest, `venue credential is invalid or lacks Binance futures account permission: binance demo: futures portfolio (v3): binance API error 401: {"code":-2015,"msg":"Invalid API-key, IP, or permissions for action"}`)
+
+	code, msg := grpcToHTTP(err)
+
+	if code != http.StatusBadRequest {
+		t.Fatalf("code = %d, want %d", code, http.StatusBadRequest)
+	}
+	if contains(msg, "10000") {
+		t.Fatalf("message leaks internal common error code: %q", msg)
+	}
+	if !contains(msg, "venue credential is invalid or lacks Binance futures account permission") ||
+		!contains(msg, "Invalid API-key, IP, or permissions") {
+		t.Fatalf("message = %q, want credential and Binance reason", msg)
+	}
+}
+
 func TestGrpcToHTTPMapsNotFound(t *testing.T) {
-	err := status.Error(codes.NotFound, "missing account")
+	err := status.Error(codes.NotFound, "missing portfolio")
 
 	code, msg := grpcToHTTP(err)
 
 	if code != http.StatusNotFound {
 		t.Fatalf("code = %d, want %d", code, http.StatusNotFound)
 	}
-	if msg != "missing account" {
-		t.Fatalf("msg = %q, want %q", msg, "missing account")
+	if msg != "missing portfolio" {
+		t.Fatalf("msg = %q, want %q", msg, "missing portfolio")
 	}
 }

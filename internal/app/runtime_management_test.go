@@ -197,7 +197,7 @@ func TestRuntimeManagement_GetRuntimeDebugDataset(t *testing.T) {
 		debugDataset: controlpanel.DebugDatasetState{
 			DatasetID:      "dbg-1",
 			UserID:         42,
-			AccountID:      7,
+			PortfolioID:      7,
 			RuntimeID:      "rt-debug",
 			Market:         "futures",
 			Symbol:         "ETHUSDT",

@@ -15,7 +15,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-func TestAccountDebugPackage_DownloadsZipWithParquet(t *testing.T) {
+func TestPortfolioDebugPackage_DownloadsZipWithParquet(t *testing.T) {
 	start := int64(1735689600000)
 	end := int64(1735689660000)
 	fake := &fakeMarketDataClient{
@@ -53,7 +53,7 @@ func TestAccountDebugPackage_DownloadsZipWithParquet(t *testing.T) {
 		},
 	}
 	s := newServerWithFakeMarketData(t, fake)
-	req := withUID(httptest.NewRequest(http.MethodPost, "/api/accounts/7/debug-package", strings.NewReader(`{
+	req := withUID(httptest.NewRequest(http.MethodPost, "/api/portfolios/7/debug-package", strings.NewReader(`{
 		"market":"perpetual_futures",
 		"symbol":"BTCUSDT",
 		"interval":"1m",
@@ -64,7 +64,7 @@ func TestAccountDebugPackage_DownloadsZipWithParquet(t *testing.T) {
 	}`)), 42)
 	rr := httptest.NewRecorder()
 
-	s.handleAccountsByID().ServeHTTP(rr, req)
+	s.handlePortfoliosByID().ServeHTTP(rr, req)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, body=%s", rr.Code, rr.Body.String())
@@ -128,7 +128,7 @@ func TestAccountDebugPackage_DownloadsZipWithParquet(t *testing.T) {
 	}
 }
 
-func TestAccountDebugPackage_RejectsIncompleteCoverage(t *testing.T) {
+func TestPortfolioDebugPackage_RejectsIncompleteCoverage(t *testing.T) {
 	fake := &fakeMarketDataClient{
 		validateResp: &mdv1.ValidateMarketDataCoverageResponse{
 			Key:           &mdv1.StreamKey{Exchange: "binance", Market: "futures", Kind: "kline", Symbol: "BTCUSDT", Interval: "1m"},
@@ -139,7 +139,7 @@ func TestAccountDebugPackage_RejectsIncompleteCoverage(t *testing.T) {
 		},
 	}
 	s := newServerWithFakeMarketData(t, fake)
-	req := withUID(httptest.NewRequest(http.MethodPost, "/api/accounts/7/debug-package", strings.NewReader(`{
+	req := withUID(httptest.NewRequest(http.MethodPost, "/api/portfolios/7/debug-package", strings.NewReader(`{
 		"market":"perpetual_futures",
 		"symbol":"BTCUSDT",
 		"interval":"1m",
@@ -148,14 +148,14 @@ func TestAccountDebugPackage_RejectsIncompleteCoverage(t *testing.T) {
 	}`)), 42)
 	rr := httptest.NewRecorder()
 
-	s.handleAccountDebugPackage(rr, req, 7)
+	s.handlePortfolioDebugPackage(rr, req, 7)
 
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, body=%s", rr.Code, rr.Body.String())
 	}
 }
 
-func TestAccountDebugPackage_RejectsStaleValidationWhenRowsIncomplete(t *testing.T) {
+func TestPortfolioDebugPackage_RejectsStaleValidationWhenRowsIncomplete(t *testing.T) {
 	start := int64(1735689600000)
 	fake := &fakeMarketDataClient{
 		validateResp: &mdv1.ValidateMarketDataCoverageResponse{
@@ -180,7 +180,7 @@ func TestAccountDebugPackage_RejectsStaleValidationWhenRowsIncomplete(t *testing
 		},
 	}
 	s := newServerWithFakeMarketData(t, fake)
-	req := withUID(httptest.NewRequest(http.MethodPost, "/api/accounts/7/debug-package", strings.NewReader(`{
+	req := withUID(httptest.NewRequest(http.MethodPost, "/api/portfolios/7/debug-package", strings.NewReader(`{
 		"market":"perpetual_futures",
 		"symbol":"BTCUSDT",
 		"interval":"1m",
@@ -189,7 +189,7 @@ func TestAccountDebugPackage_RejectsStaleValidationWhenRowsIncomplete(t *testing
 	}`)), 42)
 	rr := httptest.NewRecorder()
 
-	s.handleAccountDebugPackage(rr, req, 7)
+	s.handlePortfolioDebugPackage(rr, req, 7)
 
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, body=%s", rr.Code, rr.Body.String())

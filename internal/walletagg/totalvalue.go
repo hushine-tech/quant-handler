@@ -4,7 +4,7 @@ import (
 	"math"
 	"strings"
 
-	accountv1 "github.com/hushine-tech/core-service/gen/accountv1"
+	portfoliov1 "github.com/hushine-tech/core-service/gen/portfoliov1"
 )
 
 const qtyEps = 1e-12
@@ -26,7 +26,7 @@ func TotalsMatch(sum, total float64) bool {
 
 // SpotEstimatedValue mirrors strategy SpotWallet.get_estimated_value when all priced assets have marks;
 // assets with qty>0 but no price are skipped (partial sum). Always includes free+locked.
-func SpotEstimatedValue(sw *accountv1.SpotWallet) float64 {
+func SpotEstimatedValue(sw *portfoliov1.SpotWallet) float64 {
 	if sw == nil {
 		return 0
 	}
@@ -45,7 +45,7 @@ func SpotEstimatedValue(sw *accountv1.SpotWallet) float64 {
 	return ev
 }
 
-func spotAssetMark(a *accountv1.SpotAsset) float64 {
+func spotAssetMark(a *portfoliov1.SpotAsset) float64 {
 	if a == nil {
 		return 0
 	}
@@ -58,9 +58,9 @@ func spotAssetMark(a *accountv1.SpotAsset) float64 {
 	return 0
 }
 
-// FuturesPositionEquity approximates the account-level futures equity directly
+// FuturesPositionEquity approximates the portfolio-level futures equity directly
 // from the protobuf wallet fields exposed by core-service.
-func FuturesPositionEquity(fw *accountv1.FuturesWallet) float64 {
+func FuturesPositionEquity(fw *portfoliov1.FuturesWallet) float64 {
 	if fw == nil {
 		return 0
 	}
@@ -109,13 +109,13 @@ func FuturesPositionEquity(fw *accountv1.FuturesWallet) float64 {
 	}
 }
 
-func isolatedWBRaw(p *accountv1.FuturesPosition) float64 {
+func isolatedWBRaw(p *portfoliov1.FuturesPosition) float64 {
 	// Simplified: treat initial_balance as wallet shell regardless of position state.
 	return p.GetInitialBalance()
 }
 
 // TotalValue matches strategy _compute_total_value: futures equity + spot estimated (spot falls back to free+locked if no priced assets).
-func TotalValue(fw *accountv1.FuturesWallet, sw *accountv1.SpotWallet) float64 {
+func TotalValue(fw *portfoliov1.FuturesWallet, sw *portfoliov1.SpotWallet) float64 {
 	feq := FuturesPositionEquity(fw)
 	se := SpotEstimatedValue(sw)
 	if sw != nil && len(sw.GetAssets()) > 0 {
@@ -137,7 +137,7 @@ func TotalValue(fw *accountv1.FuturesWallet, sw *accountv1.SpotWallet) float64 {
 }
 
 // FuturesWalletBalanceAndAvailable sets bootstrap aggregates with a flat-book approximation.
-func FuturesWalletBalanceAndAvailable(fw *accountv1.FuturesWallet) (wb, av float64) {
+func FuturesWalletBalanceAndAvailable(fw *portfoliov1.FuturesWallet) (wb, av float64) {
 	if fw == nil {
 		return 0, 0
 	}

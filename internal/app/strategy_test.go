@@ -67,7 +67,7 @@ func TestPreviewRunStrategy_ForwardsBodyAndReturnsJSON(t *testing.T) {
 
 	body := `{"runtime_id":"rt-preview","strategy_path":"","start_time_ms":0,"end_time_ms":0,"max_loss_close_pct":0.25,"leverage":3}`
 	req := withUID(httptest.NewRequest(http.MethodPost,
-		"/api/accounts/7/preview-run-strategy", bytes.NewBufferString(body)), 17)
+		"/api/portfolios/7/preview-run-strategy", bytes.NewBufferString(body)), 17)
 	rec := httptest.NewRecorder()
 
 	s.handlePreviewRunStrategy(rec, req, 7)
@@ -78,8 +78,8 @@ func TestPreviewRunStrategy_ForwardsBodyAndReturnsJSON(t *testing.T) {
 	if proxy.previewReq == nil {
 		t.Fatal("PreviewRunStrategy gRPC was not called")
 	}
-	if got := proxy.previewReq.GetAccountId(); got != 7 {
-		t.Errorf("account_id forwarded = %d, want 7", got)
+	if got := proxy.previewReq.GetPortfolioId(); got != 7 {
+		t.Errorf("portfolio_id forwarded = %d, want 7", got)
 	}
 	if got := proxy.previewReq.GetUserId(); got != 17 {
 		t.Errorf("user_id forwarded = %d, want 17", got)
@@ -147,7 +147,7 @@ func TestPreviewRunStrategy_UsesRuntimeProxyDeadline(t *testing.T) {
 	}
 
 	req := withUID(httptest.NewRequest(http.MethodPost,
-		"/api/accounts/7/preview-run-strategy", bytes.NewBufferString(`{"runtime_id":"rt-preview"}`)), 17)
+		"/api/portfolios/7/preview-run-strategy", bytes.NewBufferString(`{"runtime_id":"rt-preview"}`)), 17)
 	rec := httptest.NewRecorder()
 
 	s.handlePreviewRunStrategy(rec, req, 7)
@@ -172,7 +172,7 @@ func TestPreviewRunStrategy_RejectsInvalidJSON(t *testing.T) {
 	}
 
 	req := withUID(httptest.NewRequest(http.MethodPost,
-		"/api/accounts/7/preview-run-strategy",
+		"/api/portfolios/7/preview-run-strategy",
 		bytes.NewBufferString(`{"runtime_id":"rt-preview","max_loss_close_pct":"bad"}`)), 17)
 	rec := httptest.NewRecorder()
 
@@ -201,7 +201,7 @@ func TestPreviewRunStrategy_PropagatesFailedPreconditionFromBackend(t *testing.T
 	}
 
 	req := withUID(httptest.NewRequest(http.MethodPost,
-		"/api/accounts/7/preview-run-strategy", bytes.NewBufferString(`{"runtime_id":"rt-preview"}`)), 17)
+		"/api/portfolios/7/preview-run-strategy", bytes.NewBufferString(`{"runtime_id":"rt-preview"}`)), 17)
 	rec := httptest.NewRecorder()
 
 	s.handlePreviewRunStrategy(rec, req, 7)
@@ -230,7 +230,7 @@ func TestPreviewRunStrategy_RejectsGETMethod(t *testing.T) {
 	}
 
 	req := withUID(httptest.NewRequest(http.MethodGet,
-		"/api/accounts/7/preview-run-strategy", nil), 17)
+		"/api/portfolios/7/preview-run-strategy", nil), 17)
 	rec := httptest.NewRecorder()
 
 	s.handlePreviewRunStrategy(rec, req, 7)

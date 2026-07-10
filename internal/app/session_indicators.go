@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/hushine-tech/core-service/gen/accountv1"
+	"github.com/hushine-tech/core-service/gen/portfoliov1"
 )
 
 type strategyIndicatorDefinitionJSON struct {
@@ -35,7 +35,7 @@ type strategyIndicatorChunkJSON struct {
 }
 
 func (s *server) getSessionIndicators(w http.ResponseWriter, r *http.Request, sessionID string) {
-	if s.accounts == nil {
+	if s.portfolios == nil {
 		writeErr(w, http.StatusServiceUnavailable, "core-service not configured")
 		return
 	}
@@ -45,7 +45,7 @@ func (s *server) getSessionIndicators(w http.ResponseWriter, r *http.Request, se
 		return
 	}
 
-	resp, err := s.accounts.ListStrategyIndicators(r.Context(), &accountv1.ListStrategyIndicatorsRequest{
+	resp, err := s.portfolios.ListStrategyIndicators(r.Context(), &portfoliov1.ListStrategyIndicatorsRequest{
 		SessionId: strings.TrimSpace(sessionID),
 		StreamKey: strings.TrimSpace(r.URL.Query().Get("stream_key")),
 		UserId:    uid,
@@ -64,7 +64,7 @@ func (s *server) getSessionIndicators(w http.ResponseWriter, r *http.Request, se
 }
 
 func (s *server) getSessionIndicatorChunks(w http.ResponseWriter, r *http.Request, sessionID string) {
-	if s.accounts == nil {
+	if s.portfolios == nil {
 		writeErr(w, http.StatusServiceUnavailable, "core-service not configured")
 		return
 	}
@@ -95,7 +95,7 @@ func (s *server) getSessionIndicatorChunks(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	resp, err := s.accounts.ListStrategyIndicatorChunks(r.Context(), &accountv1.ListStrategyIndicatorChunksRequest{
+	resp, err := s.portfolios.ListStrategyIndicatorChunks(r.Context(), &portfoliov1.ListStrategyIndicatorChunksRequest{
 		SessionId:     strings.TrimSpace(sessionID),
 		StreamKey:     streamKey,
 		IndicatorKeys: parseCommaSeparated(q.Get("keys")),
@@ -137,7 +137,7 @@ func parseCommaSeparated(raw string) []string {
 	return out
 }
 
-func strategyIndicatorDefinitionToJSON(def *accountv1.StrategyIndicatorDefinition) strategyIndicatorDefinitionJSON {
+func strategyIndicatorDefinitionToJSON(def *portfoliov1.StrategyIndicatorDefinition) strategyIndicatorDefinitionJSON {
 	if def == nil {
 		return strategyIndicatorDefinitionJSON{}
 	}
@@ -156,7 +156,7 @@ func strategyIndicatorDefinitionToJSON(def *accountv1.StrategyIndicatorDefinitio
 	}
 }
 
-func strategyIndicatorChunkToJSON(chunk *accountv1.StrategyIndicatorChunk) strategyIndicatorChunkJSON {
+func strategyIndicatorChunkToJSON(chunk *portfoliov1.StrategyIndicatorChunk) strategyIndicatorChunkJSON {
 	if chunk == nil {
 		return strategyIndicatorChunkJSON{}
 	}

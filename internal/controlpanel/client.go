@@ -107,7 +107,7 @@ type DebugWorkspaceState struct {
 type DebugDatasetState struct {
 	DatasetID      string
 	UserID         int64
-	AccountID      int64
+	PortfolioID      int64
 	RuntimeID      string
 	Market         string
 	Symbol         string
@@ -123,7 +123,7 @@ type DebugDatasetState struct {
 
 type LoadDebugDatasetArgs struct {
 	UserID      int64
-	AccountID   int64
+	PortfolioID   int64
 	RuntimeID   string
 	Market      string
 	Symbol      string
@@ -242,7 +242,7 @@ func debugDatasetFromProto(ds *controlpanelv1.DebugDatasetState) *DebugDatasetSt
 	out := &DebugDatasetState{
 		DatasetID:      ds.GetDatasetId(),
 		UserID:         ds.GetUserId(),
-		AccountID:      ds.GetAccountId(),
+		PortfolioID:      ds.GetPortfolioId(),
 		RuntimeID:      ds.GetRuntimeId(),
 		Market:         ds.GetMarket(),
 		Symbol:         ds.GetSymbol(),
@@ -393,7 +393,7 @@ func (c *Client) LoadDebugDataset(ctx context.Context, args LoadDebugDatasetArgs
 	resp, err := c.rpc.LoadDebugDataset(ctx, &controlpanelv1.LoadDebugDatasetRequest{
 		UserId:      args.UserID,
 		RuntimeId:   args.RuntimeID,
-		AccountId:   args.AccountID,
+		PortfolioId:   args.PortfolioID,
 		Market:      args.Market,
 		Symbol:      args.Symbol,
 		Interval:    args.Interval,

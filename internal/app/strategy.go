@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	accountv1 "github.com/hushine-tech/core-service/gen/accountv1"
+	portfoliov1 "github.com/hushine-tech/core-service/gen/portfoliov1"
 	"github.com/hushine-tech/quant-handler/internal/controlpanel"
 	strategyv1 "github.com/hushine-tech/strategy-service/gen/strategyv1"
 	"google.golang.org/grpc/codes"
@@ -95,11 +95,11 @@ type strategyRouteJSON struct {
 	Market   string `json:"market"`
 }
 
-func (s *server) strategyRoutePolicyForAccount(ctx context.Context, w http.ResponseWriter, userID int64, accountID int64, runtimeID string) (strategyRoutePolicy, bool) {
+func (s *server) strategyRoutePolicyForPortfolio(ctx context.Context, w http.ResponseWriter, userID int64, portfolioID int64, runtimeID string) (strategyRoutePolicy, bool) {
 	environment := int32(0)
-	if s.accounts != nil {
-		resp, err := s.accounts.GetAccount(ctx, &accountv1.GetAccountRequest{
-			AccountId: accountID,
+	if s.portfolios != nil {
+		resp, err := s.portfolios.GetPortfolio(ctx, &portfoliov1.GetPortfolioRequest{
+			PortfolioId: portfolioID,
 			UserId:    userID,
 		})
 		if err != nil {
@@ -107,12 +107,12 @@ func (s *server) strategyRoutePolicyForAccount(ctx context.Context, w http.Respo
 			writeErr(w, code, msg)
 			return strategyRoutePolicy{}, false
 		}
-		account := resp.GetAccount()
-		if account == nil {
-			writeErr(w, http.StatusNotFound, "account not found")
+		portfolio := resp.GetPortfolio()
+		if portfolio == nil {
+			writeErr(w, http.StatusNotFound, "portfolio not found")
 			return strategyRoutePolicy{}, false
 		}
-		environment = account.GetEnvironment()
+		environment = portfolio.GetEnvironment()
 	}
 	return s.strategyRoutePolicyForSelectedRuntime(ctx, w, userID, runtimeID, environment)
 }
@@ -142,7 +142,7 @@ func (s *server) strategyRoutePolicyForSelectedRuntime(ctx context.Context, w ht
 
 // ── Handlers ─────────────────────────────────────────────────────────────────
 
-func (s *server) handleRunStrategy(w http.ResponseWriter, r *http.Request, accountID int64) {
+func (s *server) handleRunStrategy(w http.ResponseWriter, r *http.Request, portfolioID int64) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -169,7 +169,7 @@ func (s *server) handleRunStrategy(w http.ResponseWriter, r *http.Request, accou
 		writeErr(w, http.StatusBadRequest, "runtime selection required")
 		return
 	}
-	policy, ok := s.strategyRoutePolicyForAccount(r.Context(), w, uid, accountID, runtimeID)
+	policy, ok := s.strategyRoutePolicyForPortfolio(r.Context(), w, uid, portfolioID, runtimeID)
 	if !ok {
 		return
 	}
@@ -180,7 +180,7 @@ func (s *server) handleRunStrategy(w http.ResponseWriter, r *http.Request, accou
 	rpcCtx, cancel := context.WithTimeout(r.Context(), runStrategyRPCTimeout)
 	defer cancel()
 	resp, err := cli.RunStrategy(rpcCtx, &strategyv1.RunStrategyRequest{
-		AccountId:       accountID,
+		PortfolioId:       portfolioID,
 		StrategyPath:    body.StrategyPath,
 		Interval:        interval,
 		StartTimeMs:     body.StartTimeMs,
@@ -201,7 +201,7 @@ func (s *server) handleRunStrategy(w http.ResponseWriter, r *http.Request, accou
 	})
 }
 
-func (s *server) handlePreviewRunStrategy(w http.ResponseWriter, r *http.Request, accountID int64) {
+func (s *server) handlePreviewRunStrategy(w http.ResponseWriter, r *http.Request, portfolioID int64) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -226,7 +226,7 @@ func (s *server) handlePreviewRunStrategy(w http.ResponseWriter, r *http.Request
 		writeErr(w, http.StatusBadRequest, "runtime selection required")
 		return
 	}
-	policy, ok := s.strategyRoutePolicyForAccount(r.Context(), w, uid, accountID, runtimeID)
+	policy, ok := s.strategyRoutePolicyForPortfolio(r.Context(), w, uid, portfolioID, runtimeID)
 	if !ok {
 		return
 	}
@@ -237,7 +237,7 @@ func (s *server) handlePreviewRunStrategy(w http.ResponseWriter, r *http.Request
 	rpcCtx, cancel := context.WithTimeout(r.Context(), previewRunStrategyRPCTimeout)
 	defer cancel()
 	resp, err := cli.PreviewRunStrategy(rpcCtx, &strategyv1.PreviewRunStrategyRequest{
-		AccountId:       accountID,
+		PortfolioId:       portfolioID,
 		StrategyPath:    body.StrategyPath,
 		StartTimeMs:     body.StartTimeMs,
 		EndTimeMs:       body.EndTimeMs,
@@ -420,7 +420,7 @@ func (s *server) handleStrategySession(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		if shouldServePersistedSessionStatus(err) {
-			_, msg := grpcToHTTP(err)
+			_, msg := grpcToHTTPRuntime(err)
 			writeSessionStatusJSON(w, session, runtimeID, msg)
 			return
 		}
@@ -446,7 +446,7 @@ func shouldServePersistedSessionStatus(err error) bool {
 	}
 }
 
-func writeSessionStatusJSON(w http.ResponseWriter, session *accountv1.StrategySessionEntry, runtimeID string, refreshErr string) {
+func writeSessionStatusJSON(w http.ResponseWriter, session *portfoliov1.StrategySessionEntry, runtimeID string, refreshErr string) {
 	payload := map[string]any{
 		"status":         session.GetStatus(),
 		"bars_processed": session.GetBarsProcessed(),
@@ -538,8 +538,8 @@ func (s *server) handleStopStrategy(w http.ResponseWriter, r *http.Request, sess
 		"stop_action": action.String(),
 		"runtime_id":  runtimeID,
 	}
-	if s.accounts != nil {
-		if current, err := s.accounts.GetSession(r.Context(), &accountv1.GetSessionRequest{SessionId: sessionID, UserId: uid}); err == nil {
+	if s.portfolios != nil {
+		if current, err := s.portfolios.GetSession(r.Context(), &portfoliov1.GetSessionRequest{SessionId: sessionID, UserId: uid}); err == nil {
 			if session := current.GetSession(); session != nil {
 				out["status"] = session.GetStatus()
 				out["error"] = session.GetError()
@@ -549,8 +549,8 @@ func (s *server) handleStopStrategy(w http.ResponseWriter, r *http.Request, sess
 	writeJSON(w, http.StatusOK, out)
 }
 
-func (s *server) markRecoverableForStaleRuntimeStop(ctx context.Context, session *accountv1.StrategySessionEntry, runtimeID string, stopErr error) (string, bool) {
-	if s.accounts == nil || session == nil || !isStaleRuntimeStopError(stopErr) {
+func (s *server) markRecoverableForStaleRuntimeStop(ctx context.Context, session *portfoliov1.StrategySessionEntry, runtimeID string, stopErr error) (string, bool) {
+	if s.portfolios == nil || session == nil || !isStaleRuntimeStopError(stopErr) {
 		return "", false
 	}
 	reason := "stop_recovered:runtime_session_missing: runtime no longer owns this session; marked recoverable"
@@ -560,21 +560,21 @@ func (s *server) markRecoverableForStaleRuntimeStop(ctx context.Context, session
 	return reason, s.markSessionRecoverableForStop(ctx, session, runtimeID, reason)
 }
 
-func (s *server) markRecoverableForRejectedRuntimeStop(ctx context.Context, session *accountv1.StrategySessionEntry, runtimeID string) (string, bool) {
-	if s.accounts == nil || session == nil {
+func (s *server) markRecoverableForRejectedRuntimeStop(ctx context.Context, session *portfoliov1.StrategySessionEntry, runtimeID string) (string, bool) {
+	if s.portfolios == nil || session == nil {
 		return "", false
 	}
 	reason := "stop_recovered:runtime_stop_not_accepted: runtime returned stopped=false without a terminal DB update; marked recoverable"
 	return reason, s.markSessionRecoverableForStop(ctx, session, runtimeID, reason)
 }
 
-func (s *server) markSessionRecoverableForStop(ctx context.Context, session *accountv1.StrategySessionEntry, runtimeID string, reason string) bool {
+func (s *server) markSessionRecoverableForStop(ctx context.Context, session *portfoliov1.StrategySessionEntry, runtimeID string, reason string) bool {
 	if runtimeID == "" {
 		runtimeID = session.GetRuntimeId()
 	}
 	updateCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	_, err := s.accounts.UpdateSession(updateCtx, &accountv1.UpdateSessionRequest{
+	_, err := s.portfolios.UpdateSession(updateCtx, &portfoliov1.UpdateSessionRequest{
 		SessionId:     session.GetSessionId(),
 		Status:        "recoverable",
 		BarsProcessed: session.GetBarsProcessed(),
@@ -597,12 +597,12 @@ func isStaleRuntimeStopError(err error) bool {
 		strings.Contains(msg, "runtime already ended")
 }
 
-func (s *server) loadSessionForRuntimeRoute(w http.ResponseWriter, r *http.Request, sessionID string, userID int64) (*accountv1.StrategySessionEntry, bool) {
-	if s.accounts == nil {
+func (s *server) loadSessionForRuntimeRoute(w http.ResponseWriter, r *http.Request, sessionID string, userID int64) (*portfoliov1.StrategySessionEntry, bool) {
+	if s.portfolios == nil {
 		writeErr(w, http.StatusServiceUnavailable, "core-service not configured")
 		return nil, false
 	}
-	resp, err := s.accounts.GetSession(r.Context(), &accountv1.GetSessionRequest{
+	resp, err := s.portfolios.GetSession(r.Context(), &portfoliov1.GetSessionRequest{
 		SessionId: sessionID,
 		UserId:    userID,
 	})

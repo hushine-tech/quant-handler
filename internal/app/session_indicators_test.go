@@ -6,13 +6,13 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/hushine-tech/core-service/gen/accountv1"
+	"github.com/hushine-tech/core-service/gen/portfoliov1"
 )
 
 func TestHandleSessions_RoutesStrategyIndicatorDefinitions(t *testing.T) {
-	acct := &fakeSessionAccountsClient{
-		indicatorDefinitionsResp: &accountv1.ListStrategyIndicatorsResponse{
-			Definitions: []*accountv1.StrategyIndicatorDefinition{
+	acct := &fakeSessionPortfoliosClient{
+		indicatorDefinitionsResp: &portfoliov1.ListStrategyIndicatorsResponse{
+			Definitions: []*portfoliov1.StrategyIndicatorDefinition{
 				{
 					SessionId:    "sess-1",
 					StrategyId:   19,
@@ -29,7 +29,7 @@ func TestHandleSessions_RoutesStrategyIndicatorDefinitions(t *testing.T) {
 			},
 		},
 	}
-	s := &server{accounts: acct, jwtSecret: []byte("s"), corsOrigins: []string{"*"}}
+	s := &server{portfolios: acct, jwtSecret: []byte("s"), corsOrigins: []string{"*"}}
 
 	req := withUID(httptest.NewRequest(http.MethodGet, "/api/sessions/sess-1/indicators?stream_key=binance:perpetual_futures:ETHUSDT:1m", nil), 6)
 	rec := httptest.NewRecorder()
@@ -69,9 +69,9 @@ func TestHandleSessions_RoutesStrategyIndicatorDefinitions(t *testing.T) {
 }
 
 func TestHandleSessions_RoutesStrategyIndicatorChunks(t *testing.T) {
-	acct := &fakeSessionAccountsClient{
-		indicatorChunksResp: &accountv1.ListStrategyIndicatorChunksResponse{
-			Chunks: []*accountv1.StrategyIndicatorChunk{
+	acct := &fakeSessionPortfoliosClient{
+		indicatorChunksResp: &portfoliov1.ListStrategyIndicatorChunksResponse{
+			Chunks: []*portfoliov1.StrategyIndicatorChunk{
 				{
 					SessionId:    "sess-1",
 					StreamKey:    "binance:perpetual_futures:ETHUSDT:1m",
@@ -86,7 +86,7 @@ func TestHandleSessions_RoutesStrategyIndicatorChunks(t *testing.T) {
 			},
 		},
 	}
-	s := &server{accounts: acct, jwtSecret: []byte("s"), corsOrigins: []string{"*"}}
+	s := &server{portfolios: acct, jwtSecret: []byte("s"), corsOrigins: []string{"*"}}
 
 	req := withUID(httptest.NewRequest(http.MethodGet, "/api/sessions/sess-1/indicators/chunks?stream_key=binance:perpetual_futures:ETHUSDT:1m&keys=alpha_score,signal&start_time_ms=1710000000000&end_time_ms=1710000600000", nil), 6)
 	rec := httptest.NewRecorder()
@@ -132,8 +132,8 @@ func TestHandleSessions_RoutesStrategyIndicatorChunks(t *testing.T) {
 }
 
 func TestHandleSessions_StrategyIndicatorChunksRequiresRange(t *testing.T) {
-	acct := &fakeSessionAccountsClient{}
-	s := &server{accounts: acct, jwtSecret: []byte("s"), corsOrigins: []string{"*"}}
+	acct := &fakeSessionPortfoliosClient{}
+	s := &server{portfolios: acct, jwtSecret: []byte("s"), corsOrigins: []string{"*"}}
 
 	req := withUID(httptest.NewRequest(http.MethodGet, "/api/sessions/sess-1/indicators/chunks?stream_key=binance:perpetual_futures:ETHUSDT:1m", nil), 6)
 	rec := httptest.NewRecorder()

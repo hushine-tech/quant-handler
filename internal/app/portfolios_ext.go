@@ -7,11 +7,11 @@ import (
 	"strings"
 	"time"
 
-	accountv1 "github.com/hushine-tech/core-service/gen/accountv1"
+	portfoliov1 "github.com/hushine-tech/core-service/gen/portfoliov1"
 	"github.com/hushine-tech/quant-handler/internal/walletagg"
 )
 
-type createAccountBodyExt struct {
+type createPortfolioBodyExt struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	Environment int32  `json:"environment"`
@@ -34,7 +34,7 @@ func (s *server) handleSymbols(w http.ResponseWriter, r *http.Request) {
 			limit = n
 		}
 	}
-	resp, err := s.accounts.ListSymbols(r.Context(), &accountv1.ListSymbolsRequest{
+	resp, err := s.portfolios.ListSymbols(r.Context(), &portfoliov1.ListSymbolsRequest{
 		Market: market, Query: q, Limit: int32(limit),
 	})
 	if err != nil {
@@ -52,20 +52,20 @@ func (s *server) handleSymbols(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-type accountPortfolioSnapshotItemJSON struct {
+type portfolioPortfolioSnapshotItemJSON struct {
 	Venue    venueJSON      `json:"venue"`
 	Snapshot map[string]any `json:"snapshot"`
 	Wallet   map[string]any `json:"wallet,omitempty"`
 }
 
-func (s *server) getAccountPortfolioSnapshot(w http.ResponseWriter, r *http.Request, accountID int64) {
+func (s *server) getPortfolioPortfolioSnapshot(w http.ResponseWriter, r *http.Request, portfolioID int64) {
 	uid, ok := userIDFromRequest(r)
 	if !ok {
 		writeErr(w, http.StatusUnauthorized, "missing user context")
 		return
 	}
-	resp, err := s.accounts.GetPortfolioSnapshot(r.Context(), &accountv1.GetPortfolioSnapshotRequest{
-		AccountId: accountID,
+	resp, err := s.portfolios.GetPortfolioSnapshot(r.Context(), &portfoliov1.GetPortfolioSnapshotRequest{
+		PortfolioId: portfolioID,
 		UserId:    uid,
 	})
 	if err != nil {
@@ -81,30 +81,30 @@ func (s *server) getAccountPortfolioSnapshot(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, http.StatusOK, portfolioSnapshotToJSON(snapshot))
 }
 
-func portfolioSnapshotToJSON(snapshot *accountv1.PortfolioSnapshot) map[string]any {
+func portfolioSnapshotToJSON(snapshot *portfoliov1.PortfolioSnapshot) map[string]any {
 	updatedAt := ""
 	if ts := snapshot.GetUpdatedAt(); ts != nil {
 		updatedAt = ts.AsTime().UTC().Format(time.RFC3339Nano)
 	}
-	items := make([]accountPortfolioSnapshotItemJSON, 0, len(snapshot.GetVenues()))
+	items := make([]portfolioPortfolioSnapshotItemJSON, 0, len(snapshot.GetVenues()))
 	for _, venueSnapshot := range snapshot.GetVenues() {
-		item := accountPortfolioSnapshotItemJSON{
-			Venue:    venueFromSnapshotToJSON(snapshot.GetUserId(), snapshot.GetAccountId(), venueSnapshot),
+		item := portfolioPortfolioSnapshotItemJSON{
+			Venue:    venueFromSnapshotToJSON(snapshot.GetUserId(), snapshot.GetPortfolioId(), venueSnapshot),
 			Snapshot: venueSnapshotToJSON(venueSnapshot),
 		}
 		if wallet := venueSnapshot.GetWallet(); wallet != nil {
-			item.Wallet = accountWalletStateToJSON(wallet)
+			item.Wallet = portfolioWalletStateToJSON(wallet)
 		}
 		items = append(items, item)
 	}
 	return map[string]any{
-		"account_id":        snapshot.GetAccountId(),
+		"portfolio_id":        snapshot.GetPortfolioId(),
 		"user_id":           snapshot.GetUserId(),
 		"total_value":       snapshot.GetTotalValue(),
 		"wallet_balance":    snapshot.GetWalletBalance(),
 		"available_balance": snapshot.GetAvailableBalance(),
 		"updated_at":        updatedAt,
-		"wallet":            accountWalletStateToJSON(snapshot.GetWallet()),
+		"wallet":            portfolioWalletStateToJSON(snapshot.GetWallet()),
 		"items":             items,
 		"venue_count":       len(items),
 		"successful":        len(items),
@@ -112,14 +112,14 @@ func portfolioSnapshotToJSON(snapshot *accountv1.PortfolioSnapshot) map[string]a
 	}
 }
 
-func venueFromSnapshotToJSON(userID, accountID int64, snap *accountv1.VenueSnapshot) venueJSON {
+func venueFromSnapshotToJSON(userID, portfolioID int64, snap *portfoliov1.VenueSnapshot) venueJSON {
 	if snap == nil {
 		return venueJSON{}
 	}
 	return venueJSON{
 		VenueID:          snap.GetVenueId(),
 		UserID:           userID,
-		AccountID:        accountID,
+		PortfolioID:        portfolioID,
 		Exchange:         snap.GetExchange(),
 		ExchangeLabel:    orderExchangeLabel(snap.GetExchange()),
 		Market:           snap.GetMarket(),
@@ -132,7 +132,7 @@ func venueFromSnapshotToJSON(userID, accountID int64, snap *accountv1.VenueSnaps
 	}
 }
 
-func venueSnapshotToJSON(snap *accountv1.VenueSnapshot) map[string]any {
+func venueSnapshotToJSON(snap *portfoliov1.VenueSnapshot) map[string]any {
 	if snap == nil {
 		return nil
 	}
@@ -180,7 +180,7 @@ func venueSnapshotToJSON(snap *accountv1.VenueSnapshot) map[string]any {
 	}
 }
 
-func accountWalletStateToJSON(wal *accountv1.AccountWalletState) map[string]any {
+func portfolioWalletStateToJSON(wal *portfoliov1.PortfolioWalletState) map[string]any {
 	if wal == nil {
 		return nil
 	}
@@ -190,7 +190,7 @@ func accountWalletStateToJSON(wal *accountv1.AccountWalletState) map[string]any 
 	}
 	// wallet_balance and available_balance live on the FuturesWallet
 	// sub-message in the canonical (post-Phase-B) proto layout. The older
-	// shape that stored them at AccountWalletState top level was retired
+	// shape that stored them at PortfolioWalletState top level was retired
 	// when strategy-service ↔ core-service moved to the canonical
 	// contract. GetFutures() is nil-safe; the protobuf-generated getters
 	// return 0 when the receiver is nil.
@@ -231,7 +231,7 @@ func accountWalletStateToJSON(wal *accountv1.AccountWalletState) map[string]any 
 	}
 }
 
-func protoFuturesDisplayUSDToJSON(environment int32, fw *accountv1.FuturesWallet) any {
+func protoFuturesDisplayUSDToJSON(environment int32, fw *portfoliov1.FuturesWallet) any {
 	if fw == nil {
 		return nil
 	}
@@ -245,7 +245,7 @@ func protoFuturesDisplayUSDToJSON(environment int32, fw *accountv1.FuturesWallet
 	}
 }
 
-func protoSpotToJSON(sw *accountv1.SpotWallet) any {
+func protoSpotToJSON(sw *portfoliov1.SpotWallet) any {
 	if sw == nil {
 		return nil
 	}
@@ -270,7 +270,7 @@ func protoSpotToJSON(sw *accountv1.SpotWallet) any {
 	return out
 }
 
-func protoFuturesToJSON(fw *accountv1.FuturesWallet) any {
+func protoFuturesToJSON(fw *portfoliov1.FuturesWallet) any {
 	if fw == nil {
 		return nil
 	}
@@ -322,10 +322,10 @@ func protoFuturesToJSON(fw *accountv1.FuturesWallet) any {
 	return out
 }
 
-// decodeCreateAccountBody accepts account metadata only. Credentials and wallet
+// decodeCreatePortfolioBody accepts portfolio metadata only. Credentials and wallet
 // payloads belong to venues, so unknown JSON fields fail closed here.
-func decodeCreateAccountBody(r *http.Request) (createAccountBodyExt, error) {
-	var body createAccountBodyExt
+func decodeCreatePortfolioBody(r *http.Request) (createPortfolioBodyExt, error) {
+	var body createPortfolioBodyExt
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&body); err != nil {
@@ -334,8 +334,8 @@ func decodeCreateAccountBody(r *http.Request) (createAccountBodyExt, error) {
 	return body, nil
 }
 
-func (s *server) createAccount(w http.ResponseWriter, r *http.Request) {
-	body, err := decodeCreateAccountBody(r)
+func (s *server) createPortfolio(w http.ResponseWriter, r *http.Request) {
+	body, err := decodeCreatePortfolioBody(r)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid JSON")
 		return
@@ -350,8 +350,8 @@ func (s *server) createAccount(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnauthorized, "missing user context")
 		return
 	}
-	environment := accountEnvironmentFromBody(body)
-	resp, err := s.accounts.CreateAccount(ctx, &accountv1.CreateAccountRequest{
+	environment := portfolioEnvironmentFromBody(body)
+	resp, err := s.portfolios.CreatePortfolio(ctx, &portfoliov1.CreatePortfolioRequest{
 		Name:        body.Name,
 		Description: body.Description,
 		Environment: environment,
@@ -363,8 +363,8 @@ func (s *server) createAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, accountJSON{
-		AccountID:   resp.GetAccountId(),
+	writeJSON(w, http.StatusCreated, portfolioJSON{
+		PortfolioID:   resp.GetPortfolioId(),
 		Name:        resp.GetName(),
 		Description: resp.GetDescription(),
 		Environment: resp.GetEnvironment(),

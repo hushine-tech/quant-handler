@@ -7,63 +7,63 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hushine-tech/core-service/gen/accountv1"
+	"github.com/hushine-tech/core-service/gen/portfoliov1"
 	"google.golang.org/grpc"
 )
 
-type fakeVenueAccountsClient struct {
-	accountv1.AccountServiceClient
+type fakeVenuePortfoliosClient struct {
+	portfoliov1.PortfolioServiceClient
 
-	createReq  *accountv1.CreateVenueRequest
-	listReq    *accountv1.ListVenuesRequest
-	walletReq  *accountv1.GetVenueOnlineInfoRequest
-	bindReq    *accountv1.BindVenueRequest
-	createResp *accountv1.CreateVenueResponse
-	listResp   *accountv1.ListVenuesResponse
-	walletResp *accountv1.GetVenueOnlineInfoResponse
-	bindResp   *accountv1.BindVenueResponse
+	createReq  *portfoliov1.CreateVenueRequest
+	listReq    *portfoliov1.ListVenuesRequest
+	walletReq  *portfoliov1.GetVenueOnlineInfoRequest
+	bindReq    *portfoliov1.BindVenueRequest
+	createResp *portfoliov1.CreateVenueResponse
+	listResp   *portfoliov1.ListVenuesResponse
+	walletResp *portfoliov1.GetVenueOnlineInfoResponse
+	bindResp   *portfoliov1.BindVenueResponse
 }
 
-func (f *fakeVenueAccountsClient) CreateVenue(_ context.Context, req *accountv1.CreateVenueRequest, _ ...grpc.CallOption) (*accountv1.CreateVenueResponse, error) {
+func (f *fakeVenuePortfoliosClient) CreateVenue(_ context.Context, req *portfoliov1.CreateVenueRequest, _ ...grpc.CallOption) (*portfoliov1.CreateVenueResponse, error) {
 	f.createReq = req
 	if f.createResp != nil {
 		return f.createResp, nil
 	}
-	return &accountv1.CreateVenueResponse{Venue: &accountv1.VenueEntry{VenueId: 88}}, nil
+	return &portfoliov1.CreateVenueResponse{Venue: &portfoliov1.VenueEntry{VenueId: 88}}, nil
 }
 
-func (f *fakeVenueAccountsClient) ListVenues(_ context.Context, req *accountv1.ListVenuesRequest, _ ...grpc.CallOption) (*accountv1.ListVenuesResponse, error) {
+func (f *fakeVenuePortfoliosClient) ListVenues(_ context.Context, req *portfoliov1.ListVenuesRequest, _ ...grpc.CallOption) (*portfoliov1.ListVenuesResponse, error) {
 	f.listReq = req
 	if f.listResp != nil {
 		return f.listResp, nil
 	}
-	return &accountv1.ListVenuesResponse{}, nil
+	return &portfoliov1.ListVenuesResponse{}, nil
 }
 
-func (f *fakeVenueAccountsClient) GetVenueOnlineInfo(_ context.Context, req *accountv1.GetVenueOnlineInfoRequest, _ ...grpc.CallOption) (*accountv1.GetVenueOnlineInfoResponse, error) {
+func (f *fakeVenuePortfoliosClient) GetVenueOnlineInfo(_ context.Context, req *portfoliov1.GetVenueOnlineInfoRequest, _ ...grpc.CallOption) (*portfoliov1.GetVenueOnlineInfoResponse, error) {
 	f.walletReq = req
 	if f.walletResp != nil {
 		return f.walletResp, nil
 	}
-	return &accountv1.GetVenueOnlineInfoResponse{
-		Venue:  &accountv1.VenueEntry{VenueId: req.GetVenueId(), UserId: req.GetUserId()},
-		Wallet: &accountv1.AccountWalletState{},
+	return &portfoliov1.GetVenueOnlineInfoResponse{
+		Venue:  &portfoliov1.VenueEntry{VenueId: req.GetVenueId(), UserId: req.GetUserId()},
+		Wallet: &portfoliov1.PortfolioWalletState{},
 	}, nil
 }
 
-func (f *fakeVenueAccountsClient) BindVenue(_ context.Context, req *accountv1.BindVenueRequest, _ ...grpc.CallOption) (*accountv1.BindVenueResponse, error) {
+func (f *fakeVenuePortfoliosClient) BindVenue(_ context.Context, req *portfoliov1.BindVenueRequest, _ ...grpc.CallOption) (*portfoliov1.BindVenueResponse, error) {
 	f.bindReq = req
 	if f.bindResp != nil {
 		return f.bindResp, nil
 	}
-	return &accountv1.BindVenueResponse{Venue: &accountv1.VenueEntry{VenueId: req.GetVenueId(), AccountId: req.GetAccountId(), UserId: req.GetUserId()}}, nil
+	return &portfoliov1.BindVenueResponse{Venue: &portfoliov1.VenueEntry{VenueId: req.GetVenueId(), PortfolioId: req.GetPortfolioId(), UserId: req.GetUserId()}}, nil
 }
 
 func TestCreateVenueForwardsCredentialJSON(t *testing.T) {
-	fake := &fakeVenueAccountsClient{}
-	s := &server{accounts: fake, jwtSecret: []byte("secret"), corsOrigins: []string{"*"}}
+	fake := &fakeVenuePortfoliosClient{}
+	s := &server{portfolios: fake, jwtSecret: []byte("secret"), corsOrigins: []string{"*"}}
 	body := strings.NewReader(`{
-		"account_id": 42,
+		"portfolio_id": 42,
 		"exchange": "binance",
 		"market": "perpetual_futures",
 		"environment": "demo",
@@ -81,8 +81,8 @@ func TestCreateVenueForwardsCredentialJSON(t *testing.T) {
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
-	if fake.createReq.GetUserId() != 7 || fake.createReq.GetAccountId() != 42 {
-		t.Fatalf("create req owner/account mismatch: %+v", fake.createReq)
+	if fake.createReq.GetUserId() != 7 || fake.createReq.GetPortfolioId() != 42 {
+		t.Fatalf("create req owner/portfolio mismatch: %+v", fake.createReq)
 	}
 	if fake.createReq.GetExchange() != 1 || fake.createReq.GetMarket() != 2 || fake.createReq.GetEnvironment() != 1 {
 		t.Fatalf("route enum mismatch: %+v", fake.createReq)
@@ -100,8 +100,8 @@ func TestCreateDemoVenueMissingCredentialInfoForwardsEmptyCredentialJSON(t *test
 		`{"exchange":"binance","market":"perpetual_futures","environment":"demo","api_key":"k1","margin_mode":"cross","position_mode":"one_way"}`,
 		`{"exchange":"binance","market":"perpetual_futures","environment":"demo","api_key":"k1","credential_info":null,"margin_mode":"cross","position_mode":"one_way"}`,
 	} {
-		fake := &fakeVenueAccountsClient{}
-		s := &server{accounts: fake, jwtSecret: []byte("secret"), corsOrigins: []string{"*"}}
+		fake := &fakeVenuePortfoliosClient{}
+		s := &server{portfolios: fake, jwtSecret: []byte("secret"), corsOrigins: []string{"*"}}
 		req := withUID(httptest.NewRequest(http.MethodPost, "/api/venues", strings.NewReader(body)), 42)
 		rr := httptest.NewRecorder()
 
@@ -123,11 +123,11 @@ func TestCreateDemoVenueMissingCredentialInfoForwardsEmptyCredentialJSON(t *test
 }
 
 func TestCreateBacktestVenueOmitsCredentialPayload(t *testing.T) {
-	fake := &fakeVenueAccountsClient{createResp: &accountv1.CreateVenueResponse{Venue: &accountv1.VenueEntry{VenueId: 88}}}
-	s := &server{accounts: fake, jwtSecret: []byte("secret"), corsOrigins: []string{"*"}}
+	fake := &fakeVenuePortfoliosClient{createResp: &portfoliov1.CreateVenueResponse{Venue: &portfoliov1.VenueEntry{VenueId: 88}}}
+	s := &server{portfolios: fake, jwtSecret: []byte("secret"), corsOrigins: []string{"*"}}
 
 	body := strings.NewReader(`{
-		"account_id":42,
+		"portfolio_id":42,
 		"exchange":"binance",
 		"market":"perpetual_futures",
 		"environment":"backtest",
@@ -149,8 +149,8 @@ func TestCreateBacktestVenueOmitsCredentialPayload(t *testing.T) {
 }
 
 func TestCreateBacktestVenueAllowsUnbound(t *testing.T) {
-	fake := &fakeVenueAccountsClient{createResp: &accountv1.CreateVenueResponse{Venue: &accountv1.VenueEntry{VenueId: 88}}}
-	s := &server{accounts: fake, jwtSecret: []byte("secret"), corsOrigins: []string{"*"}}
+	fake := &fakeVenuePortfoliosClient{createResp: &portfoliov1.CreateVenueResponse{Venue: &portfoliov1.VenueEntry{VenueId: 88}}}
+	s := &server{portfolios: fake, jwtSecret: []byte("secret"), corsOrigins: []string{"*"}}
 	body := strings.NewReader(`{
 		"exchange":"binance",
 		"market":"perpetual_futures",
@@ -169,14 +169,14 @@ func TestCreateBacktestVenueAllowsUnbound(t *testing.T) {
 	if fake.createReq == nil {
 		t.Fatal("CreateVenue was not forwarded")
 	}
-	if fake.createReq.GetAccountId() != 0 {
-		t.Fatalf("account_id = %d, want unbound", fake.createReq.GetAccountId())
+	if fake.createReq.GetPortfolioId() != 0 {
+		t.Fatalf("portfolio_id = %d, want unbound", fake.createReq.GetPortfolioId())
 	}
 }
 
 func TestCreateBacktestVenueForwardsWalletBootstrap(t *testing.T) {
-	fake := &fakeVenueAccountsClient{createResp: &accountv1.CreateVenueResponse{Venue: &accountv1.VenueEntry{VenueId: 88}}}
-	s := &server{accounts: fake, jwtSecret: []byte("secret"), corsOrigins: []string{"*"}}
+	fake := &fakeVenuePortfoliosClient{createResp: &portfoliov1.CreateVenueResponse{Venue: &portfoliov1.VenueEntry{VenueId: 88}}}
+	s := &server{portfolios: fake, jwtSecret: []byte("secret"), corsOrigins: []string{"*"}}
 	body := strings.NewReader(`{
 		"exchange":"binance",
 		"market":"perpetual_futures",
@@ -218,8 +218,8 @@ func TestCreateBacktestVenueRejectsCredentialPayload(t *testing.T) {
 		`{"exchange":"binance","market":"perpetual_futures","environment":"backtest","credential_info":null,"margin_mode":"cross","position_mode":"one_way"}`,
 		`{"exchange":"binance","market":"perpetual_futures","environment":"backtest","credential_info":{"api_secret":"s"},"margin_mode":"cross","position_mode":"one_way"}`,
 	} {
-		fake := &fakeVenueAccountsClient{}
-		s := &server{accounts: fake, jwtSecret: []byte("secret"), corsOrigins: []string{"*"}}
+		fake := &fakeVenuePortfoliosClient{}
+		s := &server{portfolios: fake, jwtSecret: []byte("secret"), corsOrigins: []string{"*"}}
 		req := withUID(httptest.NewRequest(http.MethodPost, "/api/venues", strings.NewReader(body)), 42)
 		rr := httptest.NewRecorder()
 
@@ -234,20 +234,20 @@ func TestCreateBacktestVenueRejectsCredentialPayload(t *testing.T) {
 	}
 }
 
-func TestListAccountVenuesUsesAccountScope(t *testing.T) {
-	fake := &fakeVenueAccountsClient{
-		listResp: &accountv1.ListVenuesResponse{Total: 0},
+func TestListPortfolioVenuesUsesPortfolioScope(t *testing.T) {
+	fake := &fakeVenuePortfoliosClient{
+		listResp: &portfoliov1.ListVenuesResponse{Total: 0},
 	}
-	s := &server{accounts: fake, jwtSecret: []byte("secret"), corsOrigins: []string{"*"}}
-	req := withUID(httptest.NewRequest(http.MethodGet, "/api/accounts/42/venues?include_unbound=true&limit=25&offset=50", nil), 7)
+	s := &server{portfolios: fake, jwtSecret: []byte("secret"), corsOrigins: []string{"*"}}
+	req := withUID(httptest.NewRequest(http.MethodGet, "/api/portfolios/42/venues?include_unbound=true&limit=25&offset=50", nil), 7)
 	rec := httptest.NewRecorder()
 
-	s.handleAccountVenues(rec, req, 42)
+	s.handlePortfolioVenues(rec, req, 42)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
-	if fake.listReq.GetUserId() != 7 || fake.listReq.GetAccountId() != 42 {
+	if fake.listReq.GetUserId() != 7 || fake.listReq.GetPortfolioId() != 42 {
 		t.Fatalf("list scope mismatch: %+v", fake.listReq)
 	}
 	if !fake.listReq.GetIncludeUnbound() || fake.listReq.GetLimit() != 25 || fake.listReq.GetOffset() != 50 {
@@ -255,12 +255,12 @@ func TestListAccountVenuesUsesAccountScope(t *testing.T) {
 	}
 }
 
-func TestListVenuesQueryAccountIDUsesAccountScope(t *testing.T) {
-	fake := &fakeVenueAccountsClient{
-		listResp: &accountv1.ListVenuesResponse{Total: 0},
+func TestListVenuesQueryPortfolioIDUsesPortfolioScope(t *testing.T) {
+	fake := &fakeVenuePortfoliosClient{
+		listResp: &portfoliov1.ListVenuesResponse{Total: 0},
 	}
-	s := &server{accounts: fake, jwtSecret: []byte("secret"), corsOrigins: []string{"*"}}
-	req := withUID(httptest.NewRequest(http.MethodGet, "/api/venues?account_id=42&include_unbound=true", nil), 7)
+	s := &server{portfolios: fake, jwtSecret: []byte("secret"), corsOrigins: []string{"*"}}
+	req := withUID(httptest.NewRequest(http.MethodGet, "/api/venues?portfolio_id=42&include_unbound=true", nil), 7)
 	rec := httptest.NewRecorder()
 
 	s.handleVenues(rec, req)
@@ -268,7 +268,7 @@ func TestListVenuesQueryAccountIDUsesAccountScope(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
-	if fake.listReq.GetUserId() != 7 || fake.listReq.GetAccountId() != 42 {
+	if fake.listReq.GetUserId() != 7 || fake.listReq.GetPortfolioId() != 42 {
 		t.Fatalf("list scope mismatch: %+v", fake.listReq)
 	}
 	if !fake.listReq.GetIncludeUnbound() {
@@ -277,23 +277,23 @@ func TestListVenuesQueryAccountIDUsesAccountScope(t *testing.T) {
 }
 
 func TestGetVenueWalletForwardsVenueIDAndUserID(t *testing.T) {
-	fake := &fakeVenueAccountsClient{
-		walletResp: &accountv1.GetVenueOnlineInfoResponse{
-			Venue: &accountv1.VenueEntry{
+	fake := &fakeVenuePortfoliosClient{
+		walletResp: &portfoliov1.GetVenueOnlineInfoResponse{
+			Venue: &portfoliov1.VenueEntry{
 				VenueId:     53,
 				UserId:      7,
-				AccountId:   42,
+				PortfolioId:   42,
 				Exchange:    1,
 				Market:      2,
 				Environment: 0,
 			},
-			Wallet: &accountv1.AccountWalletState{
+			Wallet: &portfoliov1.PortfolioWalletState{
 				TotalValue: 1000,
-				Futures:    &accountv1.FuturesWallet{MarginMode: "cross", PositionMode: "one_way"},
+				Futures:    &portfoliov1.FuturesWallet{MarginMode: "cross", PositionMode: "one_way"},
 			},
 		},
 	}
-	s := &server{accounts: fake, jwtSecret: []byte("secret"), corsOrigins: []string{"*"}}
+	s := &server{portfolios: fake, jwtSecret: []byte("secret"), corsOrigins: []string{"*"}}
 	req := withUID(httptest.NewRequest(http.MethodGet, "/api/venues/53/wallet", nil), 7)
 	rec := httptest.NewRecorder()
 
@@ -310,10 +310,10 @@ func TestGetVenueWalletForwardsVenueIDAndUserID(t *testing.T) {
 	}
 }
 
-func TestBindVenueForwardsAccountIDAndReason(t *testing.T) {
-	fake := &fakeVenueAccountsClient{}
-	s := &server{accounts: fake, jwtSecret: []byte("secret"), corsOrigins: []string{"*"}}
-	req := withUID(httptest.NewRequest(http.MethodPost, "/api/venues/53/bind", strings.NewReader(`{"account_id":42,"reason":"from test"}`)), 7)
+func TestBindVenueForwardsPortfolioIDAndReason(t *testing.T) {
+	fake := &fakeVenuePortfoliosClient{}
+	s := &server{portfolios: fake, jwtSecret: []byte("secret"), corsOrigins: []string{"*"}}
+	req := withUID(httptest.NewRequest(http.MethodPost, "/api/venues/53/bind", strings.NewReader(`{"portfolio_id":42,"reason":"from test"}`)), 7)
 	rec := httptest.NewRecorder()
 
 	s.handleVenueByID(rec, req)
@@ -321,7 +321,7 @@ func TestBindVenueForwardsAccountIDAndReason(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
-	if fake.bindReq.GetVenueId() != 53 || fake.bindReq.GetAccountId() != 42 || fake.bindReq.GetUserId() != 7 || fake.bindReq.GetReason() != "from test" {
-		t.Fatalf("bind request = %+v, want venue 53 account 42 user 7 reason", fake.bindReq)
+	if fake.bindReq.GetVenueId() != 53 || fake.bindReq.GetPortfolioId() != 42 || fake.bindReq.GetUserId() != 7 || fake.bindReq.GetReason() != "from test" {
+		t.Fatalf("bind request = %+v, want venue 53 portfolio 42 user 7 reason", fake.bindReq)
 	}
 }

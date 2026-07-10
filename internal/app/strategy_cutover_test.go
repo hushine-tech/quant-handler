@@ -10,7 +10,7 @@ import (
 	"time"
 
 	controlpanelv1 "github.com/hushine-tech/control-panel-service/gen/controlpanelv1"
-	accountv1 "github.com/hushine-tech/core-service/gen/accountv1"
+	portfoliov1 "github.com/hushine-tech/core-service/gen/portfoliov1"
 	"github.com/hushine-tech/quant-handler/internal/controlpanel"
 	strategyv1 "github.com/hushine-tech/strategy-service/gen/strategyv1"
 
@@ -112,7 +112,7 @@ func TestRunStrategy_ControlPanelNotFound(t *testing.T) {
 	}
 
 	req := withUID(httptest.NewRequest(http.MethodPost,
-		"/api/accounts/7/run-strategy", bytes.NewBufferString(`{"runtime_id":"rt_missing","start_time_ms":0,"end_time_ms":0}`)), 42)
+		"/api/portfolios/7/run-strategy", bytes.NewBufferString(`{"runtime_id":"rt_missing","start_time_ms":0,"end_time_ms":0}`)), 42)
 	rec := httptest.NewRecorder()
 	s.handleRunStrategy(rec, req, 7)
 
@@ -137,7 +137,7 @@ func TestRunStrategy_ControlPanelResourceExhausted(t *testing.T) {
 		corsOrigins:  []string{"*"},
 	}
 	req := withUID(httptest.NewRequest(http.MethodPost,
-		"/api/accounts/7/run-strategy", bytes.NewBufferString(`{"runtime_id":"rt_quota","start_time_ms":0,"end_time_ms":0}`)), 42)
+		"/api/portfolios/7/run-strategy", bytes.NewBufferString(`{"runtime_id":"rt_quota","start_time_ms":0,"end_time_ms":0}`)), 42)
 	rec := httptest.NewRecorder()
 	s.handleRunStrategy(rec, req, 7)
 
@@ -160,7 +160,7 @@ func TestRunStrategy_HostedRouteUsesProxy(t *testing.T) {
 		corsOrigins:  []string{"*"},
 	}
 	req := withUID(httptest.NewRequest(http.MethodPost,
-		"/api/accounts/7/run-strategy", bytes.NewBufferString(`{"runtime_id":"rt_empty","start_time_ms":0,"end_time_ms":0}`)), 42)
+		"/api/portfolios/7/run-strategy", bytes.NewBufferString(`{"runtime_id":"rt_empty","start_time_ms":0,"end_time_ms":0}`)), 42)
 	rec := httptest.NewRecorder()
 	s.handleRunStrategy(rec, req, 7)
 
@@ -188,7 +188,7 @@ func TestRunStrategy_ExplicitRuntimeIDRoutesByID(t *testing.T) {
 		corsOrigins:  []string{"*"},
 	}
 	req := withUID(httptest.NewRequest(http.MethodPost,
-		"/api/accounts/7/run-strategy",
+		"/api/portfolios/7/run-strategy",
 		bytes.NewBufferString(`{"runtime_id":"rt_self","start_time_ms":1,"end_time_ms":2,"leverage":5}`)), 42)
 	rec := httptest.NewRecorder()
 	s.handleRunStrategy(rec, req, 7)
@@ -224,16 +224,16 @@ func TestRunStrategy_BacktestDebuggerRuntimeRoutesAsDebugger(t *testing.T) {
 			Source:    "self_hosted",
 		},
 	}
-	accounts := &fakeSessionAccountsClient{accountEnvironment: 0}
+	portfolios := &fakeSessionPortfoliosClient{portfolioEnvironment: 0}
 	s := &server{
-		accounts:     accounts,
+		portfolios:     portfolios,
 		controlPanel: resolver,
 		cpRuntime:    proxy,
 		jwtSecret:    []byte("s"),
 		corsOrigins:  []string{"*"},
 	}
 	req := withUID(httptest.NewRequest(http.MethodPost,
-		"/api/accounts/7/run-strategy",
+		"/api/portfolios/7/run-strategy",
 		bytes.NewBufferString(`{"runtime_id":"rt_debug","start_time_ms":1,"end_time_ms":2}`)), 42)
 	rec := httptest.NewRecorder()
 	s.handleRunStrategy(rec, req, 7)
@@ -241,8 +241,8 @@ func TestRunStrategy_BacktestDebuggerRuntimeRoutesAsDebugger(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
 	}
-	if accounts.lastGetAccountReq == nil || accounts.lastGetAccountReq.GetAccountId() != 7 || accounts.lastGetAccountReq.GetUserId() != 42 {
-		t.Fatalf("GetAccount request = %+v, want account/user 7/42", accounts.lastGetAccountReq)
+	if portfolios.lastGetPortfolioReq == nil || portfolios.lastGetPortfolioReq.GetPortfolioId() != 7 || portfolios.lastGetPortfolioReq.GetUserId() != 42 {
+		t.Fatalf("GetPortfolio request = %+v, want portfolio/user 7/42", portfolios.lastGetPortfolioReq)
 	}
 	if resolver.getRuntimeCalls != 1 || resolver.gotRuntimeID != "rt_debug" {
 		t.Fatalf("GetRuntime calls=%d runtime=%q, want 1/rt_debug", resolver.getRuntimeCalls, resolver.gotRuntimeID)
@@ -264,16 +264,16 @@ func TestRunStrategy_DemoAlwaysRoutesAsExecutor(t *testing.T) {
 			Source:    "self_hosted",
 		},
 	}
-	accounts := &fakeSessionAccountsClient{accountEnvironment: 1}
+	portfolios := &fakeSessionPortfoliosClient{portfolioEnvironment: 1}
 	s := &server{
-		accounts:     accounts,
+		portfolios:     portfolios,
 		controlPanel: resolver,
 		cpRuntime:    proxy,
 		jwtSecret:    []byte("s"),
 		corsOrigins:  []string{"*"},
 	}
 	req := withUID(httptest.NewRequest(http.MethodPost,
-		"/api/accounts/7/run-strategy",
+		"/api/portfolios/7/run-strategy",
 		bytes.NewBufferString(`{"runtime_id":"rt_exec","start_time_ms":1,"end_time_ms":2}`)), 42)
 	rec := httptest.NewRecorder()
 	s.handleRunStrategy(rec, req, 7)
@@ -305,7 +305,7 @@ func TestRunStrategy_OmittedRuntimeIDWithMultipleRuntimesRequiresSelection(t *te
 		corsOrigins:  []string{"*"},
 	}
 	req := withUID(httptest.NewRequest(http.MethodPost,
-		"/api/accounts/7/run-strategy", bytes.NewBufferString(`{"start_time_ms":1,"end_time_ms":2}`)), 42)
+		"/api/portfolios/7/run-strategy", bytes.NewBufferString(`{"start_time_ms":1,"end_time_ms":2}`)), 42)
 	rec := httptest.NewRecorder()
 	s.handleRunStrategy(rec, req, 7)
 
@@ -337,7 +337,7 @@ func TestRunStrategy_SingleRuntimeDoesNotAutoSelect(t *testing.T) {
 		corsOrigins:  []string{"*"},
 	}
 	req := withUID(httptest.NewRequest(http.MethodPost,
-		"/api/accounts/7/run-strategy", bytes.NewBufferString(`{"start_time_ms":1,"end_time_ms":2}`)), 42)
+		"/api/portfolios/7/run-strategy", bytes.NewBufferString(`{"start_time_ms":1,"end_time_ms":2}`)), 42)
 	rec := httptest.NewRecorder()
 	s.handleRunStrategy(rec, req, 7)
 
@@ -359,7 +359,7 @@ func TestRunStrategy_ControlPanelDisabled(t *testing.T) {
 		corsOrigins:  []string{"*"},
 	}
 	req := withUID(httptest.NewRequest(http.MethodPost,
-		"/api/accounts/7/run-strategy", bytes.NewBufferString(`{"runtime_id":"rt_disabled","start_time_ms":0,"end_time_ms":0}`)), 42)
+		"/api/portfolios/7/run-strategy", bytes.NewBufferString(`{"runtime_id":"rt_disabled","start_time_ms":0,"end_time_ms":0}`)), 42)
 	rec := httptest.NewRecorder()
 	s.handleRunStrategy(rec, req, 7)
 	if rec.Code != http.StatusServiceUnavailable {
@@ -383,7 +383,7 @@ func TestRunStrategy_SelfHostedUsesControlPanelProxy(t *testing.T) {
 		corsOrigins:  []string{"*"},
 	}
 	req := withUID(httptest.NewRequest(http.MethodPost,
-		"/api/accounts/7/run-strategy", bytes.NewBufferString(`{"runtime_id":"rt_self","start_time_ms":1,"end_time_ms":2,"max_loss_close_pct":0.25}`)), 42)
+		"/api/portfolios/7/run-strategy", bytes.NewBufferString(`{"runtime_id":"rt_self","start_time_ms":1,"end_time_ms":2,"max_loss_close_pct":0.25}`)), 42)
 	rec := httptest.NewRecorder()
 	s.handleRunStrategy(rec, req, 7)
 
@@ -393,7 +393,7 @@ func TestRunStrategy_SelfHostedUsesControlPanelProxy(t *testing.T) {
 	if proxy.runReq == nil {
 		t.Fatal("control-panel proxy RunStrategy was not called")
 	}
-	if proxy.runReq.GetAccountId() != 7 || proxy.runReq.GetUserId() != 42 {
+	if proxy.runReq.GetPortfolioId() != 7 || proxy.runReq.GetUserId() != 42 {
 		t.Fatalf("proxy request = %+v", proxy.runReq)
 	}
 	if got := proxy.runReq.GetMaxLossClosePct(); got != 0.25 {
@@ -422,7 +422,7 @@ func TestRunStrategy_SelfHostedStreamDropSurfacesError(t *testing.T) {
 		corsOrigins:  []string{"*"},
 	}
 	req := withUID(httptest.NewRequest(http.MethodPost,
-		"/api/accounts/7/run-strategy", bytes.NewBufferString(`{"runtime_id":"rt_self","start_time_ms":1,"end_time_ms":2}`)), 42)
+		"/api/portfolios/7/run-strategy", bytes.NewBufferString(`{"runtime_id":"rt_self","start_time_ms":1,"end_time_ms":2}`)), 42)
 	rec := httptest.NewRecorder()
 	s.handleRunStrategy(rec, req, 7)
 
@@ -445,8 +445,8 @@ func TestStatus_RuntimeOfflineSurfacesProxyError(t *testing.T) {
 			Source:    "self_hosted",
 		},
 	}
-	accounts := &fakeSessionAccountsClient{
-		getSessionResp: &accountv1.GetSessionResponse{Session: &accountv1.StrategySessionEntry{
+	portfolios := &fakeSessionPortfoliosClient{
+		getSessionResp: &portfoliov1.GetSessionResponse{Session: &portfoliov1.StrategySessionEntry{
 			SessionId:     "sess_abc",
 			UserId:        42,
 			RuntimeId:     "rt_self",
@@ -456,7 +456,7 @@ func TestStatus_RuntimeOfflineSurfacesProxyError(t *testing.T) {
 		}},
 	}
 	s := &server{
-		accounts:     accounts,
+		portfolios:     portfolios,
 		controlPanel: resolver,
 		cpRuntime:    proxy,
 		jwtSecret:    []byte("s"),
@@ -502,8 +502,8 @@ func TestStatus_BacktestUsesPersistedSessionWithoutRuntimeStatusRPC(t *testing.T
 			Source:    "hosted",
 		},
 	}
-	accounts := &fakeSessionAccountsClient{
-		getSessionResp: &accountv1.GetSessionResponse{Session: &accountv1.StrategySessionEntry{
+	portfolios := &fakeSessionPortfoliosClient{
+		getSessionResp: &portfoliov1.GetSessionResponse{Session: &portfoliov1.StrategySessionEntry{
 			SessionId:     "sess_backtest",
 			UserId:        42,
 			RuntimeId:     "rt_backtest",
@@ -513,7 +513,7 @@ func TestStatus_BacktestUsesPersistedSessionWithoutRuntimeStatusRPC(t *testing.T
 		}},
 	}
 	s := &server{
-		accounts:     accounts,
+		portfolios:     portfolios,
 		controlPanel: resolver,
 		cpRuntime:    proxy,
 		jwtSecret:    []byte("s"),
@@ -555,8 +555,8 @@ func TestStatus_UsesSessionRuntimeID(t *testing.T) {
 			Source:    "self_hosted",
 		},
 	}
-	accounts := &fakeSessionAccountsClient{
-		getSessionResp: &accountv1.GetSessionResponse{Session: &accountv1.StrategySessionEntry{
+	portfolios := &fakeSessionPortfoliosClient{
+		getSessionResp: &portfoliov1.GetSessionResponse{Session: &portfoliov1.StrategySessionEntry{
 			SessionId:     "sess_abc",
 			UserId:        42,
 			RuntimeId:     "rt_session",
@@ -566,7 +566,7 @@ func TestStatus_UsesSessionRuntimeID(t *testing.T) {
 		}},
 	}
 	s := &server{
-		accounts:     accounts,
+		portfolios:     portfolios,
 		controlPanel: resolver,
 		cpRuntime:    proxy,
 		jwtSecret:    []byte("s"),
@@ -596,8 +596,8 @@ func TestStatus_RuntimeStatusCallHasDeadline(t *testing.T) {
 			Source:    "hosted",
 		},
 	}
-	accounts := &fakeSessionAccountsClient{
-		getSessionResp: &accountv1.GetSessionResponse{Session: &accountv1.StrategySessionEntry{
+	portfolios := &fakeSessionPortfoliosClient{
+		getSessionResp: &portfoliov1.GetSessionResponse{Session: &portfoliov1.StrategySessionEntry{
 			SessionId:     "sess_abc",
 			UserId:        42,
 			RuntimeId:     "rt_session",
@@ -607,7 +607,7 @@ func TestStatus_RuntimeStatusCallHasDeadline(t *testing.T) {
 		}},
 	}
 	s := &server{
-		accounts:     accounts,
+		portfolios:     portfolios,
 		controlPanel: resolver,
 		cpRuntime:    proxy,
 		jwtSecret:    []byte("s"),
@@ -648,14 +648,14 @@ func TestStatus_RuntimeStatusCallHasDeadline(t *testing.T) {
 
 func TestStatus_UnboundSessionFailsExplicitly(t *testing.T) {
 	resolver := &fakeResolver{}
-	accounts := &fakeSessionAccountsClient{
-		getSessionResp: &accountv1.GetSessionResponse{Session: &accountv1.StrategySessionEntry{
+	portfolios := &fakeSessionPortfoliosClient{
+		getSessionResp: &portfoliov1.GetSessionResponse{Session: &portfoliov1.StrategySessionEntry{
 			SessionId: "sess_unbound",
 			UserId:    42,
 		}},
 	}
 	s := &server{
-		accounts:     accounts,
+		portfolios:     portfolios,
 		controlPanel: resolver,
 		jwtSecret:    []byte("s"),
 		corsOrigins:  []string{"*"},
@@ -689,7 +689,7 @@ func TestRunStrategy_HostedUsesControlPanelProxy(t *testing.T) {
 	}
 
 	req := withUID(httptest.NewRequest(http.MethodPost,
-		"/api/accounts/7/run-strategy", bytes.NewBufferString(`{"runtime_id":"rt_hosted","start_time_ms":1,"end_time_ms":2}`)), 42)
+		"/api/portfolios/7/run-strategy", bytes.NewBufferString(`{"runtime_id":"rt_hosted","start_time_ms":1,"end_time_ms":2}`)), 42)
 	rec := httptest.NewRecorder()
 	s.handleRunStrategy(rec, req, 7)
 
@@ -724,7 +724,7 @@ func TestRunStrategy_UsesRuntimeProxyDeadline(t *testing.T) {
 	}
 
 	req := withUID(httptest.NewRequest(http.MethodPost,
-		"/api/accounts/7/run-strategy", bytes.NewBufferString(`{"runtime_id":"rt_exec","start_time_ms":1,"end_time_ms":2}`)), 42)
+		"/api/portfolios/7/run-strategy", bytes.NewBufferString(`{"runtime_id":"rt_exec","start_time_ms":1,"end_time_ms":2}`)), 42)
 	rec := httptest.NewRecorder()
 	s.handleRunStrategy(rec, req, 7)
 
@@ -785,7 +785,7 @@ func TestRunStrategyWithoutRuntimeIDRejectsInsteadOfUsingLegacyClient(t *testing
 		corsOrigins:  []string{"*"},
 	}
 	req := withUID(httptest.NewRequest(http.MethodPost,
-		"/api/accounts/7/run-strategy", bytes.NewBufferString(`{"start_time_ms":0,"end_time_ms":0}`)), 42)
+		"/api/portfolios/7/run-strategy", bytes.NewBufferString(`{"start_time_ms":0,"end_time_ms":0}`)), 42)
 	rec := httptest.NewRecorder()
 	s.handleRunStrategy(rec, req, 7)
 
@@ -819,7 +819,7 @@ func TestStop_UsesResolveNotEnsure(t *testing.T) {
 		err: status.Error(codes.NotFound, "no runtime"),
 	}
 	s := &server{
-		accounts:     &fakeSessionAccountsClient{},
+		portfolios:     &fakeSessionPortfoliosClient{},
 		controlPanel: resolver,
 		jwtSecret:    []byte("s"),
 		corsOrigins:  []string{"*"},
@@ -845,8 +845,8 @@ func TestStop_TerminalSessionDoesNotResolveRuntime(t *testing.T) {
 	resolver := &fakeResolver{
 		err: status.Error(codes.FailedPrecondition, "runtime ended"),
 	}
-	accounts := &fakeSessionAccountsClient{
-		getSessionResp: &accountv1.GetSessionResponse{Session: &accountv1.StrategySessionEntry{
+	portfolios := &fakeSessionPortfoliosClient{
+		getSessionResp: &portfoliov1.GetSessionResponse{Session: &portfoliov1.StrategySessionEntry{
 			SessionId: "sess_abc",
 			UserId:    42,
 			Status:    "recoverable",
@@ -854,7 +854,7 @@ func TestStop_TerminalSessionDoesNotResolveRuntime(t *testing.T) {
 		}},
 	}
 	s := &server{
-		accounts:     accounts,
+		portfolios:     portfolios,
 		controlPanel: resolver,
 		cpRuntime:    proxy,
 		jwtSecret:    []byte("s"),
@@ -885,15 +885,15 @@ func TestStop_UsesSessionRuntimeID(t *testing.T) {
 			Source:    "self_hosted",
 		},
 	}
-	accounts := &fakeSessionAccountsClient{
-		getSessionResp: &accountv1.GetSessionResponse{Session: &accountv1.StrategySessionEntry{
+	portfolios := &fakeSessionPortfoliosClient{
+		getSessionResp: &portfoliov1.GetSessionResponse{Session: &portfoliov1.StrategySessionEntry{
 			SessionId: "sess_abc",
 			UserId:    42,
 			RuntimeId: "rt_session",
 		}},
 	}
 	s := &server{
-		accounts:     accounts,
+		portfolios:     portfolios,
 		controlPanel: resolver,
 		cpRuntime:    proxy,
 		jwtSecret:    []byte("s"),
@@ -926,8 +926,8 @@ func TestStop_StaleRuntimeSessionMarksRecoverable(t *testing.T) {
 			Source:    "hosted",
 		},
 	}
-	accounts := &fakeSessionAccountsClient{
-		getSessionResp: &accountv1.GetSessionResponse{Session: &accountv1.StrategySessionEntry{
+	portfolios := &fakeSessionPortfoliosClient{
+		getSessionResp: &portfoliov1.GetSessionResponse{Session: &portfoliov1.StrategySessionEntry{
 			SessionId:     "sess_abc",
 			UserId:        42,
 			Status:        "running",
@@ -936,7 +936,7 @@ func TestStop_StaleRuntimeSessionMarksRecoverable(t *testing.T) {
 		}},
 	}
 	s := &server{
-		accounts:     accounts,
+		portfolios:     portfolios,
 		controlPanel: resolver,
 		cpRuntime:    proxy,
 		jwtSecret:    []byte("s"),
@@ -950,16 +950,16 @@ func TestStop_StaleRuntimeSessionMarksRecoverable(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
 	}
-	if accounts.lastUpdateSessionReq == nil {
+	if portfolios.lastUpdateSessionReq == nil {
 		t.Fatal("UpdateSession was not called")
 	}
-	if got := accounts.lastUpdateSessionReq.GetStatus(); got != "recoverable" {
+	if got := portfolios.lastUpdateSessionReq.GetStatus(); got != "recoverable" {
 		t.Fatalf("UpdateSession status = %q, want recoverable", got)
 	}
-	if got := accounts.lastUpdateSessionReq.GetRuntimeId(); got != "rt_session" {
+	if got := portfolios.lastUpdateSessionReq.GetRuntimeId(); got != "rt_session" {
 		t.Fatalf("UpdateSession runtime_id = %q, want rt_session", got)
 	}
-	if got := accounts.lastUpdateSessionReq.GetBarsProcessed(); got != 17 {
+	if got := portfolios.lastUpdateSessionReq.GetBarsProcessed(); got != 17 {
 		t.Fatalf("UpdateSession bars_processed = %d, want 17", got)
 	}
 	var out map[string]any
@@ -985,8 +985,8 @@ func TestStop_RuntimeRejectsWithoutErrorMarksRecoverable(t *testing.T) {
 			Source:    "hosted",
 		},
 	}
-	accounts := &fakeSessionAccountsClient{
-		getSessionResp: &accountv1.GetSessionResponse{Session: &accountv1.StrategySessionEntry{
+	portfolios := &fakeSessionPortfoliosClient{
+		getSessionResp: &portfoliov1.GetSessionResponse{Session: &portfoliov1.StrategySessionEntry{
 			SessionId:     "sess_abc",
 			UserId:        42,
 			Status:        "running",
@@ -995,7 +995,7 @@ func TestStop_RuntimeRejectsWithoutErrorMarksRecoverable(t *testing.T) {
 		}},
 	}
 	s := &server{
-		accounts:     accounts,
+		portfolios:     portfolios,
 		controlPanel: resolver,
 		cpRuntime:    proxy,
 		jwtSecret:    []byte("s"),
@@ -1009,10 +1009,10 @@ func TestStop_RuntimeRejectsWithoutErrorMarksRecoverable(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
 	}
-	if accounts.lastUpdateSessionReq == nil {
+	if portfolios.lastUpdateSessionReq == nil {
 		t.Fatal("UpdateSession was not called")
 	}
-	if got := accounts.lastUpdateSessionReq.GetStatus(); got != "recoverable" {
+	if got := portfolios.lastUpdateSessionReq.GetStatus(); got != "recoverable" {
 		t.Fatalf("UpdateSession status = %q, want recoverable", got)
 	}
 	var out map[string]any

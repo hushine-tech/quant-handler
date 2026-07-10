@@ -37,7 +37,7 @@ type fakeResolver struct {
 	gotRuntimeID      string
 	gotHostPath       string
 	gotContainerPath  string
-	gotAccountID      int64
+	gotPortfolioID      int64
 	gotMarket         string
 	gotSymbol         string
 	gotInterval       string
@@ -98,7 +98,7 @@ func (f *fakeResolver) LoadDebugDataset(_ context.Context, args controlpanel.Loa
 	f.loadDebugCalls++
 	f.gotUserID = args.UserID
 	f.gotRuntimeID = args.RuntimeID
-	f.gotAccountID = args.AccountID
+	f.gotPortfolioID = args.PortfolioID
 	f.gotMarket = args.Market
 	f.gotSymbol = args.Symbol
 	f.gotInterval = args.Interval

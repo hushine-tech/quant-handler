@@ -3,7 +3,7 @@ package app
 import (
 	"strings"
 
-	accountv1 "github.com/hushine-tech/core-service/gen/accountv1"
+	portfoliov1 "github.com/hushine-tech/core-service/gen/portfoliov1"
 )
 
 type spotAssetIn struct {
@@ -36,8 +36,8 @@ type futIn struct {
 }
 
 type walletBootstrap struct {
-	Futures          *accountv1.FuturesWallet
-	Spot             *accountv1.SpotWallet
+	Futures          *portfoliov1.FuturesWallet
+	Spot             *portfoliov1.SpotWallet
 	TotalValue       float64
 	WalletBalance    float64
 	AvailableBalance float64
@@ -52,20 +52,20 @@ func normPositionMode(s string) string {
 	return s
 }
 
-func buildSpotWallet(in *spotIn, initialBalance float64) *accountv1.SpotWallet {
+func buildSpotWallet(in *spotIn, initialBalance float64) *portfoliov1.SpotWallet {
 	if in == nil {
 		if initialBalance <= 0 {
 			return nil
 		}
-		return &accountv1.SpotWallet{Free: initialBalance}
+		return &portfoliov1.SpotWallet{Free: initialBalance}
 	}
-	sw := &accountv1.SpotWallet{Free: in.Free, Locked: in.Locked}
+	sw := &portfoliov1.SpotWallet{Free: in.Free, Locked: in.Locked}
 	for _, a := range in.Assets {
 		sym := strings.ToUpper(strings.TrimSpace(a.Symbol))
 		if sym == "" {
 			continue
 		}
-		asset := &accountv1.SpotAsset{
+		asset := &portfoliov1.SpotAsset{
 			Symbol:        sym,
 			Qty:           a.Qty,
 			Locked:        a.Locked,
@@ -79,7 +79,7 @@ func buildSpotWallet(in *spotIn, initialBalance float64) *accountv1.SpotWallet {
 	return sw
 }
 
-func buildFuturesWallet(in *futIn) *accountv1.FuturesWallet {
+func buildFuturesWallet(in *futIn) *portfoliov1.FuturesWallet {
 	if in == nil {
 		return nil
 	}
@@ -97,7 +97,7 @@ func buildFuturesWallet(in *futIn) *accountv1.FuturesWallet {
 	if pm != "one_way" && pm != "hedge" {
 		pm = "one_way"
 	}
-	fw := &accountv1.FuturesWallet{
+	fw := &portfoliov1.FuturesWallet{
 		MarginMode:     mm,
 		PositionMode:   pm,
 		InitialBalance: in.InitialBalance,
@@ -126,7 +126,7 @@ func buildFuturesWallet(in *futIn) *accountv1.FuturesWallet {
 		if fr == 0 {
 			fr = 0.0004
 		}
-		fw.Positions = append(fw.Positions, &accountv1.FuturesPosition{
+		fw.Positions = append(fw.Positions, &portfoliov1.FuturesPosition{
 			Symbol:         sym,
 			Direction:      p.Direction,
 			InitialBalance: ib,
@@ -137,7 +137,7 @@ func buildFuturesWallet(in *futIn) *accountv1.FuturesWallet {
 	return fw
 }
 
-func spotBootstrapValue(s *accountv1.SpotWallet) float64 {
+func spotBootstrapValue(s *portfoliov1.SpotWallet) float64 {
 	if s == nil {
 		return 0
 	}
@@ -154,7 +154,7 @@ func spotBootstrapValue(s *accountv1.SpotWallet) float64 {
 	return total
 }
 
-func futuresBootstrapValue(f *accountv1.FuturesWallet) float64 {
+func futuresBootstrapValue(f *portfoliov1.FuturesWallet) float64 {
 	if f == nil {
 		return 0
 	}

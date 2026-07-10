@@ -38,7 +38,7 @@ type marketDataStreamJSON struct {
 type marketDataRequestJSON struct {
 	RequestID         int64         `json:"request_id"`
 	UserID            int64         `json:"user_id"`
-	AccountID         int64         `json:"account_id,omitempty"`
+	PortfolioID         int64         `json:"portfolio_id,omitempty"`
 	StreamID          int64         `json:"stream_id"`
 	Key               streamKeyJSON `json:"key"`
 	Scope             string        `json:"scope"`
@@ -171,7 +171,7 @@ type createMarketDataRequestBody struct {
 	Scope             string         `json:"scope"`
 	StartTimeMs       int64          `json:"start_time_ms"`
 	EndTimeMs         int64          `json:"end_time_ms"`
-	AccountID         int64          `json:"account_id"`
+	PortfolioID         int64          `json:"portfolio_id"`
 	NeedsLiveDelivery *bool          `json:"needs_live_delivery"`
 }
 
@@ -253,7 +253,7 @@ func requestToJSON(r *mdv1.MarketDataRequest) marketDataRequestJSON {
 	j := marketDataRequestJSON{
 		RequestID:         r.GetRequestId(),
 		UserID:            r.GetUserId(),
-		AccountID:         r.GetAccountId(),
+		PortfolioID:         r.GetPortfolioId(),
 		StreamID:          r.GetStreamId(),
 		Key:               streamKeyToJSON(r.GetKey()),
 		Scope:             r.GetScope(),
@@ -503,7 +503,7 @@ func (s *server) createMarketDataRequest(w http.ResponseWriter, r *http.Request)
 
 	req := &mdv1.CreateMarketDataRequestRequest{
 		UserId:            uid,
-		AccountId:         body.AccountID,
+		PortfolioId:         body.PortfolioID,
 		Key:               key,
 		NeedsLiveDelivery: needsLive,
 		Scope:             scope,

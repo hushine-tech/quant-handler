@@ -13,8 +13,8 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	controlpanelv1 "github.com/hushine-tech/control-panel-service/gen/controlpanelv1"
 	mdv1 "github.com/hushine-tech/control-panel-service/gen/marketdatav1"
-	"github.com/hushine-tech/core-service/gen/accountv1"
 	orderv1 "github.com/hushine-tech/core-service/gen/orderv1"
+	"github.com/hushine-tech/core-service/gen/portfoliov1"
 	grpcclientmw "github.com/hushine-tech/golang-lib/middleware/grpcclient"
 	httpmw "github.com/hushine-tech/golang-lib/middleware/httpserver"
 	cerrors "github.com/hushine-tech/golang-lib/pkg/errors"
@@ -34,9 +34,9 @@ func Run(cfg *config.Config) error {
 	if httpAddr == "" {
 		httpAddr = ":8090"
 	}
-	grpcTarget := cfg.Dependencies.AccountServiceGRPC
+	grpcTarget := cfg.Dependencies.PortfolioServiceGRPC
 	if grpcTarget == "" {
-		return errors.New("dependencies.account_service_grpc is required")
+		return errors.New("dependencies.portfolio_service_grpc is required")
 	}
 	jwtSecret := cfg.Auth.JWTSecret
 	if jwtSecret == "" {
@@ -59,7 +59,7 @@ func Run(cfg *config.Config) error {
 	}
 	defer conn.Close()
 
-	cli := accountv1.NewAccountServiceClient(conn)
+	cli := portfoliov1.NewPortfolioServiceClient(conn)
 
 	// order.v1 API（可选，当前由 core-service gRPC 端口提供）
 	var orderCli orderv1.OrderServiceClient
@@ -97,7 +97,7 @@ func Run(cfg *config.Config) error {
 	}
 
 	s := &server{
-		accounts:        cli,
+		portfolios:      cli,
 		orders:          orderCli,
 		controlPanel:    controlPanel,
 		cpRuntime:       cpRuntimeCli,
@@ -119,8 +119,8 @@ func Run(cfg *config.Config) error {
 	mux.Handle("/api/auth/signup", s.cors(http.HandlerFunc(s.handleSignup)))
 	mux.Handle("/api/auth/login", s.cors(http.HandlerFunc(s.handleLogin)))
 	mux.Handle("/api/symbols", s.cors(s.auth(http.HandlerFunc(s.handleSymbols))))
-	mux.Handle("/api/accounts", s.cors(s.auth(s.handleAccountsCollection())))
-	mux.HandleFunc("/api/accounts/", s.cors(s.auth(s.handleAccountsByID())).ServeHTTP)
+	mux.Handle("/api/portfolios", s.cors(s.auth(s.handlePortfoliosCollection())))
+	mux.HandleFunc("/api/portfolios/", s.cors(s.auth(s.handlePortfoliosByID())).ServeHTTP)
 	mux.HandleFunc("/api/venues", s.cors(s.auth(http.HandlerFunc(s.handleVenues))).ServeHTTP)
 	mux.HandleFunc("/api/venues/", s.cors(s.auth(http.HandlerFunc(s.handleVenueByID))).ServeHTTP)
 	mux.HandleFunc("/api/strategy-sessions/", s.cors(s.auth(http.HandlerFunc(s.handleStrategySession))).ServeHTTP)
@@ -150,7 +150,7 @@ func Run(cfg *config.Config) error {
 }
 
 type server struct {
-	accounts        accountv1.AccountServiceClient
+	portfolios      portfoliov1.PortfolioServiceClient
 	orders          orderv1.OrderServiceClient // nil if not configured
 	controlPanel    controlpanel.Resolver
 	cpRuntime       controlpanelv1.ControlPanelServiceClient // Phase D3: direct gRPC client for credential RPCs; nil if CP not configured
@@ -239,12 +239,12 @@ type authBody struct {
 }
 
 type authUserJSON struct {
-	ID        int64  `json:"id"`
+	UserID    int64  `json:"user_id"`
 	Username  string `json:"username"`
 	CreatedAt string `json:"created_at"`
 }
 
-func protoUserToJSON(user *accountv1.User) authUserJSON {
+func protoUserToJSON(user *portfoliov1.User) authUserJSON {
 	if user == nil {
 		return authUserJSON{}
 	}
@@ -253,7 +253,7 @@ func protoUserToJSON(user *accountv1.User) authUserJSON {
 		createdAt = ts.AsTime().UTC().Format(time.RFC3339Nano)
 	}
 	return authUserJSON{
-		ID:        user.GetId(),
+		UserID:    user.GetId(),
 		Username:  user.GetUsername(),
 		CreatedAt: createdAt,
 	}
@@ -290,7 +290,7 @@ func (s *server) handleSignup(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
-	resp, err := s.accounts.CreateUser(r.Context(), &accountv1.CreateUserRequest{
+	resp, err := s.portfolios.CreateUser(r.Context(), &portfoliov1.CreateUserRequest{
 		Username: body.Username,
 		Password: body.Password,
 	})
@@ -314,7 +314,7 @@ func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
-	resp, err := s.accounts.VerifyUserPassword(r.Context(), &accountv1.VerifyUserPasswordRequest{
+	resp, err := s.portfolios.VerifyUserPassword(r.Context(), &portfoliov1.VerifyUserPasswordRequest{
 		Username: body.Username,
 		Password: body.Password,
 	})
@@ -339,22 +339,22 @@ func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *server) handleAccountsCollection() http.Handler {
+func (s *server) handlePortfoliosCollection() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
-			s.listAccounts(w, r)
+			s.listPortfolios(w, r)
 		case http.MethodPost:
-			s.createAccount(w, r)
+			s.createPortfolio(w, r)
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
 	})
 }
 
-func (s *server) handleAccountsByID() http.Handler {
+func (s *server) handlePortfoliosByID() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		suffix := strings.TrimPrefix(r.URL.Path, "/api/accounts/")
+		suffix := strings.TrimPrefix(r.URL.Path, "/api/portfolios/")
 		suffix = strings.Trim(suffix, "/")
 		parts := strings.Split(suffix, "/")
 		if len(parts) == 0 || parts[0] == "" {
@@ -364,7 +364,7 @@ func (s *server) handleAccountsByID() http.Handler {
 		rawID := strings.TrimSpace(parts[0])
 		id, parseErr := strconv.ParseInt(rawID, 10, 64)
 		if parseErr != nil {
-			writeErr(w, http.StatusBadRequest, "account_id must be an integer")
+			writeErr(w, http.StatusBadRequest, "portfolio_id must be an integer")
 			return
 		}
 		if len(parts) == 1 {
@@ -372,7 +372,7 @@ func (s *server) handleAccountsByID() http.Handler {
 				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 				return
 			}
-			s.getAccount(w, r, id)
+			s.getPortfolio(w, r, id)
 			return
 		}
 		if len(parts) == 2 && parts[1] == "portfolio-snapshot" {
@@ -380,11 +380,11 @@ func (s *server) handleAccountsByID() http.Handler {
 				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 				return
 			}
-			s.getAccountPortfolioSnapshot(w, r, id)
+			s.getPortfolioPortfolioSnapshot(w, r, id)
 			return
 		}
 		if len(parts) == 2 && parts[1] == "venues" {
-			s.handleAccountVenues(w, r, id)
+			s.handlePortfolioVenues(w, r, id)
 			return
 		}
 		if len(parts) == 2 && parts[1] == "run-strategy" {
@@ -396,11 +396,11 @@ func (s *server) handleAccountsByID() http.Handler {
 			return
 		}
 		if len(parts) == 2 && parts[1] == "debug-dataset" {
-			s.handleAccountDebugDataset(w, r, id)
+			s.handlePortfolioDebugDataset(w, r, id)
 			return
 		}
 		if len(parts) == 2 && parts[1] == "debug-package" {
-			s.handleAccountDebugPackage(w, r, id)
+			s.handlePortfolioDebugPackage(w, r, id)
 			return
 		}
 		if len(parts) == 3 && parts[1] == "strategy" && parts[2] == "coverage-preview" {
@@ -416,22 +416,22 @@ func (s *server) handleAccountsByID() http.Handler {
 			if len(parts) > 2 {
 				rest = strings.Join(parts[2:], "/")
 			}
-			s.handleAccountStrategies(w, r, id, rest)
+			s.handlePortfolioStrategies(w, r, id, rest)
 			return
 		}
 		http.NotFound(w, r)
 	})
 }
 
-type accountJSON struct {
-	AccountID   int64  `json:"account_id"`
+type portfolioJSON struct {
+	PortfolioID int64  `json:"portfolio_id"`
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
 	Environment int32  `json:"environment"`
 	CreatedAt   string `json:"created_at"`
 }
 
-func (s *server) listAccounts(w http.ResponseWriter, r *http.Request) {
+func (s *server) listPortfolios(w http.ResponseWriter, r *http.Request) {
 	uid, ok := userIDFromRequest(r)
 	if !ok {
 		writeErr(w, http.StatusUnauthorized, "missing user context")
@@ -440,19 +440,19 @@ func (s *server) listAccounts(w http.ResponseWriter, r *http.Request) {
 	limit, offset := parseCollectionPaging(r)
 	page := collectionPageRequested(r)
 	ctx := r.Context()
-	req := &accountv1.ListAccountsRequest{UserId: uid}
+	req := &portfoliov1.ListPortfoliosRequest{UserId: uid}
 	if page {
 		req.Limit = limit
 		req.Offset = offset
 	}
-	resp, err := s.accounts.ListAccounts(ctx, req)
+	resp, err := s.portfolios.ListPortfolios(ctx, req)
 	if err != nil {
 		code, msg := grpcToHTTP(err)
 		writeErr(w, code, msg)
 		return
 	}
-	out := make([]accountJSON, 0, len(resp.GetAccounts()))
-	for _, a := range resp.GetAccounts() {
+	out := make([]portfolioJSON, 0, len(resp.GetPortfolios()))
+	for _, a := range resp.GetPortfolios() {
 		out = append(out, registryEntryToJSON(a))
 	}
 	if page {
@@ -467,29 +467,29 @@ func (s *server) listAccounts(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-func (s *server) getAccount(w http.ResponseWriter, r *http.Request, id int64) {
+func (s *server) getPortfolio(w http.ResponseWriter, r *http.Request, id int64) {
 	uid, ok := userIDFromRequest(r)
 	if !ok {
 		writeErr(w, http.StatusUnauthorized, "missing user context")
 		return
 	}
 	ctx := r.Context()
-	resp, err := s.accounts.GetAccount(ctx, &accountv1.GetAccountRequest{AccountId: id, UserId: uid})
+	resp, err := s.portfolios.GetPortfolio(ctx, &portfoliov1.GetPortfolioRequest{PortfolioId: id, UserId: uid})
 	if err != nil {
 		code, msg := grpcToHTTP(err)
 		writeErr(w, code, msg)
 		return
 	}
-	if resp.GetAccount() == nil {
-		writeErr(w, http.StatusNotFound, "account not found")
+	if resp.GetPortfolio() == nil {
+		writeErr(w, http.StatusNotFound, "portfolio not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, registryEntryToJSON(resp.GetAccount()))
+	writeJSON(w, http.StatusOK, registryEntryToJSON(resp.GetPortfolio()))
 }
 
-func registryEntryToJSON(e *accountv1.AccountRegistryEntry) accountJSON {
-	return accountJSON{
-		AccountID:   e.GetAccountId(),
+func registryEntryToJSON(e *portfoliov1.PortfolioRegistryEntry) portfolioJSON {
+	return portfolioJSON{
+		PortfolioID: e.GetPortfolioId(),
 		Name:        e.GetName(),
 		Description: e.GetDescription(),
 		Environment: e.GetEnvironment(),
@@ -520,7 +520,7 @@ func grpcToHTTP(err error) (int, string) {
 	case codes.InvalidArgument:
 		return http.StatusBadRequest, st.Message()
 	case codes.Unavailable:
-		return http.StatusBadGateway, friendlyRuntimeUnavailableMessage
+		return http.StatusBadGateway, friendlyBackendUnavailableMessage
 	case codes.DeadlineExceeded:
 		return http.StatusGatewayTimeout, friendlyRuntimeTimeoutMessage
 	case codes.Canceled:
@@ -542,14 +542,23 @@ const (
 	friendlyRuntimeTimeoutMessage     = "Runtime did not respond in time. It may be starting, busy with another session, or temporarily unreachable; retry in a few seconds or choose another runtime."
 	friendlyRuntimeCanceledMessage    = "Runtime request was canceled before it completed. Retry in a few seconds or choose another runtime."
 	friendlyRuntimeUnavailableMessage = "Runtime is temporarily unavailable. Retry in a few seconds or choose another runtime."
+	friendlyBackendUnavailableMessage = "Backend service is temporarily unavailable. Retry in a few seconds."
 )
+
+func grpcToHTTPRuntime(err error) (int, string) {
+	code, msg := grpcToHTTP(err)
+	if msg == friendlyBackendUnavailableMessage {
+		return code, friendlyRuntimeUnavailableMessage
+	}
+	return code, msg
+}
 
 func friendlyTransientRPCMessage(err error) (string, bool) {
 	if cerrors.Code(err) == errorcodes.Timeout {
 		return friendlyRuntimeTimeoutMessage, true
 	}
 	if cerrors.HTTPStatus(err) == http.StatusServiceUnavailable {
-		return friendlyRuntimeUnavailableMessage, true
+		return friendlyBackendUnavailableMessage, true
 	}
 	return "", false
 }
@@ -557,7 +566,10 @@ func friendlyTransientRPCMessage(err error) (string, bool) {
 func friendlyKnownBusinessErrorMessage(err error) (string, bool) {
 	raw := err.Error()
 	if strings.Contains(raw, "ACTIVE_SESSION_EXISTS") {
-		return "Another session is already running for this account. Finish or stop the running session before starting a new one.", true
+		return "Another session is already running for this portfolio. Finish or stop the running session before starting a new one.", true
+	}
+	if idx := strings.Index(raw, "venue credential is invalid or lacks Binance futures account permission"); idx >= 0 {
+		return raw[idx:], true
 	}
 	return "", false
 }

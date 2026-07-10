@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hushine-tech/core-service/gen/accountv1"
+	"github.com/hushine-tech/core-service/gen/portfoliov1"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -102,7 +102,7 @@ func (s *server) handleNotifications(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) getNotificationSettings(w http.ResponseWriter, r *http.Request, userID int64) {
-	resp, err := s.accounts.GetNotificationSettings(r.Context(), &accountv1.GetNotificationSettingsRequest{UserId: userID})
+	resp, err := s.portfolios.GetNotificationSettings(r.Context(), &portfoliov1.GetNotificationSettingsRequest{UserId: userID})
 	if err != nil {
 		code, msg := grpcToHTTP(err)
 		writeErr(w, code, msg)
@@ -117,7 +117,7 @@ func (s *server) updateNotificationPreferences(w http.ResponseWriter, r *http.Re
 		writeErr(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
-	preferences := &accountv1.NotificationPreferences{
+	preferences := &portfoliov1.NotificationPreferences{
 		SystemEnabled:   body.SystemEnabled,
 		StrategyEnabled: body.StrategyEnabled,
 		CustomEnabled:   body.CustomEnabled,
@@ -125,7 +125,7 @@ func (s *server) updateNotificationPreferences(w http.ResponseWriter, r *http.Re
 	if body.Enabled != nil {
 		preferences.Enabled = body.Enabled
 	}
-	resp, err := s.accounts.UpdateNotificationPreferences(r.Context(), &accountv1.UpdateNotificationPreferencesRequest{
+	resp, err := s.portfolios.UpdateNotificationPreferences(r.Context(), &portfoliov1.UpdateNotificationPreferencesRequest{
 		UserId:      userID,
 		Preferences: preferences,
 	})
@@ -138,7 +138,7 @@ func (s *server) updateNotificationPreferences(w http.ResponseWriter, r *http.Re
 }
 
 func (s *server) createNotificationBindCode(w http.ResponseWriter, r *http.Request, userID int64) {
-	resp, err := s.accounts.CreateNotificationBindCode(r.Context(), &accountv1.CreateNotificationBindCodeRequest{
+	resp, err := s.portfolios.CreateNotificationBindCode(r.Context(), &portfoliov1.CreateNotificationBindCodeRequest{
 		UserId:  userID,
 		Channel: "telegram",
 	})
@@ -155,7 +155,7 @@ func (s *server) createNotificationBindCode(w http.ResponseWriter, r *http.Reque
 }
 
 func (s *server) confirmNotificationBinding(w http.ResponseWriter, r *http.Request, userID int64) {
-	resp, err := s.accounts.ConfirmNotificationBinding(r.Context(), &accountv1.ConfirmNotificationBindingRequest{
+	resp, err := s.portfolios.ConfirmNotificationBinding(r.Context(), &portfoliov1.ConfirmNotificationBindingRequest{
 		UserId:  userID,
 		Channel: "telegram",
 	})
@@ -168,7 +168,7 @@ func (s *server) confirmNotificationBinding(w http.ResponseWriter, r *http.Reque
 }
 
 func (s *server) unbindNotificationTelegram(w http.ResponseWriter, r *http.Request, userID int64) {
-	resp, err := s.accounts.UnbindNotificationChannel(r.Context(), &accountv1.UnbindNotificationChannelRequest{
+	resp, err := s.portfolios.UnbindNotificationChannel(r.Context(), &portfoliov1.UnbindNotificationChannelRequest{
 		UserId:  userID,
 		Channel: "telegram",
 	})
@@ -181,7 +181,7 @@ func (s *server) unbindNotificationTelegram(w http.ResponseWriter, r *http.Reque
 }
 
 func (s *server) sendTestNotification(w http.ResponseWriter, r *http.Request, userID int64) {
-	resp, err := s.accounts.SendTestNotification(r.Context(), &accountv1.SendTestNotificationRequest{UserId: userID})
+	resp, err := s.portfolios.SendTestNotification(r.Context(), &portfoliov1.SendTestNotificationRequest{UserId: userID})
 	if err != nil {
 		code, msg := grpcToHTTP(err)
 		writeErr(w, code, msg)
@@ -193,7 +193,7 @@ func (s *server) sendTestNotification(w http.ResponseWriter, r *http.Request, us
 	})
 }
 
-func notificationSettingsToJSON(resp *accountv1.GetNotificationSettingsResponse) notificationSettingsJSON {
+func notificationSettingsToJSON(resp *portfoliov1.GetNotificationSettingsResponse) notificationSettingsJSON {
 	if resp == nil {
 		return notificationSettingsJSON{}
 	}

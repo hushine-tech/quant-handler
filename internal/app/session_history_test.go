@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/hushine-tech/core-service/gen/accountv1"
+	"github.com/hushine-tech/core-service/gen/portfoliov1"
 	orderv1 "github.com/hushine-tech/core-service/gen/orderv1"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -15,55 +15,55 @@ import (
 
 // ── test doubles ──────────────────────────────────────────────────────────
 
-type fakeSessionAccountsClient struct {
-	accountv1.AccountServiceClient // unused methods panic on nil-interface call
+type fakeSessionPortfoliosClient struct {
+	portfoliov1.PortfolioServiceClient // unused methods panic on nil-interface call
 
 	// Capture last request.
-	lastSnapshotsReq             *accountv1.ListSessionSnapshotsRequest
-	lastReconciliationReq        *accountv1.ListReconciliationRunsRequest
-	lastReconciliationSummaryReq *accountv1.GetSessionReconciliationSummaryRequest
-	lastGetSessionReq            *accountv1.GetSessionRequest
-	lastGetAccountReq            *accountv1.GetAccountRequest
-	lastListSessionsReq          *accountv1.ListSessionsRequest
-	lastUpdateSessionReq         *accountv1.UpdateSessionRequest
-	lastIndicatorDefinitionsReq  *accountv1.ListStrategyIndicatorsRequest
-	lastIndicatorChunksReq       *accountv1.ListStrategyIndicatorChunksRequest
+	lastSnapshotsReq             *portfoliov1.ListSessionSnapshotsRequest
+	lastReconciliationReq        *portfoliov1.ListReconciliationRunsRequest
+	lastReconciliationSummaryReq *portfoliov1.GetSessionReconciliationSummaryRequest
+	lastGetSessionReq            *portfoliov1.GetSessionRequest
+	lastGetPortfolioReq            *portfoliov1.GetPortfolioRequest
+	lastListSessionsReq          *portfoliov1.ListSessionsRequest
+	lastUpdateSessionReq         *portfoliov1.UpdateSessionRequest
+	lastIndicatorDefinitionsReq  *portfoliov1.ListStrategyIndicatorsRequest
+	lastIndicatorChunksReq       *portfoliov1.ListStrategyIndicatorChunksRequest
 
 	// Canned responses.
-	snapshotsResp             *accountv1.ListSessionSnapshotsResponse
-	reconciliationResp        *accountv1.ListReconciliationRunsResponse
-	reconciliationSummaryResp *accountv1.GetSessionReconciliationSummaryResponse
-	getSessionResp            *accountv1.GetSessionResponse
+	snapshotsResp             *portfoliov1.ListSessionSnapshotsResponse
+	reconciliationResp        *portfoliov1.ListReconciliationRunsResponse
+	reconciliationSummaryResp *portfoliov1.GetSessionReconciliationSummaryResponse
+	getSessionResp            *portfoliov1.GetSessionResponse
 	getSessionErr             error
-	getAccountResp            *accountv1.GetAccountResponse
-	getAccountErr             error
-	listSessionsResp          *accountv1.ListSessionsResponse
+	getPortfolioResp            *portfoliov1.GetPortfolioResponse
+	getPortfolioErr             error
+	listSessionsResp          *portfoliov1.ListSessionsResponse
 	listSessionsErr           error
 	updateSessionErr          error
-	indicatorDefinitionsResp  *accountv1.ListStrategyIndicatorsResponse
+	indicatorDefinitionsResp  *portfoliov1.ListStrategyIndicatorsResponse
 	indicatorDefinitionsErr   error
-	indicatorChunksResp       *accountv1.ListStrategyIndicatorChunksResponse
+	indicatorChunksResp       *portfoliov1.ListStrategyIndicatorChunksResponse
 	indicatorChunksErr        error
-	accountEnvironment        int32
+	portfolioEnvironment        int32
 	reconciliationSummaryErr  error
 }
 
-func (f *fakeSessionAccountsClient) GetAccount(_ context.Context, in *accountv1.GetAccountRequest, _ ...grpc.CallOption) (*accountv1.GetAccountResponse, error) {
-	f.lastGetAccountReq = in
-	if f.getAccountErr != nil {
-		return nil, f.getAccountErr
+func (f *fakeSessionPortfoliosClient) GetPortfolio(_ context.Context, in *portfoliov1.GetPortfolioRequest, _ ...grpc.CallOption) (*portfoliov1.GetPortfolioResponse, error) {
+	f.lastGetPortfolioReq = in
+	if f.getPortfolioErr != nil {
+		return nil, f.getPortfolioErr
 	}
-	if f.getAccountResp != nil {
-		return f.getAccountResp, nil
+	if f.getPortfolioResp != nil {
+		return f.getPortfolioResp, nil
 	}
-	return &accountv1.GetAccountResponse{Account: &accountv1.AccountRegistryEntry{
-		AccountId:   in.GetAccountId(),
+	return &portfoliov1.GetPortfolioResponse{Portfolio: &portfoliov1.PortfolioRegistryEntry{
+		PortfolioId:   in.GetPortfolioId(),
 		UserId:      in.GetUserId(),
-		Environment: f.accountEnvironment,
+		Environment: f.portfolioEnvironment,
 	}}, nil
 }
 
-func (f *fakeSessionAccountsClient) GetSession(_ context.Context, in *accountv1.GetSessionRequest, _ ...grpc.CallOption) (*accountv1.GetSessionResponse, error) {
+func (f *fakeSessionPortfoliosClient) GetSession(_ context.Context, in *portfoliov1.GetSessionRequest, _ ...grpc.CallOption) (*portfoliov1.GetSessionResponse, error) {
 	f.lastGetSessionReq = in
 	if f.getSessionErr != nil {
 		return nil, f.getSessionErr
@@ -71,14 +71,14 @@ func (f *fakeSessionAccountsClient) GetSession(_ context.Context, in *accountv1.
 	if f.getSessionResp != nil {
 		return f.getSessionResp, nil
 	}
-	return &accountv1.GetSessionResponse{Session: &accountv1.StrategySessionEntry{
+	return &portfoliov1.GetSessionResponse{Session: &portfoliov1.StrategySessionEntry{
 		SessionId: in.GetSessionId(),
 		UserId:    in.GetUserId(),
 		RuntimeId: "rt-default",
 	}}, nil
 }
 
-func (f *fakeSessionAccountsClient) ListSessions(_ context.Context, in *accountv1.ListSessionsRequest, _ ...grpc.CallOption) (*accountv1.ListSessionsResponse, error) {
+func (f *fakeSessionPortfoliosClient) ListSessions(_ context.Context, in *portfoliov1.ListSessionsRequest, _ ...grpc.CallOption) (*portfoliov1.ListSessionsResponse, error) {
 	f.lastListSessionsReq = in
 	if f.listSessionsErr != nil {
 		return nil, f.listSessionsErr
@@ -86,28 +86,28 @@ func (f *fakeSessionAccountsClient) ListSessions(_ context.Context, in *accountv
 	if f.listSessionsResp != nil {
 		return f.listSessionsResp, nil
 	}
-	return &accountv1.ListSessionsResponse{}, nil
+	return &portfoliov1.ListSessionsResponse{}, nil
 }
 
-func (f *fakeSessionAccountsClient) UpdateSession(_ context.Context, in *accountv1.UpdateSessionRequest, _ ...grpc.CallOption) (*accountv1.UpdateSessionResponse, error) {
+func (f *fakeSessionPortfoliosClient) UpdateSession(_ context.Context, in *portfoliov1.UpdateSessionRequest, _ ...grpc.CallOption) (*portfoliov1.UpdateSessionResponse, error) {
 	f.lastUpdateSessionReq = in
 	if f.updateSessionErr != nil {
 		return nil, f.updateSessionErr
 	}
-	return &accountv1.UpdateSessionResponse{}, nil
+	return &portfoliov1.UpdateSessionResponse{}, nil
 }
 
-func (f *fakeSessionAccountsClient) ListSessionSnapshots(_ context.Context, in *accountv1.ListSessionSnapshotsRequest, _ ...grpc.CallOption) (*accountv1.ListSessionSnapshotsResponse, error) {
+func (f *fakeSessionPortfoliosClient) ListSessionSnapshots(_ context.Context, in *portfoliov1.ListSessionSnapshotsRequest, _ ...grpc.CallOption) (*portfoliov1.ListSessionSnapshotsResponse, error) {
 	f.lastSnapshotsReq = in
 	return f.snapshotsResp, nil
 }
 
-func (f *fakeSessionAccountsClient) ListReconciliationRuns(_ context.Context, in *accountv1.ListReconciliationRunsRequest, _ ...grpc.CallOption) (*accountv1.ListReconciliationRunsResponse, error) {
+func (f *fakeSessionPortfoliosClient) ListReconciliationRuns(_ context.Context, in *portfoliov1.ListReconciliationRunsRequest, _ ...grpc.CallOption) (*portfoliov1.ListReconciliationRunsResponse, error) {
 	f.lastReconciliationReq = in
 	return f.reconciliationResp, nil
 }
 
-func (f *fakeSessionAccountsClient) GetSessionReconciliationSummary(_ context.Context, in *accountv1.GetSessionReconciliationSummaryRequest, _ ...grpc.CallOption) (*accountv1.GetSessionReconciliationSummaryResponse, error) {
+func (f *fakeSessionPortfoliosClient) GetSessionReconciliationSummary(_ context.Context, in *portfoliov1.GetSessionReconciliationSummaryRequest, _ ...grpc.CallOption) (*portfoliov1.GetSessionReconciliationSummaryResponse, error) {
 	f.lastReconciliationSummaryReq = in
 	if f.reconciliationSummaryErr != nil {
 		return nil, f.reconciliationSummaryErr
@@ -115,7 +115,7 @@ func (f *fakeSessionAccountsClient) GetSessionReconciliationSummary(_ context.Co
 	return f.reconciliationSummaryResp, nil
 }
 
-func (f *fakeSessionAccountsClient) ListStrategyIndicators(_ context.Context, in *accountv1.ListStrategyIndicatorsRequest, _ ...grpc.CallOption) (*accountv1.ListStrategyIndicatorsResponse, error) {
+func (f *fakeSessionPortfoliosClient) ListStrategyIndicators(_ context.Context, in *portfoliov1.ListStrategyIndicatorsRequest, _ ...grpc.CallOption) (*portfoliov1.ListStrategyIndicatorsResponse, error) {
 	f.lastIndicatorDefinitionsReq = in
 	if f.indicatorDefinitionsErr != nil {
 		return nil, f.indicatorDefinitionsErr
@@ -123,10 +123,10 @@ func (f *fakeSessionAccountsClient) ListStrategyIndicators(_ context.Context, in
 	if f.indicatorDefinitionsResp != nil {
 		return f.indicatorDefinitionsResp, nil
 	}
-	return &accountv1.ListStrategyIndicatorsResponse{}, nil
+	return &portfoliov1.ListStrategyIndicatorsResponse{}, nil
 }
 
-func (f *fakeSessionAccountsClient) ListStrategyIndicatorChunks(_ context.Context, in *accountv1.ListStrategyIndicatorChunksRequest, _ ...grpc.CallOption) (*accountv1.ListStrategyIndicatorChunksResponse, error) {
+func (f *fakeSessionPortfoliosClient) ListStrategyIndicatorChunks(_ context.Context, in *portfoliov1.ListStrategyIndicatorChunksRequest, _ ...grpc.CallOption) (*portfoliov1.ListStrategyIndicatorChunksResponse, error) {
 	f.lastIndicatorChunksReq = in
 	if f.indicatorChunksErr != nil {
 		return nil, f.indicatorChunksErr
@@ -134,7 +134,7 @@ func (f *fakeSessionAccountsClient) ListStrategyIndicatorChunks(_ context.Contex
 	if f.indicatorChunksResp != nil {
 		return f.indicatorChunksResp, nil
 	}
-	return &accountv1.ListStrategyIndicatorChunksResponse{}, nil
+	return &portfoliov1.ListStrategyIndicatorChunksResponse{}, nil
 }
 
 // Reuse ``fakeOrdersClient`` defined in order_history_test.go — it already
@@ -143,12 +143,12 @@ func (f *fakeSessionAccountsClient) ListStrategyIndicatorChunks(_ context.Contex
 // ── session list handler ─────────────────────────────────────────────────
 
 func TestListSessions_IncludesRuntimeAndDebugMetadata(t *testing.T) {
-	acct := &fakeSessionAccountsClient{
-		listSessionsResp: &accountv1.ListSessionsResponse{
-			Sessions: []*accountv1.StrategySessionEntry{
+	acct := &fakeSessionPortfoliosClient{
+		listSessionsResp: &portfoliov1.ListSessionsResponse{
+			Sessions: []*portfoliov1.StrategySessionEntry{
 				{
 					SessionId:      "debug-1",
-					AccountId:      7,
+					PortfolioId:      7,
 					Environment:    0,
 					Status:         "finished",
 					Interval:       "1m",
@@ -163,9 +163,9 @@ func TestListSessions_IncludesRuntimeAndDebugMetadata(t *testing.T) {
 			},
 		},
 	}
-	s := &server{accounts: acct, jwtSecret: []byte("s"), corsOrigins: []string{"*"}}
+	s := &server{portfolios: acct, jwtSecret: []byte("s"), corsOrigins: []string{"*"}}
 
-	req := withUID(httptest.NewRequest(http.MethodGet, "/api/sessions?account_id=7&limit=5", nil), 42)
+	req := withUID(httptest.NewRequest(http.MethodGet, "/api/sessions?portfolio_id=7&limit=5", nil), 42)
 	rec := httptest.NewRecorder()
 	s.listSessionsHandler(rec, req)
 
@@ -197,16 +197,16 @@ func TestListSessions_IncludesRuntimeAndDebugMetadata(t *testing.T) {
 // ── snapshots handler ────────────────────────────────────────────────────
 
 func TestGetSessionSnapshots_DefaultLimitOffsetAndPagedShape(t *testing.T) {
-	acct := &fakeSessionAccountsClient{
-		snapshotsResp: &accountv1.ListSessionSnapshotsResponse{
-			Items: []*accountv1.SnapshotEntry{
-				{Time: timestamppb.Now(), AccountId: 1, SnapshotReason: 2},
+	acct := &fakeSessionPortfoliosClient{
+		snapshotsResp: &portfoliov1.ListSessionSnapshotsResponse{
+			Items: []*portfoliov1.SnapshotEntry{
+				{Time: timestamppb.Now(), PortfolioId: 1, SnapshotReason: 2},
 			},
 			NextOffset: 1,
 			HasMore:    false,
 		},
 	}
-	s := &server{accounts: acct, jwtSecret: []byte("s"), corsOrigins: []string{"*"}}
+	s := &server{portfolios: acct, jwtSecret: []byte("s"), corsOrigins: []string{"*"}}
 
 	req := withUID(httptest.NewRequest(http.MethodGet, "/api/sessions/sess-1/snapshots", nil), 7)
 	rec := httptest.NewRecorder()
@@ -243,10 +243,10 @@ func TestGetSessionSnapshots_DefaultLimitOffsetAndPagedShape(t *testing.T) {
 }
 
 func TestGetSessionSnapshots_LimitOversizedIsClampedTo200(t *testing.T) {
-	acct := &fakeSessionAccountsClient{
-		snapshotsResp: &accountv1.ListSessionSnapshotsResponse{},
+	acct := &fakeSessionPortfoliosClient{
+		snapshotsResp: &portfoliov1.ListSessionSnapshotsResponse{},
 	}
-	s := &server{accounts: acct, jwtSecret: []byte("s"), corsOrigins: []string{"*"}}
+	s := &server{portfolios: acct, jwtSecret: []byte("s"), corsOrigins: []string{"*"}}
 
 	req := withUID(httptest.NewRequest(http.MethodGet, "/api/sessions/sess-1/snapshots?limit=10000&offset=5", nil), 7)
 	rec := httptest.NewRecorder()
@@ -264,10 +264,10 @@ func TestGetSessionSnapshots_LimitOversizedIsClampedTo200(t *testing.T) {
 }
 
 func TestGetSessionSnapshots_NegativeOrZeroLimitFallsBackToDefault(t *testing.T) {
-	acct := &fakeSessionAccountsClient{
-		snapshotsResp: &accountv1.ListSessionSnapshotsResponse{},
+	acct := &fakeSessionPortfoliosClient{
+		snapshotsResp: &portfoliov1.ListSessionSnapshotsResponse{},
 	}
-	s := &server{accounts: acct, jwtSecret: []byte("s"), corsOrigins: []string{"*"}}
+	s := &server{portfolios: acct, jwtSecret: []byte("s"), corsOrigins: []string{"*"}}
 
 	for _, raw := range []string{"0", "-5", "abc"} {
 		req := withUID(httptest.NewRequest(http.MethodGet, "/api/sessions/sess-1/snapshots?limit="+raw, nil), 7)
@@ -284,11 +284,11 @@ func TestGetSessionSnapshots_NegativeOrZeroLimitFallsBackToDefault(t *testing.T)
 
 func TestSessionOrderLifecycleEndpointReturnsEvents(t *testing.T) {
 	occurred := timestamppb.Now()
-	acct := &fakeSessionAccountsClient{
-		getSessionResp: &accountv1.GetSessionResponse{Session: &accountv1.StrategySessionEntry{
+	acct := &fakeSessionPortfoliosClient{
+		getSessionResp: &portfoliov1.GetSessionResponse{Session: &portfoliov1.StrategySessionEntry{
 			SessionId: "sess-1",
 			UserId:    7,
-			AccountId: 42,
+			PortfolioId: 42,
 			RuntimeId: "rt-1",
 		}},
 	}
@@ -298,7 +298,7 @@ func TestSessionOrderLifecycleEndpointReturnsEvents(t *testing.T) {
 				{
 					EventId:         101,
 					SessionId:       "sess-1",
-					AccountId:       42,
+					PortfolioId:       42,
 					VenueId:         88,
 					IntentId:        "intent-1",
 					AttemptId:       "attempt-1",
@@ -336,7 +336,7 @@ func TestSessionOrderLifecycleEndpointReturnsEvents(t *testing.T) {
 			},
 		},
 	}
-	s := &server{accounts: acct, orders: orders, jwtSecret: []byte("s"), corsOrigins: []string{"*"}}
+	s := &server{portfolios: acct, orders: orders, jwtSecret: []byte("s"), corsOrigins: []string{"*"}}
 
 	req := withUID(httptest.NewRequest(http.MethodGet, "/api/sessions/sess-1/lifecycle-events?after_event_id=99&limit=5", nil), 7)
 	rec := httptest.NewRecorder()
@@ -401,17 +401,17 @@ func TestSessionOrderLifecycleEndpointReturnsEvents(t *testing.T) {
 }
 
 func TestStoppingFailedStatusReturnedToFrontend(t *testing.T) {
-	acct := &fakeSessionAccountsClient{
-		getSessionResp: &accountv1.GetSessionResponse{Session: &accountv1.StrategySessionEntry{
+	acct := &fakeSessionPortfoliosClient{
+		getSessionResp: &portfoliov1.GetSessionResponse{Session: &portfoliov1.StrategySessionEntry{
 			SessionId: "sess-stop-failed",
 			UserId:    7,
-			AccountId: 42,
+			PortfolioId: 42,
 			Status:    "stopping_failed",
 			Error:     "manual exchange close required",
 			RuntimeId: "rt-1",
 		}},
 	}
-	s := &server{accounts: acct, jwtSecret: []byte("s"), corsOrigins: []string{"*"}}
+	s := &server{portfolios: acct, jwtSecret: []byte("s"), corsOrigins: []string{"*"}}
 
 	req := withUID(httptest.NewRequest(http.MethodGet, "/api/sessions/sess-stop-failed", nil), 7)
 	rec := httptest.NewRecorder()
@@ -435,9 +435,9 @@ func TestStoppingFailedStatusReturnedToFrontend(t *testing.T) {
 // ── reconciliation handler ──────────────────────────────────────────────
 
 func TestGetSessionReconciliation_PagedShapeAndCustomPaging(t *testing.T) {
-	acct := &fakeSessionAccountsClient{
-		reconciliationResp: &accountv1.ListReconciliationRunsResponse{
-			Items: []*accountv1.ReconciliationRunEntry{
+	acct := &fakeSessionPortfoliosClient{
+		reconciliationResp: &portfoliov1.ListReconciliationRunsResponse{
+			Items: []*portfoliov1.ReconciliationRunEntry{
 				{RunId: "r-1", HardPass: true, SoftPass: true},
 				{RunId: "r-2", HardPass: false, SoftPass: true},
 			},
@@ -445,7 +445,7 @@ func TestGetSessionReconciliation_PagedShapeAndCustomPaging(t *testing.T) {
 			HasMore:    true,
 		},
 	}
-	s := &server{accounts: acct, jwtSecret: []byte("s"), corsOrigins: []string{"*"}}
+	s := &server{portfolios: acct, jwtSecret: []byte("s"), corsOrigins: []string{"*"}}
 
 	req := withUID(httptest.NewRequest(http.MethodGet, "/api/sessions/s-42/reconciliation?limit=10&offset=10", nil), 7)
 	rec := httptest.NewRecorder()
@@ -738,9 +738,9 @@ func TestSessionOrderAuditHandlersExposeVenueRouteFacts(t *testing.T) {
 // ── response shape invariant (spec §Paginated response SHALL be structurally distinguishable) ──
 
 func TestAuditListHandlers_ReturnJSONObjectNotArray(t *testing.T) {
-	acct := &fakeSessionAccountsClient{
-		snapshotsResp:      &accountv1.ListSessionSnapshotsResponse{},
-		reconciliationResp: &accountv1.ListReconciliationRunsResponse{},
+	acct := &fakeSessionPortfoliosClient{
+		snapshotsResp:      &portfoliov1.ListSessionSnapshotsResponse{},
+		reconciliationResp: &portfoliov1.ListReconciliationRunsResponse{},
 	}
 	orders := &fakeOrdersClient{
 		intentsResp:  &orderv1.QueryOrderIntentsResponse{},
@@ -748,7 +748,7 @@ func TestAuditListHandlers_ReturnJSONObjectNotArray(t *testing.T) {
 		ordersResp:   &orderv1.QueryOrdersResponse{},
 		fillsResp:    &orderv1.QueryOrderFillsResponse{},
 	}
-	s := &server{accounts: acct, orders: orders, jwtSecret: []byte("s"), corsOrigins: []string{"*"}}
+	s := &server{portfolios: acct, orders: orders, jwtSecret: []byte("s"), corsOrigins: []string{"*"}}
 
 	type handler func(http.ResponseWriter, *http.Request, string)
 	handlers := []struct {
@@ -911,15 +911,15 @@ func TestHandleSessions_RoutesIntents(t *testing.T) {
 // ── total threading on existing list endpoints ─────────────────────────────
 
 func TestGetSessionSnapshots_TotalThreaded(t *testing.T) {
-	acct := &fakeSessionAccountsClient{
-		snapshotsResp: &accountv1.ListSessionSnapshotsResponse{
-			Items:      []*accountv1.SnapshotEntry{{AccountId: 1}},
+	acct := &fakeSessionPortfoliosClient{
+		snapshotsResp: &portfoliov1.ListSessionSnapshotsResponse{
+			Items:      []*portfoliov1.SnapshotEntry{{PortfolioId: 1}},
 			NextOffset: 1,
 			HasMore:    true,
 			Total:      57,
 		},
 	}
-	s := &server{accounts: acct, jwtSecret: []byte("s"), corsOrigins: []string{"*"}}
+	s := &server{portfolios: acct, jwtSecret: []byte("s"), corsOrigins: []string{"*"}}
 
 	req := withUID(httptest.NewRequest(http.MethodGet, "/api/sessions/s-1/snapshots", nil), 7)
 	rec := httptest.NewRecorder()
@@ -937,15 +937,15 @@ func TestGetSessionSnapshots_TotalThreaded(t *testing.T) {
 }
 
 func TestGetSessionReconciliation_TotalThreaded(t *testing.T) {
-	acct := &fakeSessionAccountsClient{
-		reconciliationResp: &accountv1.ListReconciliationRunsResponse{
-			Items:      []*accountv1.ReconciliationRunEntry{{RunId: "r-1"}},
+	acct := &fakeSessionPortfoliosClient{
+		reconciliationResp: &portfoliov1.ListReconciliationRunsResponse{
+			Items:      []*portfoliov1.ReconciliationRunEntry{{RunId: "r-1"}},
 			NextOffset: 1,
 			HasMore:    true,
 			Total:      99,
 		},
 	}
-	s := &server{accounts: acct, jwtSecret: []byte("s"), corsOrigins: []string{"*"}}
+	s := &server{portfolios: acct, jwtSecret: []byte("s"), corsOrigins: []string{"*"}}
 
 	req := withUID(httptest.NewRequest(http.MethodGet, "/api/sessions/s-1/reconciliation", nil), 7)
 	rec := httptest.NewRecorder()
@@ -965,14 +965,14 @@ func TestGetSessionReconciliation_TotalThreaded(t *testing.T) {
 // ── reconciliation summary endpoint ────────────────────────────────────────
 
 func TestGetSessionReconciliationSummary_HappyPath(t *testing.T) {
-	acct := &fakeSessionAccountsClient{
-		reconciliationSummaryResp: &accountv1.GetSessionReconciliationSummaryResponse{
+	acct := &fakeSessionPortfoliosClient{
+		reconciliationSummaryResp: &portfoliov1.GetSessionReconciliationSummaryResponse{
 			TotalRuns:    53,
 			HardFailRuns: 7,
 			SoftFailRuns: 12,
 		},
 	}
-	s := &server{accounts: acct, jwtSecret: []byte("s"), corsOrigins: []string{"*"}}
+	s := &server{portfolios: acct, jwtSecret: []byte("s"), corsOrigins: []string{"*"}}
 
 	req := withUID(httptest.NewRequest(http.MethodGet, "/api/sessions/s-1/reconciliation/summary", nil), 7)
 	rec := httptest.NewRecorder()
@@ -1005,10 +1005,10 @@ func TestGetSessionReconciliationSummary_HappyPath(t *testing.T) {
 }
 
 func TestGetSessionReconciliationSummary_RequiresAuth(t *testing.T) {
-	acct := &fakeSessionAccountsClient{
-		reconciliationSummaryResp: &accountv1.GetSessionReconciliationSummaryResponse{},
+	acct := &fakeSessionPortfoliosClient{
+		reconciliationSummaryResp: &portfoliov1.GetSessionReconciliationSummaryResponse{},
 	}
-	s := &server{accounts: acct, jwtSecret: []byte("s"), corsOrigins: []string{"*"}}
+	s := &server{portfolios: acct, jwtSecret: []byte("s"), corsOrigins: []string{"*"}}
 
 	// No withUID → no user context → 401.
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/s-1/reconciliation/summary", nil)
@@ -1021,7 +1021,7 @@ func TestGetSessionReconciliationSummary_RequiresAuth(t *testing.T) {
 }
 
 func TestGetSessionReconciliationSummary_MethodNotAllowed(t *testing.T) {
-	s := &server{accounts: &fakeSessionAccountsClient{}, jwtSecret: []byte("s"), corsOrigins: []string{"*"}}
+	s := &server{portfolios: &fakeSessionPortfoliosClient{}, jwtSecret: []byte("s"), corsOrigins: []string{"*"}}
 
 	for _, method := range []string{http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodPatch} {
 		req := withUID(httptest.NewRequest(method, "/api/sessions/s-1/reconciliation/summary", nil), 7)

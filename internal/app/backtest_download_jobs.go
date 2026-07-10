@@ -99,7 +99,7 @@ func (s *downloadRunJobStore) update(jobID string, mutate func(*downloadRunJob))
 	s.jobs[jobID] = job
 }
 
-func (s *server) handleDownloadAndRun(w http.ResponseWriter, r *http.Request, accountID int64) {
+func (s *server) handleDownloadAndRun(w http.ResponseWriter, r *http.Request, portfolioID int64) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -135,7 +135,7 @@ func (s *server) handleDownloadAndRun(w http.ResponseWriter, r *http.Request, ac
 		writeErr(w, http.StatusBadRequest, "runtime selection required")
 		return
 	}
-	policy, ok := s.strategyRoutePolicyForAccount(r.Context(), w, uid, accountID, runtimeID)
+	policy, ok := s.strategyRoutePolicyForPortfolio(r.Context(), w, uid, portfolioID, runtimeID)
 	if !ok {
 		return
 	}
@@ -145,7 +145,7 @@ func (s *server) handleDownloadAndRun(w http.ResponseWriter, r *http.Request, ac
 	}
 
 	job := s.downloadJobs().create()
-	go s.runDownloadAndRunJob(context.Background(), job.JobID, cli, uid, accountID, runtimeID, body)
+	go s.runDownloadAndRunJob(context.Background(), job.JobID, cli, uid, portfolioID, runtimeID, body)
 	writeJSON(w, http.StatusAccepted, job)
 }
 
@@ -168,7 +168,7 @@ func (s *server) handleDownloadRunJobStatus(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, job)
 }
 
-func (s *server) runDownloadAndRunJob(ctx context.Context, jobID string, cli strategyv1.StrategyServiceClient, uid int64, accountID int64, runtimeID string, body downloadAndRunRequest) {
+func (s *server) runDownloadAndRunJob(ctx context.Context, jobID string, cli strategyv1.StrategyServiceClient, uid int64, portfolioID int64, runtimeID string, body downloadAndRunRequest) {
 	store := s.downloadJobs()
 	fail := func(err error) {
 		store.update(jobID, func(job *downloadRunJob) {
@@ -185,7 +185,7 @@ func (s *server) runDownloadAndRunJob(ctx context.Context, jobID string, cli str
 	defer cancel()
 
 	preview, err := cli.PreviewRunStrategy(ctx, &strategyv1.PreviewRunStrategyRequest{
-		AccountId:       accountID,
+		PortfolioId:       portfolioID,
 		StrategyPath:    body.StrategyPath,
 		StartTimeMs:     body.StartTimeMS,
 		EndTimeMs:       body.EndTimeMS,
@@ -209,7 +209,7 @@ func (s *server) runDownloadAndRunJob(ctx context.Context, jobID string, cli str
 	}
 	store.update(jobID, func(job *downloadRunJob) { job.Progress = 0.15 })
 
-	requestIDs, err := s.createMissingCoverageRequests(ctx, uid, accountID, declared, body)
+	requestIDs, err := s.createMissingCoverageRequests(ctx, uid, portfolioID, declared, body)
 	if err != nil {
 		fail(err)
 		return
@@ -226,7 +226,7 @@ func (s *server) runDownloadAndRunJob(ctx context.Context, jobID string, cli str
 	})
 
 	run, err := cli.RunStrategy(ctx, &strategyv1.RunStrategyRequest{
-		AccountId:       accountID,
+		PortfolioId:       portfolioID,
 		StrategyPath:    body.StrategyPath,
 		Interval:        body.Interval,
 		StartTimeMs:     body.StartTimeMS,
@@ -249,7 +249,7 @@ func (s *server) runDownloadAndRunJob(ctx context.Context, jobID string, cli str
 	})
 }
 
-func (s *server) createMissingCoverageRequests(ctx context.Context, uid int64, accountID int64, declared []*strategyv1.LiveStreamBinding, body downloadAndRunRequest) (map[int64]struct{}, error) {
+func (s *server) createMissingCoverageRequests(ctx context.Context, uid int64, portfolioID int64, declared []*strategyv1.LiveStreamBinding, body downloadAndRunRequest) (map[int64]struct{}, error) {
 	requestIDs := make(map[int64]struct{})
 	for _, binding := range declared {
 		key := marketDataKeyFromLiveBinding(binding)
@@ -267,7 +267,7 @@ func (s *server) createMissingCoverageRequests(ctx context.Context, uid int64, a
 		for _, missing := range coverage.GetMissingSegments() {
 			resp, err := s.marketData.CreateMarketDataRequest(ctx, &mdv1.CreateMarketDataRequestRequest{
 				UserId:            uid,
-				AccountId:         accountID,
+				PortfolioId:         portfolioID,
 				Key:               key,
 				Scope:             "historical",
 				NeedsLiveDelivery: false,

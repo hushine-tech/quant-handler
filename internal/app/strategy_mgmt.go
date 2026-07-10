@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hushine-tech/core-service/gen/accountv1"
+	"github.com/hushine-tech/core-service/gen/portfoliov1"
 )
 
 // ── Request / Response types ─────────────────────────────────────────────────
@@ -97,7 +97,7 @@ func (s *server) createStrategy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp, err := s.accounts.CreateStrategy(r.Context(), &accountv1.CreateStrategyRequest{
+	resp, err := s.portfolios.CreateStrategy(r.Context(), &portfoliov1.CreateStrategyRequest{
 		Name:        body.Name,
 		Version:     body.Version,
 		Description: body.Description,
@@ -124,7 +124,7 @@ func (s *server) listStrategies(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	req := &accountv1.ListStrategiesRequest{
+	req := &portfoliov1.ListStrategiesRequest{
 		NamePrefix: namePrefix,
 		ActiveOnly: activeOnly,
 		UserId:     uid,
@@ -133,7 +133,7 @@ func (s *server) listStrategies(w http.ResponseWriter, r *http.Request) {
 		req.Limit = limit
 		req.Offset = offset
 	}
-	resp, err := s.accounts.ListStrategies(r.Context(), req)
+	resp, err := s.portfolios.ListStrategies(r.Context(), req)
 	if err != nil {
 		code, msg := grpcToHTTP(err)
 		writeErr(w, code, msg)
@@ -161,7 +161,7 @@ func (s *server) getStrategy(w http.ResponseWriter, r *http.Request, id int64) {
 		writeErr(w, http.StatusUnauthorized, "missing user context")
 		return
 	}
-	resp, err := s.accounts.GetStrategy(r.Context(), &accountv1.GetStrategyRequest{StrategyId: id, UserId: uid})
+	resp, err := s.portfolios.GetStrategy(r.Context(), &portfoliov1.GetStrategyRequest{StrategyId: id, UserId: uid})
 	if err != nil {
 		code, msg := grpcToHTTP(err)
 		writeErr(w, code, msg)
@@ -176,7 +176,7 @@ func (s *server) archiveStrategy(w http.ResponseWriter, r *http.Request, id int6
 		writeErr(w, http.StatusUnauthorized, "missing user context")
 		return
 	}
-	_, err := s.accounts.ArchiveStrategy(r.Context(), &accountv1.ArchiveStrategyRequest{StrategyId: id, UserId: uid})
+	_, err := s.portfolios.ArchiveStrategy(r.Context(), &portfoliov1.ArchiveStrategyRequest{StrategyId: id, UserId: uid})
 	if err != nil {
 		code, msg := grpcToHTTP(err)
 		writeErr(w, code, msg)
@@ -187,7 +187,7 @@ func (s *server) archiveStrategy(w http.ResponseWriter, r *http.Request, id int6
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-func protoStrategyToJSON(st *accountv1.StrategyEntry, includeCode bool) strategyJSON {
+func protoStrategyToJSON(st *portfoliov1.StrategyEntry, includeCode bool) strategyJSON {
 	if st == nil {
 		return strategyJSON{}
 	}

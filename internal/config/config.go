@@ -21,7 +21,7 @@ type ServerConfig struct {
 }
 
 type DependenciesConfig struct {
-	AccountServiceGRPC      string `yaml:"account_service_grpc"`
+	PortfolioServiceGRPC      string `yaml:"portfolio_service_grpc"`
 	OrderServiceGRPC        string `yaml:"order_service_grpc"`
 	ControlPanelServiceGRPC string `yaml:"control_panel_service_grpc"`
 }
@@ -48,7 +48,7 @@ func Default() *Config {
 			HTTPAddr: ":8090",
 		},
 		Dependencies: DependenciesConfig{
-			AccountServiceGRPC: "127.0.0.1:50051",
+			PortfolioServiceGRPC: "127.0.0.1:50051",
 			OrderServiceGRPC:   "127.0.0.1:50051",
 		},
 		Auth: AuthConfig{
@@ -78,9 +78,9 @@ func (c *Config) ApplyEnvOverrides() {
 	}
 
 	if v := os.Getenv("DEPENDENCIES_CORE_SERVICE_GRPC"); v != "" {
-		c.Dependencies.AccountServiceGRPC = v
+		c.Dependencies.PortfolioServiceGRPC = v
 	} else if v := os.Getenv("CORE_SERVICE_GRPC_ADDR"); v != "" {
-		c.Dependencies.AccountServiceGRPC = v
+		c.Dependencies.PortfolioServiceGRPC = v
 	}
 	if v := os.Getenv("DEPENDENCIES_ORDER_SERVICE_GRPC"); v != "" {
 		c.Dependencies.OrderServiceGRPC = v

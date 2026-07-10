@@ -9,32 +9,32 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hushine-tech/core-service/gen/accountv1"
+	"github.com/hushine-tech/core-service/gen/portfoliov1"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-type fakeNotificationAccountClient struct {
-	accountv1.AccountServiceClient
-	settingsReq *accountv1.GetNotificationSettingsRequest
-	updateReq   *accountv1.UpdateNotificationPreferencesRequest
-	bindReq     *accountv1.CreateNotificationBindCodeRequest
-	resp        *accountv1.GetNotificationSettingsResponse
+type fakeNotificationPortfolioClient struct {
+	portfoliov1.PortfolioServiceClient
+	settingsReq *portfoliov1.GetNotificationSettingsRequest
+	updateReq   *portfoliov1.UpdateNotificationPreferencesRequest
+	bindReq     *portfoliov1.CreateNotificationBindCodeRequest
+	resp        *portfoliov1.GetNotificationSettingsResponse
 }
 
-func (f *fakeNotificationAccountClient) GetNotificationSettings(_ context.Context, req *accountv1.GetNotificationSettingsRequest, _ ...grpc.CallOption) (*accountv1.GetNotificationSettingsResponse, error) {
+func (f *fakeNotificationPortfolioClient) GetNotificationSettings(_ context.Context, req *portfoliov1.GetNotificationSettingsRequest, _ ...grpc.CallOption) (*portfoliov1.GetNotificationSettingsResponse, error) {
 	f.settingsReq = req
 	return f.resp, nil
 }
 
-func (f *fakeNotificationAccountClient) UpdateNotificationPreferences(_ context.Context, req *accountv1.UpdateNotificationPreferencesRequest, _ ...grpc.CallOption) (*accountv1.UpdateNotificationPreferencesResponse, error) {
+func (f *fakeNotificationPortfolioClient) UpdateNotificationPreferences(_ context.Context, req *portfoliov1.UpdateNotificationPreferencesRequest, _ ...grpc.CallOption) (*portfoliov1.UpdateNotificationPreferencesResponse, error) {
 	f.updateReq = req
-	return &accountv1.UpdateNotificationPreferencesResponse{Settings: f.resp}, nil
+	return &portfoliov1.UpdateNotificationPreferencesResponse{Settings: f.resp}, nil
 }
 
-func (f *fakeNotificationAccountClient) CreateNotificationBindCode(_ context.Context, req *accountv1.CreateNotificationBindCodeRequest, _ ...grpc.CallOption) (*accountv1.CreateNotificationBindCodeResponse, error) {
+func (f *fakeNotificationPortfolioClient) CreateNotificationBindCode(_ context.Context, req *portfoliov1.CreateNotificationBindCodeRequest, _ ...grpc.CallOption) (*portfoliov1.CreateNotificationBindCodeResponse, error) {
 	f.bindReq = req
-	return &accountv1.CreateNotificationBindCodeResponse{
+	return &portfoliov1.CreateNotificationBindCodeResponse{
 		BindCode:    "HUSH-123456",
 		ExpiresAt:   timestamppb.New(time.Date(2026, 5, 17, 1, 2, 3, 0, time.UTC)),
 		BotUsername: "hushine_bot",
@@ -42,8 +42,8 @@ func (f *fakeNotificationAccountClient) CreateNotificationBindCode(_ context.Con
 }
 
 func TestNotificationsGetSettings(t *testing.T) {
-	fake := &fakeNotificationAccountClient{resp: notificationTestSettings()}
-	s := &server{accounts: fake, jwtSecret: []byte("s"), corsOrigins: []string{"*"}}
+	fake := &fakeNotificationPortfolioClient{resp: notificationTestSettings()}
+	s := &server{portfolios: fake, jwtSecret: []byte("s"), corsOrigins: []string{"*"}}
 	req := withUID(httptest.NewRequest(http.MethodGet, "/api/notifications/settings", nil), 42)
 	rec := httptest.NewRecorder()
 
@@ -68,8 +68,8 @@ func TestNotificationsGetSettings(t *testing.T) {
 }
 
 func TestNotificationsUpdatePreferences(t *testing.T) {
-	fake := &fakeNotificationAccountClient{resp: notificationTestSettings()}
-	s := &server{accounts: fake, jwtSecret: []byte("s"), corsOrigins: []string{"*"}}
+	fake := &fakeNotificationPortfolioClient{resp: notificationTestSettings()}
+	s := &server{portfolios: fake, jwtSecret: []byte("s"), corsOrigins: []string{"*"}}
 	req := withUID(httptest.NewRequest(http.MethodPatch, "/api/notifications/preferences", bytes.NewBufferString(`{"enabled":false,"system_enabled":true,"strategy_enabled":false,"custom_enabled":true}`)), 42)
 	rec := httptest.NewRecorder()
 
@@ -90,8 +90,8 @@ func TestNotificationsUpdatePreferences(t *testing.T) {
 }
 
 func TestNotificationsCreateBindCode(t *testing.T) {
-	fake := &fakeNotificationAccountClient{resp: notificationTestSettings()}
-	s := &server{accounts: fake, jwtSecret: []byte("s"), corsOrigins: []string{"*"}}
+	fake := &fakeNotificationPortfolioClient{resp: notificationTestSettings()}
+	s := &server{portfolios: fake, jwtSecret: []byte("s"), corsOrigins: []string{"*"}}
 	req := withUID(httptest.NewRequest(http.MethodPost, "/api/notifications/telegram/bind-code", nil), 42)
 	rec := httptest.NewRecorder()
 
@@ -112,15 +112,15 @@ func TestNotificationsCreateBindCode(t *testing.T) {
 	}
 }
 
-func notificationTestSettings() *accountv1.GetNotificationSettingsResponse {
-	return &accountv1.GetNotificationSettingsResponse{
-		Preferences: &accountv1.NotificationPreferences{
+func notificationTestSettings() *portfoliov1.GetNotificationSettingsResponse {
+	return &portfoliov1.GetNotificationSettingsResponse{
+		Preferences: &portfoliov1.NotificationPreferences{
 			Enabled:         boolPtr(true),
 			SystemEnabled:   true,
 			StrategyEnabled: true,
 			CustomEnabled:   false,
 		},
-		Plan: &accountv1.NotificationPlan{
+		Plan: &portfoliov1.NotificationPlan{
 			PlanCode:                 "pro",
 			NotificationEnabled:      true,
 			AllowSystem:              true,
@@ -129,7 +129,7 @@ func notificationTestSettings() *accountv1.GetNotificationSettingsResponse {
 			CustomRateLimitPerMinute: 30,
 			CustomRateLimitBurst:     10,
 		},
-		Telegram: &accountv1.NotificationChannel{
+		Telegram: &portfoliov1.NotificationChannel{
 			Channel:             "telegram",
 			Status:              "bound",
 			ProviderUsername:    "alice",

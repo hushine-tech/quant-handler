@@ -2,7 +2,7 @@ server:
   http_addr: ":8090"
 
 dependencies:
-  account_service_grpc: "127.0.0.1:50051"
+  portfolio_service_grpc: "127.0.0.1:50051"
   order_service_grpc: "127.0.0.1:50051"
   # control-panel-service owns hosted runtime routing, self-hosted proxying,
   # runtime credentials, and market-data control-plane RPCs.

@@ -52,7 +52,7 @@ func TestMarketDataCoverageRoute(t *testing.T) {
 
 func TestCoveragePreviewUsesDeclaredInputs(t *testing.T) {
 	body := bytes.NewBufferString(`{"runtime_id":"rt-coverage","start_time_ms":1779033600000,"end_time_ms":1779037200000}`)
-	req := withUID(httptest.NewRequest(http.MethodPost, "/api/accounts/7/strategy/coverage-preview", body), 6)
+	req := withUID(httptest.NewRequest(http.MethodPost, "/api/portfolios/7/strategy/coverage-preview", body), 6)
 	rec := httptest.NewRecorder()
 	proxy := &fakeControlPanelStrategyProxy{previewResp: &strategyv1.PreviewRunStrategyResponse{
 		Profile:   "backtest",
@@ -102,7 +102,7 @@ func TestCoveragePreviewUsesDeclaredInputs(t *testing.T) {
 
 func TestCoveragePreviewUsesRuntimeProxyDeadline(t *testing.T) {
 	body := bytes.NewBufferString(`{"runtime_id":"rt-coverage","start_time_ms":1779033600000,"end_time_ms":1779037200000}`)
-	req := withUID(httptest.NewRequest(http.MethodPost, "/api/accounts/7/strategy/coverage-preview", body), 6)
+	req := withUID(httptest.NewRequest(http.MethodPost, "/api/portfolios/7/strategy/coverage-preview", body), 6)
 	rec := httptest.NewRecorder()
 	proxy := &fakeControlPanelStrategyProxy{previewResp: &strategyv1.PreviewRunStrategyResponse{
 		Profile:   "backtest",
@@ -142,7 +142,7 @@ func TestCoveragePreviewUsesRuntimeProxyDeadline(t *testing.T) {
 
 func TestCoveragePreviewSanitizesRuntimeTimeout(t *testing.T) {
 	body := bytes.NewBufferString(`{"runtime_id":"rt-coverage","start_time_ms":1779033600000,"end_time_ms":1779037200000}`)
-	req := withUID(httptest.NewRequest(http.MethodPost, "/api/accounts/7/strategy/coverage-preview", body), 6)
+	req := withUID(httptest.NewRequest(http.MethodPost, "/api/portfolios/7/strategy/coverage-preview", body), 6)
 	rec := httptest.NewRecorder()
 	proxy := &fakeControlPanelStrategyProxy{
 		previewErr: cerrors.New(errorcodes.Timeout, http.StatusGatewayTimeout, "stream terminated by RST_STREAM with error code: CANCEL"),
@@ -202,7 +202,7 @@ func TestDownloadAndRunCreatesJob(t *testing.T) {
 	}
 
 	body := bytes.NewBufferString(`{"runtime_id":"rt-download","start_time_ms":1779033600000,"end_time_ms":1779037200000,"interval":"1m","max_loss_close_pct":0.25}`)
-	req := withUID(httptest.NewRequest(http.MethodPost, "/api/accounts/7/strategy/download-and-run", body), 6)
+	req := withUID(httptest.NewRequest(http.MethodPost, "/api/portfolios/7/strategy/download-and-run", body), 6)
 	rec := httptest.NewRecorder()
 
 	s.handleDownloadAndRun(rec, req, 7)
@@ -295,7 +295,7 @@ func TestDownloadAndRunJobStatusSurfacesHistoricalRequestState(t *testing.T) {
 	}
 
 	body := bytes.NewBufferString(`{"runtime_id":"rt-download","start_time_ms":1779033600000,"end_time_ms":1779037200000,"interval":"1m","max_loss_close_pct":0.25}`)
-	req := withUID(httptest.NewRequest(http.MethodPost, "/api/accounts/7/strategy/download-and-run", body), 6)
+	req := withUID(httptest.NewRequest(http.MethodPost, "/api/portfolios/7/strategy/download-and-run", body), 6)
 	rec := httptest.NewRecorder()
 
 	s.handleDownloadAndRun(rec, req, 7)

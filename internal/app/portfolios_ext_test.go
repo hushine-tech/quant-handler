@@ -8,19 +8,19 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/hushine-tech/core-service/gen/accountv1"
+	"github.com/hushine-tech/core-service/gen/portfoliov1"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-type fakeWalletAccountsClient struct {
-	accountv1.AccountServiceClient
+type fakeWalletPortfoliosClient struct {
+	portfoliov1.PortfolioServiceClient
 
-	resp *accountv1.GetPortfolioSnapshotResponse
+	resp *portfoliov1.GetPortfolioSnapshotResponse
 	err  error
 }
 
-func (f *fakeWalletAccountsClient) GetPortfolioSnapshot(_ context.Context, _ *accountv1.GetPortfolioSnapshotRequest, _ ...grpc.CallOption) (*accountv1.GetPortfolioSnapshotResponse, error) {
+func (f *fakeWalletPortfoliosClient) GetPortfolioSnapshot(_ context.Context, _ *portfoliov1.GetPortfolioSnapshotRequest, _ ...grpc.CallOption) (*portfoliov1.GetPortfolioSnapshotResponse, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -28,14 +28,14 @@ func (f *fakeWalletAccountsClient) GetPortfolioSnapshot(_ context.Context, _ *ac
 }
 
 type fakePortfolioSnapshotClient struct {
-	accountv1.AccountServiceClient
+	portfoliov1.PortfolioServiceClient
 
-	lastReq *accountv1.GetPortfolioSnapshotRequest
-	resp    *accountv1.GetPortfolioSnapshotResponse
+	lastReq *portfoliov1.GetPortfolioSnapshotRequest
+	resp    *portfoliov1.GetPortfolioSnapshotResponse
 	err     error
 }
 
-func (f *fakePortfolioSnapshotClient) GetPortfolioSnapshot(_ context.Context, req *accountv1.GetPortfolioSnapshotRequest, _ ...grpc.CallOption) (*accountv1.GetPortfolioSnapshotResponse, error) {
+func (f *fakePortfolioSnapshotClient) GetPortfolioSnapshot(_ context.Context, req *portfoliov1.GetPortfolioSnapshotRequest, _ ...grpc.CallOption) (*portfoliov1.GetPortfolioSnapshotResponse, error) {
 	f.lastReq = req
 	if f.err != nil {
 		return nil, f.err
@@ -43,18 +43,18 @@ func (f *fakePortfolioSnapshotClient) GetPortfolioSnapshot(_ context.Context, re
 	return f.resp, nil
 }
 
-type fakeCreateAccountClient struct {
-	accountv1.AccountServiceClient
+type fakeCreatePortfolioClient struct {
+	portfoliov1.PortfolioServiceClient
 
-	createAccountReq  *accountv1.CreateAccountRequest
-	createVenueReq    *accountv1.CreateVenueRequest
-	updateSnapshotReq *accountv1.UpdatePortfolioSnapshotRequest
+	createPortfolioReq  *portfoliov1.CreatePortfolioRequest
+	createVenueReq    *portfoliov1.CreateVenueRequest
+	updateSnapshotReq *portfoliov1.UpdatePortfolioSnapshotRequest
 }
 
-func (f *fakeCreateAccountClient) CreateAccount(_ context.Context, req *accountv1.CreateAccountRequest, _ ...grpc.CallOption) (*accountv1.CreateAccountResponse, error) {
-	f.createAccountReq = req
-	return &accountv1.CreateAccountResponse{
-		AccountId:   42,
+func (f *fakeCreatePortfolioClient) CreatePortfolio(_ context.Context, req *portfoliov1.CreatePortfolioRequest, _ ...grpc.CallOption) (*portfoliov1.CreatePortfolioResponse, error) {
+	f.createPortfolioReq = req
+	return &portfoliov1.CreatePortfolioResponse{
+		PortfolioId:   42,
 		Name:        req.GetName(),
 		Description: req.GetDescription(),
 		Environment: req.GetEnvironment(),
@@ -62,45 +62,45 @@ func (f *fakeCreateAccountClient) CreateAccount(_ context.Context, req *accountv
 	}, nil
 }
 
-func (f *fakeCreateAccountClient) CreateVenue(_ context.Context, req *accountv1.CreateVenueRequest, _ ...grpc.CallOption) (*accountv1.CreateVenueResponse, error) {
+func (f *fakeCreatePortfolioClient) CreateVenue(_ context.Context, req *portfoliov1.CreateVenueRequest, _ ...grpc.CallOption) (*portfoliov1.CreateVenueResponse, error) {
 	f.createVenueReq = req
-	return &accountv1.CreateVenueResponse{Venue: &accountv1.VenueEntry{VenueId: 88}}, nil
+	return &portfoliov1.CreateVenueResponse{Venue: &portfoliov1.VenueEntry{VenueId: 88}}, nil
 }
 
-func (f *fakeCreateAccountClient) UpdatePortfolioSnapshot(_ context.Context, req *accountv1.UpdatePortfolioSnapshotRequest, _ ...grpc.CallOption) (*accountv1.UpdatePortfolioSnapshotResponse, error) {
+func (f *fakeCreatePortfolioClient) UpdatePortfolioSnapshot(_ context.Context, req *portfoliov1.UpdatePortfolioSnapshotRequest, _ ...grpc.CallOption) (*portfoliov1.UpdatePortfolioSnapshotResponse, error) {
 	f.updateSnapshotReq = req
-	return &accountv1.UpdatePortfolioSnapshotResponse{Snapshot: &accountv1.PortfolioSnapshot{AccountId: req.GetAccountId(), UserId: req.GetUserId()}}, nil
+	return &portfoliov1.UpdatePortfolioSnapshotResponse{Snapshot: &portfoliov1.PortfolioSnapshot{PortfolioId: req.GetPortfolioId(), UserId: req.GetUserId()}}, nil
 }
 
-func TestCreateAccountCreatesPlainPortfolioContext(t *testing.T) {
-	fake := &fakeCreateAccountClient{}
-	s := &server{accounts: fake, jwtSecret: []byte("secret"), corsOrigins: []string{"*"}}
+func TestCreatePortfolioCreatesPlainPortfolioContext(t *testing.T) {
+	fake := &fakeCreatePortfolioClient{}
+	s := &server{portfolios: fake, jwtSecret: []byte("secret"), corsOrigins: []string{"*"}}
 	body := []byte(`{
-		"name":"demo-account",
+		"name":"demo-portfolio",
 		"description":"portfolio context",
 		"environment":1
 	}`)
-	req := withUID(httptest.NewRequest(http.MethodPost, "/api/accounts", bytes.NewReader(body)), 7)
+	req := withUID(httptest.NewRequest(http.MethodPost, "/api/portfolios", bytes.NewReader(body)), 7)
 	rec := httptest.NewRecorder()
 
-	s.createAccount(rec, req)
+	s.createPortfolio(rec, req)
 
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want 201; body=%s", rec.Code, rec.Body.String())
 	}
-	if fake.createAccountReq == nil {
-		t.Fatal("CreateAccount was not called")
+	if fake.createPortfolioReq == nil {
+		t.Fatal("CreatePortfolio was not called")
 	}
-	if fake.createAccountReq.GetUserId() != 7 || fake.createAccountReq.GetName() != "demo-account" || fake.createAccountReq.GetEnvironment() != 1 {
-		t.Fatalf("create account request = %+v", fake.createAccountReq)
+	if fake.createPortfolioReq.GetUserId() != 7 || fake.createPortfolioReq.GetName() != "demo-portfolio" || fake.createPortfolioReq.GetEnvironment() != 1 {
+		t.Fatalf("create portfolio request = %+v", fake.createPortfolioReq)
 	}
 	if fake.createVenueReq != nil || fake.updateSnapshotReq != nil {
-		t.Fatalf("account creation must not configure venues or wallet state: venue=%+v snapshot=%+v",
+		t.Fatalf("portfolio creation must not configure venues or wallet state: venue=%+v snapshot=%+v",
 			fake.createVenueReq, fake.updateSnapshotReq)
 	}
 }
 
-func TestCreateBacktestAccountRejectsLegacyWalletBootstrapPayload(t *testing.T) {
+func TestCreateBacktestPortfolioRejectsLegacyWalletBootstrapPayload(t *testing.T) {
 	cases := []struct {
 		name string
 		body string
@@ -108,7 +108,7 @@ func TestCreateBacktestAccountRejectsLegacyWalletBootstrapPayload(t *testing.T) 
 		{
 			"spot futures payload",
 			`{
-				"name":"backtest-account",
+				"name":"backtest-portfolio",
 				"environment":0,
 				"spot":{"free":250},
 				"futures":{"margin_mode":"cross","position_mode":"one_way","initial_balance":1000}
@@ -117,7 +117,7 @@ func TestCreateBacktestAccountRejectsLegacyWalletBootstrapPayload(t *testing.T) 
 		{
 			"initial balance payload",
 			`{
-				"name":"backtest-account",
+				"name":"backtest-portfolio",
 				"environment":0,
 				"initial_balance":1000
 			}`,
@@ -125,25 +125,25 @@ func TestCreateBacktestAccountRejectsLegacyWalletBootstrapPayload(t *testing.T) 
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			fake := &fakeCreateAccountClient{}
-			s := &server{accounts: fake, jwtSecret: []byte("secret"), corsOrigins: []string{"*"}}
-			req := withUID(httptest.NewRequest(http.MethodPost, "/api/accounts", bytes.NewReader([]byte(tc.body))), 7)
+			fake := &fakeCreatePortfolioClient{}
+			s := &server{portfolios: fake, jwtSecret: []byte("secret"), corsOrigins: []string{"*"}}
+			req := withUID(httptest.NewRequest(http.MethodPost, "/api/portfolios", bytes.NewReader([]byte(tc.body))), 7)
 			rec := httptest.NewRecorder()
 
-			s.createAccount(rec, req)
+			s.createPortfolio(rec, req)
 
 			if rec.Code != http.StatusBadRequest {
 				t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
 			}
-			if fake.createAccountReq != nil || fake.createVenueReq != nil || fake.updateSnapshotReq != nil {
-				t.Fatalf("legacy wallet bootstrap must not call core-service: account=%+v venue=%+v snapshot=%+v",
-					fake.createAccountReq, fake.createVenueReq, fake.updateSnapshotReq)
+			if fake.createPortfolioReq != nil || fake.createVenueReq != nil || fake.updateSnapshotReq != nil {
+				t.Fatalf("legacy wallet bootstrap must not call core-service: portfolio=%+v venue=%+v snapshot=%+v",
+					fake.createPortfolioReq, fake.createVenueReq, fake.updateSnapshotReq)
 			}
 		})
 	}
 }
 
-func TestCreateAccountRejectsDeprecatedAccountLevelRuntimePayload(t *testing.T) {
+func TestCreatePortfolioRejectsDeprecatedPortfolioLevelRuntimePayload(t *testing.T) {
 	cases := []struct {
 		name string
 		body string
@@ -151,7 +151,7 @@ func TestCreateAccountRejectsDeprecatedAccountLevelRuntimePayload(t *testing.T) 
 		{
 			"legacy credentials",
 			`{
-				"name":"demo-account",
+				"name":"demo-portfolio",
 				"environment":1,
 				"api_key":"demo-key",
 				"api_secret":"demo-secret"
@@ -160,26 +160,26 @@ func TestCreateAccountRejectsDeprecatedAccountLevelRuntimePayload(t *testing.T) 
 		{
 			"deprecated mode field",
 			`{
-				"name":"legacy-account",
+				"name":"legacy-portfolio",
 				"mode":1
 			}`,
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			fake := &fakeCreateAccountClient{}
-			s := &server{accounts: fake, jwtSecret: []byte("secret"), corsOrigins: []string{"*"}}
-			req := withUID(httptest.NewRequest(http.MethodPost, "/api/accounts", bytes.NewReader([]byte(tc.body))), 7)
+			fake := &fakeCreatePortfolioClient{}
+			s := &server{portfolios: fake, jwtSecret: []byte("secret"), corsOrigins: []string{"*"}}
+			req := withUID(httptest.NewRequest(http.MethodPost, "/api/portfolios", bytes.NewReader([]byte(tc.body))), 7)
 			rec := httptest.NewRecorder()
 
-			s.createAccount(rec, req)
+			s.createPortfolio(rec, req)
 
 			if rec.Code != http.StatusBadRequest {
 				t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
 			}
-			if fake.createAccountReq != nil || fake.createVenueReq != nil || fake.updateSnapshotReq != nil {
-				t.Fatalf("deprecated payload should not call core-service: account=%+v venue=%+v snapshot=%+v",
-					fake.createAccountReq, fake.createVenueReq, fake.updateSnapshotReq)
+			if fake.createPortfolioReq != nil || fake.createVenueReq != nil || fake.updateSnapshotReq != nil {
+				t.Fatalf("deprecated payload should not call core-service: portfolio=%+v venue=%+v snapshot=%+v",
+					fake.createPortfolioReq, fake.createVenueReq, fake.updateSnapshotReq)
 			}
 		})
 	}
@@ -188,24 +188,24 @@ func TestCreateAccountRejectsDeprecatedAccountLevelRuntimePayload(t *testing.T) 
 func TestPortfolioSnapshotEndpointReturnsVenues(t *testing.T) {
 	now := timestamppb.Now()
 	fake := &fakePortfolioSnapshotClient{
-		resp: &accountv1.GetPortfolioSnapshotResponse{
-			Snapshot: &accountv1.PortfolioSnapshot{
-				AccountId:        42,
+		resp: &portfoliov1.GetPortfolioSnapshotResponse{
+			Snapshot: &portfoliov1.PortfolioSnapshot{
+				PortfolioId:        42,
 				UserId:           7,
 				TotalValue:       2500,
 				WalletBalance:    2000,
 				AvailableBalance: 1500,
 				UpdatedAt:        now,
-				Wallet: &accountv1.AccountWalletState{
+				Wallet: &portfoliov1.PortfolioWalletState{
 					Environment: 2,
 					UpdatedAt:   now,
 					TotalValue:  2500,
-					Futures: &accountv1.FuturesWallet{
+					Futures: &portfoliov1.FuturesWallet{
 						WalletBalance:    2000,
 						AvailableBalance: 1500,
 					},
 				},
-				Venues: []*accountv1.VenueSnapshot{
+				Venues: []*portfoliov1.VenueSnapshot{
 					{
 						VenueId:          88,
 						Exchange:         1,
@@ -215,10 +215,10 @@ func TestPortfolioSnapshotEndpointReturnsVenues(t *testing.T) {
 						WalletBalance:    2000,
 						AvailableBalance: 1500,
 						UpdatedAt:        now,
-						Balances: []*accountv1.BalanceEntry{
+						Balances: []*portfoliov1.BalanceEntry{
 							{Asset: "USDT", WalletBalance: 2000, AvailableBalance: 1500, ValueUsdt: 2000},
 						},
-						Positions: []*accountv1.PositionEntry{
+						Positions: []*portfoliov1.PositionEntry{
 							{Symbol: "ETHUSDT", PositionSide: "BOTH", Qty: 0.5, EntryPrice: 3000, MarkPrice: 3100, UnrealizedPnl: 50},
 						},
 					},
@@ -226,20 +226,20 @@ func TestPortfolioSnapshotEndpointReturnsVenues(t *testing.T) {
 			},
 		},
 	}
-	s := &server{accounts: fake, jwtSecret: []byte("secret"), corsOrigins: []string{"*"}}
-	req := withUID(httptest.NewRequest(http.MethodGet, "/api/accounts/42/portfolio-snapshot", nil), 7)
+	s := &server{portfolios: fake, jwtSecret: []byte("secret"), corsOrigins: []string{"*"}}
+	req := withUID(httptest.NewRequest(http.MethodGet, "/api/portfolios/42/portfolio-snapshot", nil), 7)
 	rec := httptest.NewRecorder()
 
-	s.getAccountPortfolioSnapshot(rec, req, 42)
+	s.getPortfolioPortfolioSnapshot(rec, req, 42)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
 	}
-	if fake.lastReq == nil || fake.lastReq.GetAccountId() != 42 || fake.lastReq.GetUserId() != 7 {
+	if fake.lastReq == nil || fake.lastReq.GetPortfolioId() != 42 || fake.lastReq.GetUserId() != 7 {
 		t.Fatalf("snapshot request = %+v", fake.lastReq)
 	}
 	var body struct {
-		AccountID        int64   `json:"account_id"`
+		PortfolioID        int64   `json:"portfolio_id"`
 		TotalValue       float64 `json:"total_value"`
 		WalletBalance    float64 `json:"wallet_balance"`
 		AvailableBalance float64 `json:"available_balance"`
@@ -266,7 +266,7 @@ func TestPortfolioSnapshotEndpointReturnsVenues(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if body.AccountID != 42 || body.TotalValue != 2500 || body.WalletBalance != 2000 || body.AvailableBalance != 1500 {
+	if body.PortfolioID != 42 || body.TotalValue != 2500 || body.WalletBalance != 2000 || body.AvailableBalance != 1500 {
 		t.Fatalf("summary = %+v", body)
 	}
 	if len(body.Items) != 1 {
@@ -283,25 +283,25 @@ func TestPortfolioSnapshotEndpointReturnsVenues(t *testing.T) {
 
 func TestPortfolioSnapshotWalletIncludesMarginBalanceFields(t *testing.T) {
 	now := timestamppb.Now()
-	fake := &fakeWalletAccountsClient{
-		resp: &accountv1.GetPortfolioSnapshotResponse{
-			Snapshot: &accountv1.PortfolioSnapshot{
-				AccountId: 42,
+	fake := &fakeWalletPortfoliosClient{
+		resp: &portfoliov1.GetPortfolioSnapshotResponse{
+			Snapshot: &portfoliov1.PortfolioSnapshot{
+				PortfolioId: 42,
 				UserId:    7,
-				Wallet: &accountv1.AccountWalletState{
+				Wallet: &portfoliov1.PortfolioWalletState{
 					TotalValue:            20759.4682,
 					Environment:           2,
 					UpdatedAt:             now,
 					SpotEstimatedValue:    9997.9,
 					FuturesPositionEquity: 10761.5682,
 					MetricsAuthoritative:  true,
-					Spot: &accountv1.SpotWallet{
+					Spot: &portfoliov1.SpotWallet{
 						Free: 5000,
-						Assets: []*accountv1.SpotAsset{
+						Assets: []*portfoliov1.SpotAsset{
 							{Symbol: "USDC", Qty: 5000, Price: float64Ptr(1)},
 						},
 					},
-					Futures: &accountv1.FuturesWallet{
+					Futures: &portfoliov1.FuturesWallet{
 						MarginMode:                 "cross",
 						PositionMode:               "one_way",
 						WalletBalance:              10000,
@@ -317,7 +317,7 @@ func TestPortfolioSnapshotWalletIncludesMarginBalanceFields(t *testing.T) {
 						DisplayWalletBalanceUsd:    10000,
 						DisplayMarginBalanceUsd:    10761.5682,
 						DisplayUnrealizedPnlUsd:    761.5682,
-						Positions: []*accountv1.FuturesPosition{
+						Positions: []*portfoliov1.FuturesPosition{
 							{Symbol: "ETHUSDT", PositionSide: "BOTH", PositionQty: -0.021, Qty: -0.021, Leverage: 20},
 						},
 					},
@@ -326,15 +326,15 @@ func TestPortfolioSnapshotWalletIncludesMarginBalanceFields(t *testing.T) {
 		},
 	}
 	s := &server{
-		accounts:    fake,
+		portfolios:    fake,
 		jwtSecret:   []byte("secret"),
 		corsOrigins: []string{"*"},
 	}
 
-	req := withUID(httptest.NewRequest(http.MethodGet, "/api/accounts/42/portfolio-snapshot", nil), 7)
+	req := withUID(httptest.NewRequest(http.MethodGet, "/api/portfolios/42/portfolio-snapshot", nil), 7)
 	rec := httptest.NewRecorder()
 
-	s.getAccountPortfolioSnapshot(rec, req, 42)
+	s.getPortfolioPortfolioSnapshot(rec, req, 42)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
@@ -403,20 +403,20 @@ func float64Ptr(v float64) *float64 {
 
 func TestPortfolioSnapshotWalletStructurallySeparatesCanonicalFromDisplay(t *testing.T) {
 	now := timestamppb.Now()
-	fake := &fakeWalletAccountsClient{
-		resp: &accountv1.GetPortfolioSnapshotResponse{
-			Snapshot: &accountv1.PortfolioSnapshot{
-				AccountId: 42,
+	fake := &fakeWalletPortfoliosClient{
+		resp: &portfoliov1.GetPortfolioSnapshotResponse{
+			Snapshot: &portfoliov1.PortfolioSnapshot{
+				PortfolioId: 42,
 				UserId:    7,
-				Wallet: &accountv1.AccountWalletState{
+				Wallet: &portfoliov1.PortfolioWalletState{
 					TotalValue:            20759.4682,
 					Environment:           2,
 					UpdatedAt:             now,
 					SpotEstimatedValue:    9997.9,
 					FuturesPositionEquity: 10761.5682,
 					MetricsAuthoritative:  true,
-					Spot:                  &accountv1.SpotWallet{Free: 0, Assets: nil},
-					Futures: &accountv1.FuturesWallet{
+					Spot:                  &portfoliov1.SpotWallet{Free: 0, Assets: nil},
+					Futures: &portfoliov1.FuturesWallet{
 						MarginMode:              "cross",
 						PositionMode:            "one_way",
 						WalletBalance:           10000,
@@ -431,11 +431,11 @@ func TestPortfolioSnapshotWalletStructurallySeparatesCanonicalFromDisplay(t *tes
 			},
 		},
 	}
-	s := &server{accounts: fake, jwtSecret: []byte("secret"), corsOrigins: []string{"*"}}
+	s := &server{portfolios: fake, jwtSecret: []byte("secret"), corsOrigins: []string{"*"}}
 
-	req := withUID(httptest.NewRequest(http.MethodGet, "/api/accounts/42/portfolio-snapshot", nil), 7)
+	req := withUID(httptest.NewRequest(http.MethodGet, "/api/portfolios/42/portfolio-snapshot", nil), 7)
 	rec := httptest.NewRecorder()
-	s.getAccountPortfolioSnapshot(rec, req, 42)
+	s.getPortfolioPortfolioSnapshot(rec, req, 42)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)

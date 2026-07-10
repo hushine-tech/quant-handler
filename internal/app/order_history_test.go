@@ -71,8 +71,8 @@ func withOrderUID(r *http.Request, uid int64) *http.Request {
 
 // ────────────────────────────────────────────────────────────────────────────
 
-func TestOrderHistory_omittedAccountIDIsAllowed(t *testing.T) {
-	// Previously required — now account_id is optional and 0 means user-wide.
+func TestOrderHistory_omittedPortfolioIDIsAllowed(t *testing.T) {
+	// Previously required — now portfolio_id is optional and 0 means user-wide.
 	fake := &fakeOrdersClient{ordersResp: &orderv1.QueryOrdersResponse{Total: 0}}
 	s := newOrderHistoryServer(fake)
 
@@ -86,24 +86,24 @@ func TestOrderHistory_omittedAccountIDIsAllowed(t *testing.T) {
 	if fake.lastOrdersReq == nil {
 		t.Fatal("gRPC was not called")
 	}
-	if fake.lastOrdersReq.GetAccountId() != 0 {
-		t.Errorf("forwarded account_id = %d, want 0", fake.lastOrdersReq.GetAccountId())
+	if fake.lastOrdersReq.GetPortfolioId() != 0 {
+		t.Errorf("forwarded portfolio_id = %d, want 0", fake.lastOrdersReq.GetPortfolioId())
 	}
 	if fake.lastOrdersReq.GetUserId() != 7 {
 		t.Errorf("forwarded user_id = %d, want 7", fake.lastOrdersReq.GetUserId())
 	}
 }
 
-func TestOrderHistory_accountIDFilterForwarded(t *testing.T) {
+func TestOrderHistory_portfolioIDFilterForwarded(t *testing.T) {
 	fake := &fakeOrdersClient{ordersResp: &orderv1.QueryOrdersResponse{Total: 0}}
 	s := newOrderHistoryServer(fake)
 
-	req := withOrderUID(httptest.NewRequest(http.MethodGet, "/api/orders?account_id=9", nil), 7)
+	req := withOrderUID(httptest.NewRequest(http.MethodGet, "/api/orders?portfolio_id=9", nil), 7)
 	rec := httptest.NewRecorder()
 	s.handleOrderHistory(rec, req)
 
-	if fake.lastOrdersReq.GetAccountId() != 9 {
-		t.Errorf("account_id = %d, want 9", fake.lastOrdersReq.GetAccountId())
+	if fake.lastOrdersReq.GetPortfolioId() != 9 {
+		t.Errorf("portfolio_id = %d, want 9", fake.lastOrdersReq.GetPortfolioId())
 	}
 }
 
@@ -191,7 +191,7 @@ func TestOrderHistory_envelopeShape(t *testing.T) {
 			Orders: []*orderv1.ExchangeOrderEntry{
 				{
 					OrderId:            "o1",
-					AccountId:          3,
+					PortfolioId:          3,
 					Symbol:             "BTCUSDT",
 					Side:               "BUY",
 					OrigQty:            0.1,
@@ -221,7 +221,7 @@ func TestOrderHistory_envelopeShape(t *testing.T) {
 	var body struct {
 		Items []struct {
 			OrderID            string  `json:"order_id"`
-			AccountID          int64   `json:"account_id"`
+			PortfolioID          int64   `json:"portfolio_id"`
 			Symbol             string  `json:"symbol"`
 			OrigQty            float64 `json:"orig_qty"`
 			ExecutedQty        float64 `json:"executed_qty"`
@@ -277,11 +277,11 @@ func TestOrderHistory_rejectsMissingUser(t *testing.T) {
 	}
 }
 
-func TestOrderHistory_rejectsInvalidAccountID(t *testing.T) {
+func TestOrderHistory_rejectsInvalidPortfolioID(t *testing.T) {
 	fake := &fakeOrdersClient{}
 	s := newOrderHistoryServer(fake)
 
-	req := withOrderUID(httptest.NewRequest(http.MethodGet, "/api/orders?account_id=abc", nil), 7)
+	req := withOrderUID(httptest.NewRequest(http.MethodGet, "/api/orders?portfolio_id=abc", nil), 7)
 	rec := httptest.NewRecorder()
 	s.handleOrderHistory(rec, req)
 
@@ -311,7 +311,7 @@ func TestOrderAttempts_envelopeShape(t *testing.T) {
 			Attempts: []*orderv1.OrderAttemptEntry{
 				{
 					AttemptId:       "a1",
-					AccountId:       3,
+					PortfolioId:       3,
 					Symbol:          "BTCUSDT",
 					Side:            "BUY",
 					RequestedQty:    0.1,
@@ -337,7 +337,7 @@ func TestOrderAttempts_envelopeShape(t *testing.T) {
 	var body struct {
 		Items []struct {
 			AttemptID    string  `json:"attempt_id"`
-			AccountID    int64   `json:"account_id"`
+			PortfolioID    int64   `json:"portfolio_id"`
 			RequestedQty float64 `json:"requested_qty"`
 			Status       string  `json:"status"`
 			PostOnly     bool    `json:"post_only"`
@@ -393,7 +393,7 @@ func TestOrderHistory_flatQueryDoesNotDefaultAncestorIDs(t *testing.T) {
 	fake := &fakeOrdersClient{ordersResp: &orderv1.QueryOrdersResponse{Total: 0}}
 	s := newOrderHistoryServer(fake)
 
-	req := withOrderUID(httptest.NewRequest(http.MethodGet, "/api/orders?account_id=42", nil), 7)
+	req := withOrderUID(httptest.NewRequest(http.MethodGet, "/api/orders?portfolio_id=42", nil), 7)
 	rec := httptest.NewRecorder()
 	s.handleOrderHistory(rec, req)
 
@@ -403,8 +403,8 @@ func TestOrderHistory_flatQueryDoesNotDefaultAncestorIDs(t *testing.T) {
 	if fake.lastOrdersReq.GetAttemptId() != "" {
 		t.Errorf("unexpected attempt_id default = %q", fake.lastOrdersReq.GetAttemptId())
 	}
-	if fake.lastOrdersReq.GetAccountId() != 42 {
-		t.Errorf("account_id = %d, want 42", fake.lastOrdersReq.GetAccountId())
+	if fake.lastOrdersReq.GetPortfolioId() != 42 {
+		t.Errorf("portfolio_id = %d, want 42", fake.lastOrdersReq.GetPortfolioId())
 	}
 }
 
@@ -431,15 +431,15 @@ func TestOrderAttempts_flatQueryDoesNotDefaultIntentID(t *testing.T) {
 	fake := &fakeOrdersClient{attemptsResp: &orderv1.QueryOrderAttemptsResponse{Total: 0}}
 	s := newOrderHistoryServer(fake)
 
-	req := withOrderUID(httptest.NewRequest(http.MethodGet, "/api/orders/attempts?account_id=42", nil), 7)
+	req := withOrderUID(httptest.NewRequest(http.MethodGet, "/api/orders/attempts?portfolio_id=42", nil), 7)
 	rec := httptest.NewRecorder()
 	s.handleOrderAttempts(rec, req)
 
 	if fake.lastAttemptsReq.GetIntentId() != "" {
 		t.Errorf("unexpected intent_id default = %q", fake.lastAttemptsReq.GetIntentId())
 	}
-	if fake.lastAttemptsReq.GetAccountId() != 42 {
-		t.Errorf("account_id = %d, want 42", fake.lastAttemptsReq.GetAccountId())
+	if fake.lastAttemptsReq.GetPortfolioId() != 42 {
+		t.Errorf("portfolio_id = %d, want 42", fake.lastAttemptsReq.GetPortfolioId())
 	}
 }
 
@@ -463,7 +463,7 @@ func TestOrderFills_flatQueryDoesNotDefaultAncestorIDs(t *testing.T) {
 	fake := &fakeOrdersClient{fillsResp: &orderv1.QueryOrderFillsResponse{Total: 0}}
 	s := newOrderHistoryServer(fake)
 
-	req := withOrderUID(httptest.NewRequest(http.MethodGet, "/api/orders/fills?account_id=42", nil), 7)
+	req := withOrderUID(httptest.NewRequest(http.MethodGet, "/api/orders/fills?portfolio_id=42", nil), 7)
 	rec := httptest.NewRecorder()
 	s.handleOrderFills(rec, req)
 
@@ -481,7 +481,7 @@ func TestOrderIntents_envelopeShape(t *testing.T) {
 			Intents: []*orderv1.OrderIntentEntry{
 				{
 					IntentId:       "i1",
-					AccountId:      9,
+					PortfolioId:      9,
 					Symbol:         "BTCUSDT",
 					Side:           "BUY",
 					RequestedQty:   0.1,
@@ -513,15 +513,15 @@ func TestOrderIntents_envelopeShape(t *testing.T) {
 	if fake.lastIntentsReq.GetUserId() != 7 {
 		t.Errorf("user_id = %d, want 7", fake.lastIntentsReq.GetUserId())
 	}
-	if fake.lastIntentsReq.GetAccountId() != 0 || fake.lastIntentsReq.GetStrategyId() != 0 || fake.lastIntentsReq.GetSessionId() != "" {
-		t.Errorf("unexpected default filters: account_id=%d strategy_id=%d session_id=%q",
-			fake.lastIntentsReq.GetAccountId(), fake.lastIntentsReq.GetStrategyId(), fake.lastIntentsReq.GetSessionId())
+	if fake.lastIntentsReq.GetPortfolioId() != 0 || fake.lastIntentsReq.GetStrategyId() != 0 || fake.lastIntentsReq.GetSessionId() != "" {
+		t.Errorf("unexpected default filters: portfolio_id=%d strategy_id=%d session_id=%q",
+			fake.lastIntentsReq.GetPortfolioId(), fake.lastIntentsReq.GetStrategyId(), fake.lastIntentsReq.GetSessionId())
 	}
 
 	var body struct {
 		Items []struct {
 			IntentID       string  `json:"intent_id"`
-			AccountID      int64   `json:"account_id"`
+			PortfolioID      int64   `json:"portfolio_id"`
 			Symbol         string  `json:"symbol"`
 			Side           string  `json:"side"`
 			RequestedQty   float64 `json:"requested_qty"`
@@ -544,7 +544,7 @@ func TestOrderIntents_envelopeShape(t *testing.T) {
 		t.Fatalf("unexpected body: %+v", body)
 	}
 	got := body.Items[0]
-	if got.IntentID != "i1" || got.AccountID != 9 || got.Symbol != "BTCUSDT" || got.Side != "BUY" {
+	if got.IntentID != "i1" || got.PortfolioID != 9 || got.Symbol != "BTCUSDT" || got.Side != "BUY" {
 		t.Errorf("unexpected item identity: %+v", got)
 	}
 	if got.RequestedQty != 0.1 || got.RequestedPrice != 50000 || got.StrategyID != 5 || got.Market != "perpetual_futures" {
@@ -558,16 +558,16 @@ func TestOrderIntents_envelopeShape(t *testing.T) {
 	}
 }
 
-func TestOrderIntents_accountAndStrategyForwarded(t *testing.T) {
+func TestOrderIntents_portfolioAndStrategyForwarded(t *testing.T) {
 	fake := &fakeOrdersClient{intentsResp: &orderv1.QueryOrderIntentsResponse{Total: 0}}
 	s := newOrderHistoryServer(fake)
 
-	req := withOrderUID(httptest.NewRequest(http.MethodGet, "/api/orders/intents?account_id=42&strategy_id=7", nil), 11)
+	req := withOrderUID(httptest.NewRequest(http.MethodGet, "/api/orders/intents?portfolio_id=42&strategy_id=7", nil), 11)
 	rec := httptest.NewRecorder()
 	s.handleOrderIntents(rec, req)
 
-	if fake.lastIntentsReq.GetAccountId() != 42 {
-		t.Errorf("account_id = %d, want 42", fake.lastIntentsReq.GetAccountId())
+	if fake.lastIntentsReq.GetPortfolioId() != 42 {
+		t.Errorf("portfolio_id = %d, want 42", fake.lastIntentsReq.GetPortfolioId())
 	}
 	if fake.lastIntentsReq.GetStrategyId() != 7 {
 		t.Errorf("strategy_id = %d, want 7", fake.lastIntentsReq.GetStrategyId())
@@ -611,7 +611,7 @@ func TestOrderFills_envelopeShape(t *testing.T) {
 		fillsResp: &orderv1.QueryOrderFillsResponse{
 			Total: 5,
 			Fills: []*orderv1.OrderFillEntry{
-				{FillId: "f1", OrderId: "o1", AccountId: 3, Symbol: "BTCUSDT", Qty: 0.1, FillPrice: 50000, Fee: 0.2},
+				{FillId: "f1", OrderId: "o1", PortfolioId: 3, Symbol: "BTCUSDT", Qty: 0.1, FillPrice: 50000, Fee: 0.2},
 			},
 		},
 	}
@@ -628,7 +628,7 @@ func TestOrderFills_envelopeShape(t *testing.T) {
 		Items []struct {
 			FillID    string  `json:"fill_id"`
 			OrderID   string  `json:"order_id"`
-			AccountID int64   `json:"account_id"`
+			PortfolioID int64   `json:"portfolio_id"`
 			Qty       float64 `json:"qty"`
 			FillPrice float64 `json:"fill_price"`
 			Fee       float64 `json:"fee"`

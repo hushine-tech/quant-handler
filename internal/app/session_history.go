@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hushine-tech/core-service/gen/accountv1"
+	"github.com/hushine-tech/core-service/gen/portfoliov1"
 	orderv1 "github.com/hushine-tech/core-service/gen/orderv1"
 )
 
@@ -90,7 +90,7 @@ func (s *server) handleSessions(w http.ResponseWriter, r *http.Request) {
 	// /api/sessions/{session_id}/reconciliation
 	// /api/sessions/{session_id}/orders
 	// /api/sessions/{session_id}
-	// /api/sessions?account_id=X
+	// /api/sessions?portfolio_id=X
 	path := strings.TrimPrefix(r.URL.Path, "/api/sessions")
 	path = strings.Trim(path, "/")
 
@@ -147,10 +147,10 @@ func (s *server) listSessionsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
-	aidStr := q.Get("account_id")
+	aidStr := q.Get("portfolio_id")
 	page := collectionPageRequested(r)
 	if aidStr == "" && !page {
-		writeErr(w, http.StatusBadRequest, "account_id is required")
+		writeErr(w, http.StatusBadRequest, "portfolio_id is required")
 		return
 	}
 	var aid int64
@@ -158,7 +158,7 @@ func (s *server) listSessionsHandler(w http.ResponseWriter, r *http.Request) {
 		var err error
 		aid, err = strconv.ParseInt(aidStr, 10, 64)
 		if err != nil {
-			writeErr(w, http.StatusBadRequest, "invalid account_id")
+			writeErr(w, http.StatusBadRequest, "invalid portfolio_id")
 			return
 		}
 	}
@@ -172,8 +172,8 @@ func (s *server) listSessionsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	req := &accountv1.ListSessionsRequest{
-		AccountId: aid,
+	req := &portfoliov1.ListSessionsRequest{
+		PortfolioId: aid,
 		Limit:     limit,
 		Offset:    offset,
 		UserId:    uid,
@@ -208,7 +208,7 @@ func (s *server) listSessionsHandler(w http.ResponseWriter, r *http.Request) {
 			req.StartedBeforeMs = n
 		}
 	}
-	resp, err := s.accounts.ListSessions(r.Context(), req)
+	resp, err := s.portfolios.ListSessions(r.Context(), req)
 	if err != nil {
 		code, msg := grpcToHTTP(err)
 		writeErr(w, code, msg)
@@ -237,7 +237,7 @@ func (s *server) getSession(w http.ResponseWriter, r *http.Request, sessionID st
 		writeErr(w, http.StatusUnauthorized, "missing user context")
 		return
 	}
-	resp, err := s.accounts.GetSession(r.Context(), &accountv1.GetSessionRequest{SessionId: sessionID, UserId: uid})
+	resp, err := s.portfolios.GetSession(r.Context(), &portfoliov1.GetSessionRequest{SessionId: sessionID, UserId: uid})
 	if err != nil {
 		code, msg := grpcToHTTP(err)
 		writeErr(w, code, msg)
@@ -253,7 +253,7 @@ func (s *server) getSessionSnapshots(w http.ResponseWriter, r *http.Request, ses
 		return
 	}
 	limit, offset := parseAuditListPaging(r)
-	resp, err := s.accounts.ListSessionSnapshots(r.Context(), &accountv1.ListSessionSnapshotsRequest{
+	resp, err := s.portfolios.ListSessionSnapshots(r.Context(), &portfoliov1.ListSessionSnapshotsRequest{
 		SessionId: sessionID,
 		Limit:     limit,
 		Offset:    offset,
@@ -267,7 +267,7 @@ func (s *server) getSessionSnapshots(w http.ResponseWriter, r *http.Request, ses
 
 	type snapshotJSON struct {
 		Time             string  `json:"time"`
-		AccountID        int64   `json:"account_id"`
+		PortfolioID        int64   `json:"portfolio_id"`
 		SnapshotReason   int32   `json:"snapshot_reason"`
 		TotalValue       float64 `json:"total_value"`
 		WalletBalance    float64 `json:"wallet_balance"`
@@ -285,7 +285,7 @@ func (s *server) getSessionSnapshots(w http.ResponseWriter, r *http.Request, ses
 		}
 		out = append(out, snapshotJSON{
 			Time:             t,
-			AccountID:        snap.GetAccountId(),
+			PortfolioID:        snap.GetPortfolioId(),
 			SnapshotReason:   snap.GetSnapshotReason(),
 			TotalValue:       snap.GetTotalValue(),
 			WalletBalance:    snap.GetWalletBalance(),
@@ -330,7 +330,7 @@ func (s *server) getSessionIntents(w http.ResponseWriter, r *http.Request, sessi
 	type intentJSON struct {
 		Time           string  `json:"time"`
 		IntentID       string  `json:"intent_id"`
-		AccountID      int64   `json:"account_id"`
+		PortfolioID      int64   `json:"portfolio_id"`
 		Symbol         string  `json:"symbol"`
 		Side           string  `json:"side"`
 		RequestedQty   float64 `json:"requested_qty"`
@@ -354,7 +354,7 @@ func (s *server) getSessionIntents(w http.ResponseWriter, r *http.Request, sessi
 		out = append(out, intentJSON{
 			Time:           protoTime(it.GetTime()),
 			IntentID:       it.GetIntentId(),
-			AccountID:      it.GetAccountId(),
+			PortfolioID:      it.GetPortfolioId(),
 			Symbol:         it.GetSymbol(),
 			Side:           it.GetSide(),
 			RequestedQty:   it.GetRequestedQty(),
@@ -658,11 +658,11 @@ func (s *server) getSessionLifecycleEvents(w http.ResponseWriter, r *http.Reques
 		writeErr(w, http.StatusUnauthorized, "missing user context")
 		return
 	}
-	if s.accounts == nil {
+	if s.portfolios == nil {
 		writeErr(w, http.StatusServiceUnavailable, "core-service not configured")
 		return
 	}
-	if _, err := s.accounts.GetSession(r.Context(), &accountv1.GetSessionRequest{SessionId: sessionID, UserId: uid}); err != nil {
+	if _, err := s.portfolios.GetSession(r.Context(), &portfoliov1.GetSessionRequest{SessionId: sessionID, UserId: uid}); err != nil {
 		code, msg := grpcToHTTP(err)
 		writeErr(w, code, msg)
 		return
@@ -730,7 +730,7 @@ func parseLifecycleEventPaging(r *http.Request) (limit int32, afterEventID int64
 type orderLifecycleEventJSON struct {
 	EventID          int64          `json:"event_id"`
 	SessionID        string         `json:"session_id"`
-	AccountID        int64          `json:"account_id"`
+	PortfolioID        int64          `json:"portfolio_id"`
 	VenueID          int64          `json:"venue_id,omitempty"`
 	IntentID         string         `json:"intent_id,omitempty"`
 	AttemptID        string         `json:"attempt_id,omitempty"`
@@ -757,7 +757,7 @@ func orderLifecycleEventToJSON(event *orderv1.OrderLifecycleEventEntry) orderLif
 	return orderLifecycleEventJSON{
 		EventID:          event.GetEventId(),
 		SessionID:        event.GetSessionId(),
-		AccountID:        event.GetAccountId(),
+		PortfolioID:        event.GetPortfolioId(),
 		VenueID:          event.GetVenueId(),
 		IntentID:         event.GetIntentId(),
 		AttemptID:        event.GetAttemptId(),
@@ -824,7 +824,7 @@ func (s *server) getSessionReconciliation(w http.ResponseWriter, r *http.Request
 
 	limit, offset := parseAuditListPaging(r)
 
-	resp, err := s.accounts.ListReconciliationRuns(r.Context(), &accountv1.ListReconciliationRunsRequest{
+	resp, err := s.portfolios.ListReconciliationRuns(r.Context(), &portfoliov1.ListReconciliationRunsRequest{
 		SessionId: sessionID,
 		UserId:    uid,
 		Limit:     limit,
@@ -849,7 +849,7 @@ func (s *server) getSessionReconciliation(w http.ResponseWriter, r *http.Request
 	type runJSON struct {
 		Time                 string          `json:"time"`
 		RunID                string          `json:"run_id"`
-		AccountID            int64           `json:"account_id"`
+		PortfolioID            int64           `json:"portfolio_id"`
 		StrategyID           int64           `json:"strategy_id"`
 		SessionID            string          `json:"session_id"`
 		SnapshotReason       int32           `json:"snapshot_reason"`
@@ -877,7 +877,7 @@ func (s *server) getSessionReconciliation(w http.ResponseWriter, r *http.Request
 		}
 		return out
 	}
-	toFieldDiff := func(d *accountv1.FieldDiffEntry) fieldDiffJSON {
+	toFieldDiff := func(d *portfoliov1.FieldDiffEntry) fieldDiffJSON {
 		return fieldDiffJSON{
 			Field:     d.GetField(),
 			Severity:  d.GetSeverity(),
@@ -918,7 +918,7 @@ func (s *server) getSessionReconciliation(w http.ResponseWriter, r *http.Request
 		out = append(out, runJSON{
 			Time:                 t,
 			RunID:                run.GetRunId(),
-			AccountID:            run.GetAccountId(),
+			PortfolioID:            run.GetPortfolioId(),
 			StrategyID:           run.GetStrategyId(),
 			SessionID:            run.GetSessionId(),
 			SnapshotReason:       run.GetSnapshotReason(),
@@ -953,7 +953,7 @@ func (s *server) getSessionReconciliationSummary(w http.ResponseWriter, r *http.
 		writeErr(w, http.StatusUnauthorized, "missing user context")
 		return
 	}
-	resp, err := s.accounts.GetSessionReconciliationSummary(r.Context(), &accountv1.GetSessionReconciliationSummaryRequest{
+	resp, err := s.portfolios.GetSessionReconciliationSummary(r.Context(), &portfoliov1.GetSessionReconciliationSummaryRequest{
 		SessionId: sessionID,
 		UserId:    uid,
 	})
@@ -975,7 +975,7 @@ func (s *server) getSessionReconciliationSummary(w http.ResponseWriter, r *http.
 
 type sessionJSON struct {
 	SessionID      string `json:"session_id"`
-	AccountID      int64  `json:"account_id"`
+	PortfolioID      int64  `json:"portfolio_id"`
 	StrategyID     int64  `json:"strategy_id"`
 	Environment    int32  `json:"environment"`
 	Status         string `json:"status"`
@@ -994,13 +994,13 @@ type sessionJSON struct {
 	CompletedAt    string `json:"completed_at,omitempty"`
 }
 
-func protoSessionToJSON(se *accountv1.StrategySessionEntry) sessionJSON {
+func protoSessionToJSON(se *portfoliov1.StrategySessionEntry) sessionJSON {
 	if se == nil {
 		return sessionJSON{}
 	}
 	j := sessionJSON{
 		SessionID:      se.GetSessionId(),
-		AccountID:      se.GetAccountId(),
+		PortfolioID:      se.GetPortfolioId(),
 		StrategyID:     se.GetStrategyId(),
 		Environment:    se.GetEnvironment(),
 		Status:         se.GetStatus(),

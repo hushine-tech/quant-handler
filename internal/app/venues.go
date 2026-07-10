@@ -6,11 +6,11 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/hushine-tech/core-service/gen/accountv1"
+	"github.com/hushine-tech/core-service/gen/portfoliov1"
 )
 
 type venueBody struct {
-	AccountID      int64           `json:"account_id"`
+	PortfolioID      int64           `json:"portfolio_id"`
 	Exchange       string          `json:"exchange"`
 	Market         string          `json:"market"`
 	Environment    string          `json:"environment"`
@@ -27,14 +27,14 @@ type venueBody struct {
 }
 
 type venueActionBody struct {
-	AccountID int64  `json:"account_id"`
+	PortfolioID int64  `json:"portfolio_id"`
 	Reason    string `json:"reason"`
 }
 
 type venueJSON struct {
 	VenueID               int64  `json:"venue_id"`
 	UserID                int64  `json:"user_id"`
-	AccountID             int64  `json:"account_id,omitempty"`
+	PortfolioID             int64  `json:"portfolio_id,omitempty"`
 	Exchange              int32  `json:"exchange"`
 	ExchangeLabel         string `json:"exchange_label"`
 	Market                int32  `json:"market"`
@@ -109,12 +109,12 @@ func (s *server) handleVenueByID(w http.ResponseWriter, r *http.Request) {
 	http.NotFound(w, r)
 }
 
-func (s *server) handleAccountVenues(w http.ResponseWriter, r *http.Request, accountID int64) {
+func (s *server) handlePortfolioVenues(w http.ResponseWriter, r *http.Request, portfolioID int64) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	s.listVenues(w, r, accountID)
+	s.listVenues(w, r, portfolioID)
 }
 
 func (s *server) createVenue(w http.ResponseWriter, r *http.Request) {
@@ -180,9 +180,9 @@ func (s *server) createVenue(w http.ResponseWriter, r *http.Request) {
 	if environment == 0 {
 		bootstrap = buildWalletBootstrap(body.Spot, body.Futures, body.InitialBalance)
 	}
-	resp, err := s.accounts.CreateVenue(r.Context(), &accountv1.CreateVenueRequest{
+	resp, err := s.portfolios.CreateVenue(r.Context(), &portfoliov1.CreateVenueRequest{
 		UserId:           uid,
-		AccountId:        body.AccountID,
+		PortfolioId:        body.PortfolioID,
 		Exchange:         exchange,
 		Market:           market,
 		Environment:      environment,
@@ -207,26 +207,26 @@ func (s *server) createVenue(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, venueToJSON(resp.GetVenue()))
 }
 
-func (s *server) listVenues(w http.ResponseWriter, r *http.Request, accountID int64) {
+func (s *server) listVenues(w http.ResponseWriter, r *http.Request, portfolioID int64) {
 	uid, ok := userIDFromRequest(r)
 	if !ok {
 		writeErr(w, http.StatusUnauthorized, "missing user context")
 		return
 	}
-	if accountID == 0 {
-		if raw := strings.TrimSpace(r.URL.Query().Get("account_id")); raw != "" {
+	if portfolioID == 0 {
+		if raw := strings.TrimSpace(r.URL.Query().Get("portfolio_id")); raw != "" {
 			n, err := strconv.ParseInt(raw, 10, 64)
 			if err != nil || n <= 0 {
-				writeErr(w, http.StatusBadRequest, "account_id must be a positive integer")
+				writeErr(w, http.StatusBadRequest, "portfolio_id must be a positive integer")
 				return
 			}
-			accountID = n
+			portfolioID = n
 		}
 	}
 	limit, offset := parseCollectionPaging(r)
-	resp, err := s.accounts.ListVenues(r.Context(), &accountv1.ListVenuesRequest{
+	resp, err := s.portfolios.ListVenues(r.Context(), &portfoliov1.ListVenuesRequest{
 		UserId:          uid,
-		AccountId:       accountID,
+		PortfolioId:       portfolioID,
 		IncludeUnbound:  boolQuery(r, "include_unbound"),
 		IncludeInactive: boolQuery(r, "include_inactive"),
 		Limit:           limit,
@@ -252,7 +252,7 @@ func (s *server) getVenue(w http.ResponseWriter, r *http.Request, venueID int64)
 		writeErr(w, http.StatusUnauthorized, "missing user context")
 		return
 	}
-	resp, err := s.accounts.GetVenue(r.Context(), &accountv1.GetVenueRequest{UserId: uid, VenueId: venueID})
+	resp, err := s.portfolios.GetVenue(r.Context(), &portfoliov1.GetVenueRequest{UserId: uid, VenueId: venueID})
 	if err != nil {
 		code, msg := grpcToHTTP(err)
 		writeErr(w, code, msg)
@@ -275,7 +275,7 @@ func (s *server) getVenueWallet(w http.ResponseWriter, r *http.Request, venueID 
 		writeErr(w, http.StatusUnauthorized, "missing user context")
 		return
 	}
-	resp, err := s.accounts.GetVenueOnlineInfo(r.Context(), &accountv1.GetVenueOnlineInfoRequest{
+	resp, err := s.portfolios.GetVenueOnlineInfo(r.Context(), &portfoliov1.GetVenueOnlineInfoRequest{
 		UserId:  uid,
 		VenueId: venueID,
 	})
@@ -291,7 +291,7 @@ func (s *server) getVenueWallet(w http.ResponseWriter, r *http.Request, venueID 
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"venue":  venueToJSON(resp.GetVenue()),
-		"wallet": accountWalletStateToJSON(wallet),
+		"wallet": portfolioWalletStateToJSON(wallet),
 	})
 }
 
@@ -310,9 +310,9 @@ func (s *server) bindVenue(w http.ResponseWriter, r *http.Request, venueID int64
 		writeErr(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
-	resp, err := s.accounts.BindVenue(r.Context(), &accountv1.BindVenueRequest{
+	resp, err := s.portfolios.BindVenue(r.Context(), &portfoliov1.BindVenueRequest{
 		UserId:    uid,
-		AccountId: body.AccountID,
+		PortfolioId: body.PortfolioID,
 		VenueId:   venueID,
 		Reason:    strings.TrimSpace(body.Reason),
 	})
@@ -335,7 +335,7 @@ func (s *server) releaseVenue(w http.ResponseWriter, r *http.Request, venueID in
 		return
 	}
 	body := decodeVenueActionBody(r)
-	resp, err := s.accounts.ReleaseVenue(r.Context(), &accountv1.ReleaseVenueRequest{
+	resp, err := s.portfolios.ReleaseVenue(r.Context(), &portfoliov1.ReleaseVenueRequest{
 		UserId:  uid,
 		VenueId: venueID,
 		Reason:  strings.TrimSpace(body.Reason),
@@ -359,7 +359,7 @@ func (s *server) archiveVenue(w http.ResponseWriter, r *http.Request, venueID in
 		return
 	}
 	body := decodeVenueActionBody(r)
-	_, err := s.accounts.ArchiveVenue(r.Context(), &accountv1.ArchiveVenueRequest{
+	_, err := s.portfolios.ArchiveVenue(r.Context(), &portfoliov1.ArchiveVenueRequest{
 		UserId:  uid,
 		VenueId: venueID,
 		Reason:  strings.TrimSpace(body.Reason),
@@ -395,7 +395,7 @@ func decodeVenueActionBody(r *http.Request) venueActionBody {
 	return body
 }
 
-func venuesToJSON(venues []*accountv1.VenueEntry) []venueJSON {
+func venuesToJSON(venues []*portfoliov1.VenueEntry) []venueJSON {
 	out := make([]venueJSON, 0, len(venues))
 	for _, venue := range venues {
 		out = append(out, venueToJSON(venue))
@@ -403,14 +403,14 @@ func venuesToJSON(venues []*accountv1.VenueEntry) []venueJSON {
 	return out
 }
 
-func venueToJSON(venue *accountv1.VenueEntry) venueJSON {
+func venueToJSON(venue *portfoliov1.VenueEntry) venueJSON {
 	if venue == nil {
 		return venueJSON{}
 	}
 	return venueJSON{
 		VenueID:               venue.GetVenueId(),
 		UserID:                venue.GetUserId(),
-		AccountID:             venue.GetAccountId(),
+		PortfolioID:             venue.GetPortfolioId(),
 		Exchange:              venue.GetExchange(),
 		ExchangeLabel:         venueExchangeLabel(venue.GetExchange()),
 		Market:                venue.GetMarket(),

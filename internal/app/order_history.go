@@ -13,7 +13,7 @@ import (
 
 type orderHistoryFilters struct {
 	userID     int64
-	accountID  int64
+	portfolioID  int64
 	strategyID int64
 	sessionID  string
 	intentID   string
@@ -53,7 +53,7 @@ func (s *server) handleOrderIntents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp, err := s.orders.QueryOrderIntents(r.Context(), &orderv1.QueryOrderIntentsRequest{
-		AccountId:  filters.accountID,
+		PortfolioId:  filters.portfolioID,
 		StrategyId: filters.strategyID,
 		SessionId:  filters.sessionID,
 		Limit:      filters.limit,
@@ -69,7 +69,7 @@ func (s *server) handleOrderIntents(w http.ResponseWriter, r *http.Request) {
 	type intentJSON struct {
 		Time           string  `json:"time"`
 		IntentID       string  `json:"intent_id"`
-		AccountID      int64   `json:"account_id"`
+		PortfolioID      int64   `json:"portfolio_id"`
 		Symbol         string  `json:"symbol"`
 		Side           string  `json:"side"`
 		RequestedQty   float64 `json:"requested_qty"`
@@ -95,7 +95,7 @@ func (s *server) handleOrderIntents(w http.ResponseWriter, r *http.Request) {
 		items = append(items, intentJSON{
 			Time:           protoTime(it.GetTime()),
 			IntentID:       it.GetIntentId(),
-			AccountID:      it.GetAccountId(),
+			PortfolioID:      it.GetPortfolioId(),
 			Symbol:         it.GetSymbol(),
 			Side:           it.GetSide(),
 			RequestedQty:   it.GetRequestedQty(),
@@ -130,7 +130,7 @@ func (s *server) handleOrderHistory(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp, err := s.orders.QueryOrders(r.Context(), &orderv1.QueryOrdersRequest{
-		AccountId:  filters.accountID,
+		PortfolioId:  filters.portfolioID,
 		StrategyId: filters.strategyID,
 		SessionId:  filters.sessionID,
 		IntentId:   filters.intentID,
@@ -152,7 +152,7 @@ func (s *server) handleOrderHistory(w http.ResponseWriter, r *http.Request) {
 		ClientOrderID      string  `json:"client_order_id,omitempty"`
 		AttemptID          string  `json:"attempt_id,omitempty"`
 		IntentID           string  `json:"intent_id,omitempty"`
-		AccountID          int64   `json:"account_id"`
+		PortfolioID          int64   `json:"portfolio_id"`
 		Symbol             string  `json:"symbol"`
 		Side               string  `json:"side"`
 		OrigQty            float64 `json:"orig_qty"`
@@ -189,7 +189,7 @@ func (s *server) handleOrderHistory(w http.ResponseWriter, r *http.Request) {
 			ClientOrderID:      o.GetClientOrderId(),
 			AttemptID:          o.GetAttemptId(),
 			IntentID:           o.GetIntentId(),
-			AccountID:          o.GetAccountId(),
+			PortfolioID:          o.GetPortfolioId(),
 			Symbol:             o.GetSymbol(),
 			Side:               o.GetSide(),
 			OrigQty:            o.GetOrigQty(),
@@ -231,7 +231,7 @@ func (s *server) handleOrderAttempts(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp, err := s.orders.QueryOrderAttempts(r.Context(), &orderv1.QueryOrderAttemptsRequest{
-		AccountId:  filters.accountID,
+		PortfolioId:  filters.portfolioID,
 		StrategyId: filters.strategyID,
 		SessionId:  filters.sessionID,
 		IntentId:   filters.intentID,
@@ -252,7 +252,7 @@ func (s *server) handleOrderAttempts(w http.ResponseWriter, r *http.Request) {
 		OrderID         string           `json:"order_id,omitempty"`
 		ExchangeOrderID string           `json:"exchange_order_id,omitempty"`
 		ClientOrderID   string           `json:"client_order_id,omitempty"`
-		AccountID       int64            `json:"account_id"`
+		PortfolioID       int64            `json:"portfolio_id"`
 		Symbol          string           `json:"symbol"`
 		Side            string           `json:"side"`
 		RequestedQty    float64          `json:"requested_qty"`
@@ -285,7 +285,7 @@ func (s *server) handleOrderAttempts(w http.ResponseWriter, r *http.Request) {
 			OrderID:         a.GetOrderId(),
 			ExchangeOrderID: a.GetExchangeOrderId(),
 			ClientOrderID:   a.GetClientOrderId(),
-			AccountID:       a.GetAccountId(),
+			PortfolioID:       a.GetPortfolioId(),
 			Symbol:          a.GetSymbol(),
 			Side:            a.GetSide(),
 			RequestedQty:    a.GetRequestedQty(),
@@ -323,7 +323,7 @@ func (s *server) handleOrderFills(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp, err := s.orders.QueryOrderFills(r.Context(), &orderv1.QueryOrderFillsRequest{
-		AccountId:  filters.accountID,
+		PortfolioId:  filters.portfolioID,
 		StrategyId: filters.strategyID,
 		SessionId:  filters.sessionID,
 		IntentId:   filters.intentID,
@@ -347,7 +347,7 @@ func (s *server) handleOrderFills(w http.ResponseWriter, r *http.Request) {
 		ExchangeOrderID string  `json:"exchange_order_id,omitempty"`
 		AttemptID       string  `json:"attempt_id,omitempty"`
 		IntentID        string  `json:"intent_id,omitempty"`
-		AccountID       int64   `json:"account_id"`
+		PortfolioID       int64   `json:"portfolio_id"`
 		Symbol          string  `json:"symbol"`
 		Side            string  `json:"side"`
 		Qty             float64 `json:"qty"`
@@ -374,7 +374,7 @@ func (s *server) handleOrderFills(w http.ResponseWriter, r *http.Request) {
 			ExchangeOrderID: f.GetExchangeOrderId(),
 			AttemptID:       f.GetAttemptId(),
 			IntentID:        f.GetIntentId(),
-			AccountID:       f.GetAccountId(),
+			PortfolioID:       f.GetPortfolioId(),
 			Symbol:          f.GetSymbol(),
 			Side:            f.GetSide(),
 			Qty:             f.GetQty(),
@@ -414,14 +414,14 @@ func (s *server) parseOrderHistoryFilters(w http.ResponseWriter, r *http.Request
 	}
 
 	q := r.URL.Query()
-	var accountID int64
-	if v := q.Get("account_id"); v != "" {
+	var portfolioID int64
+	if v := q.Get("portfolio_id"); v != "" {
 		n, err := strconv.ParseInt(v, 10, 64)
 		if err != nil {
-			writeErr(w, http.StatusBadRequest, "invalid account_id")
+			writeErr(w, http.StatusBadRequest, "invalid portfolio_id")
 			return orderHistoryFilters{}, false
 		}
-		accountID = n
+		portfolioID = n
 	}
 
 	var strategyID int64
@@ -450,7 +450,7 @@ func (s *server) parseOrderHistoryFilters(w http.ResponseWriter, r *http.Request
 
 	return orderHistoryFilters{
 		userID:     uid,
-		accountID:  accountID,
+		portfolioID:  portfolioID,
 		strategyID: strategyID,
 		sessionID:  strings.TrimSpace(q.Get("session_id")),
 		intentID:   strings.TrimSpace(q.Get("intent_id")),
