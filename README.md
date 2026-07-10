@@ -47,9 +47,6 @@ Handler resolves the explicit
 strategy proxy; the proxy sends REQUEST frames over the runtime's outbound
 `RuntimeChannel` for both hosted and self-hosted runtimes.
 
-The old name-based debug endpoint `GET /api/_debug/runtime-route` remains
-only as a removal marker and returns `410 Gone`; routing uses `runtime_id` only.
-
 Session status is DB-authoritative after creation. Backtest status/detail reads
 the persisted `strategy_sessions` row directly; demo/live status still attempts
 a runtime refresh, but `DeadlineExceeded` / `Unavailable` falls back to the

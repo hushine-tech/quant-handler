@@ -2,10 +2,6 @@ package app
 
 import (
 	"context"
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
-	"testing"
 
 	"github.com/hushine-tech/quant-handler/internal/controlpanel"
 )
@@ -37,7 +33,7 @@ type fakeResolver struct {
 	gotRuntimeID      string
 	gotHostPath       string
 	gotContainerPath  string
-	gotPortfolioID      int64
+	gotPortfolioID    int64
 	gotMarket         string
 	gotSymbol         string
 	gotInterval       string
@@ -47,7 +43,6 @@ type fakeResolver struct {
 	gotEnvironment    int
 	resolveByIDResp   controlpanel.Route
 	resolveByIDErr    error
-	resolveCalls      int
 	ensureCalls       int
 	listCalls         int
 	getRuntimeCalls   int
@@ -132,47 +127,4 @@ func (f *fakeResolver) EnsureHostedRuntime(_ context.Context, userID int64, name
 	f.gotName = name
 	f.gotProfile = profile
 	return f.ensureResp, f.ensureErr
-}
-
-func TestRuntimeRouteByNameReturnsGone(t *testing.T) {
-	resolver := &fakeResolver{
-		resp: controlpanel.Route{RuntimeID: "rt_x"},
-	}
-	s := &server{
-		controlPanel: resolver,
-		jwtSecret:    []byte("s"),
-		corsOrigins:  []string{"*"},
-	}
-	req := withUID(httptest.NewRequest(http.MethodGet, "/api/_debug/runtime-route", nil), 42)
-	rec := httptest.NewRecorder()
-
-	s.handleResolveRuntimeRoute(rec, req)
-
-	if rec.Code != http.StatusGone {
-		t.Fatalf("status = %d, want 410; body=%s", rec.Code, rec.Body.String())
-	}
-	if !json.Valid(rec.Body.Bytes()) {
-		t.Fatalf("body is not JSON: %s", rec.Body.String())
-	}
-	if resolver.resolveCalls != 0 || resolver.resolveByIDCalls != 0 {
-		t.Fatalf("route resolver was called after route-by-name removal")
-	}
-}
-
-// TestRuntimeRoute_MethodNotAllowed proves only GET is accepted, since the
-// removal endpoint is read-only.
-func TestRuntimeRoute_MethodNotAllowed(t *testing.T) {
-	s := &server{
-		controlPanel: controlpanel.Disabled(),
-		jwtSecret:    []byte("s"),
-		corsOrigins:  []string{"*"},
-	}
-	req := withUID(httptest.NewRequest(http.MethodPost, "/api/_debug/runtime-route", nil), 42)
-	rec := httptest.NewRecorder()
-
-	s.handleResolveRuntimeRoute(rec, req)
-
-	if rec.Code != http.StatusMethodNotAllowed {
-		t.Fatalf("status = %d, want 405", rec.Code)
-	}
 }
