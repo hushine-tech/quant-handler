@@ -20,6 +20,7 @@ const (
 	previewRunStrategyRPCTimeout = 15 * time.Second
 	runStrategyRPCTimeout        = 30 * time.Second
 	statusStrategyRPCTimeout     = 3 * time.Second
+	maxStrategySourceBytes       = 1 << 20
 )
 
 // ── Request / Response types ─────────────────────────────────────────────────
@@ -45,6 +46,37 @@ type previewRunStrategyRequest struct {
 	RuntimeID       string  `json:"runtime_id"`
 	MaxLossClosePct float64 `json:"max_loss_close_pct"`
 	Leverage        float64 `json:"leverage"`
+}
+
+type validateStrategySourceRequest struct {
+	RuntimeID string `json:"runtime_id"`
+	Source    string `json:"source"`
+}
+
+type strategyValidationIssueJSON struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+	Module  string `json:"module"`
+	Line    int32  `json:"line"`
+	Symbol  string `json:"symbol"`
+}
+
+type runtimeDependencyProfileJSON struct {
+	SchemaVersion         uint32   `json:"schema_version"`
+	ProfileName           string   `json:"profile_name"`
+	ProfileVersion        string   `json:"profile_version"`
+	ContractSHA256        string   `json:"contract_sha256"`
+	HostedPython          string   `json:"hosted_python"`
+	PublicImportRoots     []string `json:"public_import_roots"`
+	StrategyServiceCommit string   `json:"strategy_service_commit"`
+	StrategyLibraryCommit string   `json:"strategy_library_commit"`
+	ImageBuildID          string   `json:"image_build_id"`
+}
+
+type validateStrategySourceResponse struct {
+	OK             bool                          `json:"ok"`
+	Issues         []strategyValidationIssueJSON `json:"issues"`
+	RuntimeProfile *runtimeDependencyProfileJSON `json:"runtime_profile"`
 }
 
 // Shape of the preview-run JSON response — mirrors PreviewRunStrategyResponse.
@@ -100,7 +132,7 @@ func (s *server) strategyRoutePolicyForPortfolio(ctx context.Context, w http.Res
 	if s.portfolios != nil {
 		resp, err := s.portfolios.GetPortfolio(ctx, &portfoliov1.GetPortfolioRequest{
 			PortfolioId: portfolioID,
-			UserId:    userID,
+			UserId:      userID,
 		})
 		if err != nil {
 			code, msg := grpcToHTTP(err)
@@ -180,7 +212,7 @@ func (s *server) handleRunStrategy(w http.ResponseWriter, r *http.Request, portf
 	rpcCtx, cancel := context.WithTimeout(r.Context(), runStrategyRPCTimeout)
 	defer cancel()
 	resp, err := cli.RunStrategy(rpcCtx, &strategyv1.RunStrategyRequest{
-		PortfolioId:       portfolioID,
+		PortfolioId:     portfolioID,
 		StrategyPath:    body.StrategyPath,
 		Interval:        interval,
 		StartTimeMs:     body.StartTimeMs,
@@ -191,6 +223,9 @@ func (s *server) handleRunStrategy(w http.ResponseWriter, r *http.Request, portf
 		Leverage:        body.Leverage,
 	})
 	if err != nil {
+		if writeRuntimeDependencyError(w, err) {
+			return
+		}
 		code, msg := grpcToHTTP(err)
 		writeErr(w, code, msg)
 		return
@@ -199,6 +234,86 @@ func (s *server) handleRunStrategy(w http.ResponseWriter, r *http.Request, portf
 	writeJSON(w, http.StatusOK, map[string]any{
 		"session_id": resp.GetSessionId(),
 	})
+}
+
+func (s *server) handleValidateStrategySource(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var body validateStrategySourceRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	runtimeID := strings.TrimSpace(body.RuntimeID)
+	if runtimeID == "" {
+		writeErr(w, http.StatusBadRequest, "runtime_id is required")
+		return
+	}
+	if strings.TrimSpace(body.Source) == "" {
+		writeErr(w, http.StatusBadRequest, "source is required")
+		return
+	}
+	if len([]byte(body.Source)) > maxStrategySourceBytes {
+		writeErr(w, http.StatusBadRequest, "source exceeds 1 MiB limit")
+		return
+	}
+	uid, ok := userIDFromRequest(r)
+	if !ok {
+		writeErr(w, http.StatusUnauthorized, "missing user context")
+		return
+	}
+	cli, selectedRuntimeID, ok := s.strategyClient(r.Context(), w, uid, routeEnsure, runtimeID, defaultStrategyRoutePolicy())
+	if !ok {
+		return
+	}
+	rpcCtx, cancel := context.WithTimeout(r.Context(), previewRunStrategyRPCTimeout)
+	defer cancel()
+	resp, err := cli.ValidateStrategySource(rpcCtx, &strategyv1.ValidateStrategySourceRequest{
+		Source:    body.Source,
+		UserId:    uid,
+		RuntimeId: selectedRuntimeID,
+	})
+	if err != nil {
+		if writeRuntimeDependencyError(w, err) {
+			return
+		}
+		code, msg := grpcToHTTP(err)
+		writeErr(w, code, msg)
+		return
+	}
+	issues := make([]strategyValidationIssueJSON, 0, len(resp.GetIssues()))
+	for _, issue := range resp.GetIssues() {
+		if issue == nil {
+			continue
+		}
+		issues = append(issues, strategyValidationIssueJSON{
+			Code: issue.GetCode(), Message: issue.GetMessage(), Module: issue.GetModule(), Line: issue.GetLine(), Symbol: issue.GetSymbol(),
+		})
+	}
+	writeJSON(w, http.StatusOK, validateStrategySourceResponse{
+		OK:             resp.GetOk(),
+		Issues:         issues,
+		RuntimeProfile: runtimeDependencyProfileToJSON(resp.GetRuntimeProfile()),
+	})
+}
+
+func runtimeDependencyProfileToJSON(profile *strategyv1.RuntimeDependencyProfile) *runtimeDependencyProfileJSON {
+	if profile == nil {
+		return nil
+	}
+	return &runtimeDependencyProfileJSON{
+		SchemaVersion:         profile.GetSchemaVersion(),
+		ProfileName:           profile.GetProfileName(),
+		ProfileVersion:        profile.GetProfileVersion(),
+		ContractSHA256:        profile.GetContractSha256(),
+		HostedPython:          profile.GetHostedPython(),
+		PublicImportRoots:     append([]string(nil), profile.GetPublicImportRoots()...),
+		StrategyServiceCommit: profile.GetStrategyServiceCommit(),
+		StrategyLibraryCommit: profile.GetStrategyLibraryCommit(),
+		ImageBuildID:          profile.GetImageBuildId(),
+	}
 }
 
 func (s *server) handlePreviewRunStrategy(w http.ResponseWriter, r *http.Request, portfolioID int64) {
@@ -237,7 +352,7 @@ func (s *server) handlePreviewRunStrategy(w http.ResponseWriter, r *http.Request
 	rpcCtx, cancel := context.WithTimeout(r.Context(), previewRunStrategyRPCTimeout)
 	defer cancel()
 	resp, err := cli.PreviewRunStrategy(rpcCtx, &strategyv1.PreviewRunStrategyRequest{
-		PortfolioId:       portfolioID,
+		PortfolioId:     portfolioID,
 		StrategyPath:    body.StrategyPath,
 		StartTimeMs:     body.StartTimeMs,
 		EndTimeMs:       body.EndTimeMs,
@@ -247,6 +362,9 @@ func (s *server) handlePreviewRunStrategy(w http.ResponseWriter, r *http.Request
 		Leverage:        body.Leverage,
 	})
 	if err != nil {
+		if writeRuntimeDependencyError(w, err) {
+			return
+		}
 		code, msg := grpcToHTTP(err)
 		writeErr(w, code, msg)
 		return

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -35,6 +36,9 @@ type fakeControlPanelStrategyProxy struct {
 	previewReq              *strategyv1.PreviewRunStrategyRequest
 	previewResp             *strategyv1.PreviewRunStrategyResponse
 	previewErr              error
+	validateReq             *strategyv1.ValidateStrategySourceRequest
+	validateResp            *strategyv1.ValidateStrategySourceResponse
+	validateErr             error
 
 	runDeadlineSet       bool
 	runDeadlineRemaining time.Duration
@@ -99,6 +103,92 @@ func (f *fakeControlPanelStrategyProxy) PreviewRunStrategy(ctx context.Context, 
 	return &strategyv1.PreviewRunStrategyResponse{Profile: "backtest", Supported: true, Ok: true}, nil
 }
 
+func (f *fakeControlPanelStrategyProxy) ValidateStrategySource(_ context.Context, in *strategyv1.ValidateStrategySourceRequest, _ ...grpc.CallOption) (*strategyv1.ValidateStrategySourceResponse, error) {
+	f.validateReq = in
+	if f.validateErr != nil {
+		return nil, f.validateErr
+	}
+	if f.validateResp != nil {
+		return f.validateResp, nil
+	}
+	return &strategyv1.ValidateStrategySourceResponse{Ok: true}, nil
+}
+
+func TestValidateStrategySourceRoutesOnlyByExplicitRuntimeID(t *testing.T) {
+	resolver := &fakeResolver{resp: controlpanel.Route{RuntimeID: "rt-validate"}}
+	proxy := &fakeControlPanelStrategyProxy{validateResp: &strategyv1.ValidateStrategySourceResponse{
+		Ok: false,
+		Issues: []*strategyv1.StrategyValidationIssueProto{{
+			Code: "STRATEGY_DEPENDENCY_UNAVAILABLE", Message: "dependency unavailable", Module: "google.cloud", Line: 3,
+		}},
+		RuntimeProfile: &strategyv1.RuntimeDependencyProfile{
+			SchemaVersion: 1, ProfileName: "platform-python-3.13", ProfileVersion: "1.0.0", ContractSha256: "digest",
+		},
+	}}
+	s := &server{controlPanel: resolver, cpRuntime: proxy}
+	req := withUID(httptest.NewRequest(http.MethodPost, "/api/strategy/validate-source",
+		bytes.NewBufferString(`{"runtime_id":"rt-validate","source":"import google.cloud"}`)), 42)
+	rec := httptest.NewRecorder()
+
+	s.handleValidateStrategySource(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if resolver.resolveByIDCalls != 1 || resolver.ensureCalls != 0 {
+		t.Fatalf("route calls resolve_by_id/ensure = %d/%d, want 1/0", resolver.resolveByIDCalls, resolver.ensureCalls)
+	}
+	if resolver.gotUserID != 42 || resolver.gotRuntimeID != "rt-validate" {
+		t.Fatalf("resolved user/runtime = %d/%q, want 42/rt-validate", resolver.gotUserID, resolver.gotRuntimeID)
+	}
+	if proxy.validateReq == nil || proxy.validateReq.GetUserId() != 42 || proxy.validateReq.GetRuntimeId() != "rt-validate" || proxy.validateReq.GetSource() != "import google.cloud" {
+		t.Fatalf("validate request = %+v", proxy.validateReq)
+	}
+	var body struct {
+		OK             bool                          `json:"ok"`
+		Issues         []strategyValidationIssueJSON `json:"issues"`
+		RuntimeProfile *runtimeDependencyProfileJSON `json:"runtime_profile"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.OK || len(body.Issues) != 1 || body.Issues[0].Module != "google.cloud" {
+		t.Fatalf("validation response = %+v", body)
+	}
+	if body.RuntimeProfile == nil || body.RuntimeProfile.ProfileName != "platform-python-3.13" {
+		t.Fatalf("runtime_profile = %+v", body.RuntimeProfile)
+	}
+}
+
+func TestValidateStrategySourceRejectsMissingOrOversizedInputWithoutRouting(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "runtime", body: `{"source":"import numpy"}`},
+		{name: "source", body: `{"runtime_id":"rt-1","source":"  "}`},
+		{name: "oversized source", body: `{"runtime_id":"rt-1","source":"` + strings.Repeat("x", maxStrategySourceBytes+1) + `"}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resolver := &fakeResolver{resp: controlpanel.Route{RuntimeID: "rt-1"}}
+			proxy := &fakeControlPanelStrategyProxy{}
+			s := &server{controlPanel: resolver, cpRuntime: proxy}
+			req := withUID(httptest.NewRequest(http.MethodPost, "/api/strategy/validate-source", bytes.NewBufferString(tt.body)), 42)
+			rec := httptest.NewRecorder()
+
+			s.handleValidateStrategySource(rec, req)
+
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+			}
+			if resolver.resolveByIDCalls != 0 || resolver.ensureCalls != 0 || proxy.validateReq != nil {
+				t.Fatalf("invalid input routed: resolve=%d ensure=%d request=%+v", resolver.resolveByIDCalls, resolver.ensureCalls, proxy.validateReq)
+			}
+		})
+	}
+}
+
 // TestRunStrategy_ControlPanelNotFound surfaces the gRPC NotFound from
 // ResolveRuntimeRouteByID as HTTP 404.
 func TestRunStrategy_ControlPanelNotFound(t *testing.T) {
@@ -143,6 +233,38 @@ func TestRunStrategy_ControlPanelResourceExhausted(t *testing.T) {
 
 	if rec.Code == http.StatusOK {
 		t.Fatalf("status = %d, expected non-2xx; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestRunStrategyEmitsStructuredRuntimeDependencyError(t *testing.T) {
+	proxy := &fakeControlPanelStrategyProxy{
+		runErr: runtimeDependencyTestError(codes.FailedPrecondition, "STRATEGY_IMPORT_FAILED"),
+	}
+	s := &server{
+		controlPanel: &fakeResolver{
+			resp:        controlpanel.Route{RuntimeID: "rt-run"},
+			runtimeResp: controlpanel.Runtime{RuntimeID: "rt-run", Role: "executor"},
+		},
+		cpRuntime: proxy,
+	}
+	req := withUID(httptest.NewRequest(http.MethodPost,
+		"/api/portfolios/7/run-strategy", bytes.NewBufferString(`{"runtime_id":"rt-run"}`)), 42)
+	rec := httptest.NewRecorder()
+
+	s.handleRunStrategy(rec, req, 7)
+
+	if rec.Code != http.StatusPreconditionFailed {
+		t.Fatalf("status = %d, want 412; body=%s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Error        string                      `json:"error"`
+		RuntimeError *runtimeDependencyHTTPError `json:"runtime_error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Error != runtimeDependencyTestMessage || body.RuntimeError == nil || body.RuntimeError.Code != "STRATEGY_IMPORT_FAILED" {
+		t.Fatalf("response = %+v", body)
 	}
 }
 
@@ -226,7 +348,7 @@ func TestRunStrategy_BacktestDebuggerRuntimeRoutesAsDebugger(t *testing.T) {
 	}
 	portfolios := &fakeSessionPortfoliosClient{portfolioEnvironment: 0}
 	s := &server{
-		portfolios:     portfolios,
+		portfolios:   portfolios,
 		controlPanel: resolver,
 		cpRuntime:    proxy,
 		jwtSecret:    []byte("s"),
@@ -266,7 +388,7 @@ func TestRunStrategy_DemoAlwaysRoutesAsExecutor(t *testing.T) {
 	}
 	portfolios := &fakeSessionPortfoliosClient{portfolioEnvironment: 1}
 	s := &server{
-		portfolios:     portfolios,
+		portfolios:   portfolios,
 		controlPanel: resolver,
 		cpRuntime:    proxy,
 		jwtSecret:    []byte("s"),
@@ -456,7 +578,7 @@ func TestStatus_RuntimeOfflineSurfacesProxyError(t *testing.T) {
 		}},
 	}
 	s := &server{
-		portfolios:     portfolios,
+		portfolios:   portfolios,
 		controlPanel: resolver,
 		cpRuntime:    proxy,
 		jwtSecret:    []byte("s"),
@@ -513,7 +635,7 @@ func TestStatus_BacktestUsesPersistedSessionWithoutRuntimeStatusRPC(t *testing.T
 		}},
 	}
 	s := &server{
-		portfolios:     portfolios,
+		portfolios:   portfolios,
 		controlPanel: resolver,
 		cpRuntime:    proxy,
 		jwtSecret:    []byte("s"),
@@ -566,7 +688,7 @@ func TestStatus_UsesSessionRuntimeID(t *testing.T) {
 		}},
 	}
 	s := &server{
-		portfolios:     portfolios,
+		portfolios:   portfolios,
 		controlPanel: resolver,
 		cpRuntime:    proxy,
 		jwtSecret:    []byte("s"),
@@ -607,7 +729,7 @@ func TestStatus_RuntimeStatusCallHasDeadline(t *testing.T) {
 		}},
 	}
 	s := &server{
-		portfolios:     portfolios,
+		portfolios:   portfolios,
 		controlPanel: resolver,
 		cpRuntime:    proxy,
 		jwtSecret:    []byte("s"),
@@ -655,7 +777,7 @@ func TestStatus_UnboundSessionFailsExplicitly(t *testing.T) {
 		}},
 	}
 	s := &server{
-		portfolios:     portfolios,
+		portfolios:   portfolios,
 		controlPanel: resolver,
 		jwtSecret:    []byte("s"),
 		corsOrigins:  []string{"*"},
@@ -819,7 +941,7 @@ func TestStop_UsesResolveNotEnsure(t *testing.T) {
 		err: status.Error(codes.NotFound, "no runtime"),
 	}
 	s := &server{
-		portfolios:     &fakeSessionPortfoliosClient{},
+		portfolios:   &fakeSessionPortfoliosClient{},
 		controlPanel: resolver,
 		jwtSecret:    []byte("s"),
 		corsOrigins:  []string{"*"},
@@ -854,7 +976,7 @@ func TestStop_TerminalSessionDoesNotResolveRuntime(t *testing.T) {
 		}},
 	}
 	s := &server{
-		portfolios:     portfolios,
+		portfolios:   portfolios,
 		controlPanel: resolver,
 		cpRuntime:    proxy,
 		jwtSecret:    []byte("s"),
@@ -893,7 +1015,7 @@ func TestStop_UsesSessionRuntimeID(t *testing.T) {
 		}},
 	}
 	s := &server{
-		portfolios:     portfolios,
+		portfolios:   portfolios,
 		controlPanel: resolver,
 		cpRuntime:    proxy,
 		jwtSecret:    []byte("s"),
@@ -936,7 +1058,7 @@ func TestStop_StaleRuntimeSessionMarksRecoverable(t *testing.T) {
 		}},
 	}
 	s := &server{
-		portfolios:     portfolios,
+		portfolios:   portfolios,
 		controlPanel: resolver,
 		cpRuntime:    proxy,
 		jwtSecret:    []byte("s"),
@@ -995,7 +1117,7 @@ func TestStop_RuntimeRejectsWithoutErrorMarksRecoverable(t *testing.T) {
 		}},
 	}
 	s := &server{
-		portfolios:     portfolios,
+		portfolios:   portfolios,
 		controlPanel: resolver,
 		cpRuntime:    proxy,
 		jwtSecret:    []byte("s"),

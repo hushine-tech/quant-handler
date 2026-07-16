@@ -24,6 +24,10 @@ func (c controlPanelStrategyClient) PreviewRunStrategy(ctx context.Context, in *
 	return c.rpc.PreviewRunStrategy(ctx, in, opts...)
 }
 
+func (c controlPanelStrategyClient) ValidateStrategySource(ctx context.Context, in *strategyv1.ValidateStrategySourceRequest, opts ...grpc.CallOption) (*strategyv1.ValidateStrategySourceResponse, error) {
+	return c.rpc.ValidateStrategySource(ctx, in, opts...)
+}
+
 func (c controlPanelStrategyClient) GetStrategyStatus(ctx context.Context, in *strategyv1.GetStrategyStatusRequest, opts ...grpc.CallOption) (*strategyv1.GetStrategyStatusResponse, error) {
 	return c.rpc.GetStrategyStatus(ctx, in, opts...)
 }

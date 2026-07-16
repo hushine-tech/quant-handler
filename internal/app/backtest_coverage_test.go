@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,7 @@ import (
 	errorcodes "github.com/hushine-tech/golang-lib/pkg/errors/codes"
 	"github.com/hushine-tech/quant-handler/internal/controlpanel"
 	strategyv1 "github.com/hushine-tech/strategy-service/gen/strategyv1"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -232,6 +234,67 @@ func TestDownloadAndRunCreatesJob(t *testing.T) {
 	}
 	if got := proxy.runReq.GetMaxLossClosePct(); got != 0.25 {
 		t.Fatalf("run max_loss_close_pct=%v want 0.25", got)
+	}
+}
+
+func TestDownloadAndRunJobPreservesPreviewAndRunDependencyErrors(t *testing.T) {
+	tests := []struct {
+		name       string
+		previewErr error
+		runErr     error
+		wantCode   string
+	}{
+		{
+			name:       "preview",
+			previewErr: runtimeDependencyTestError(codes.FailedPrecondition, "STRATEGY_DEPENDENCY_UNAVAILABLE"),
+			wantCode:   "STRATEGY_DEPENDENCY_UNAVAILABLE",
+		},
+		{
+			name:     "run",
+			runErr:   runtimeDependencyTestError(codes.FailedPrecondition, "STRATEGY_IMPORT_FAILED"),
+			wantCode: "STRATEGY_IMPORT_FAILED",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			proxy := &fakeControlPanelStrategyProxy{
+				previewErr: tt.previewErr,
+				runErr:     tt.runErr,
+				previewResp: &strategyv1.PreviewRunStrategyResponse{
+					Profile: "backtest", Supported: true, Ok: true,
+					DeclaredInputs: []*strategyv1.LiveStreamBinding{{
+						Exchange: "binance", Market: "perpetual_futures", Kind: "kline", Symbol: "ETHUSDT", Interval: "1m",
+					}},
+				},
+			}
+			store := newDownloadRunJobStore()
+			s := &server{
+				marketData:      &fakeMarketDataClient{coverageResp: &mdv1CoverageComplete},
+				downloadRunJobs: store,
+			}
+			job := store.create()
+			s.runDownloadAndRunJob(context.Background(), job.JobID, proxy, 6, 7, "rt-download", downloadAndRunRequest{
+				RuntimeID: "rt-download", StartTimeMS: 1779033600000, EndTimeMS: 1779037200000, Interval: "1m",
+			})
+
+			got, ok := store.get(job.JobID)
+			if !ok {
+				t.Fatal("job missing")
+			}
+			if got.Status != downloadRunError || got.Error != runtimeDependencyTestMessage {
+				t.Fatalf("job status/error = %s/%q", got.Status, got.Error)
+			}
+			if got.RuntimeError == nil || got.RuntimeError.Code != tt.wantCode || got.RuntimeError.Message != got.Error {
+				t.Fatalf("runtime_error = %+v", got.RuntimeError)
+			}
+			encoded, err := json.Marshal(got)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if contains(string(encoded), "10000") || contains(string(encoded), "StringValue") {
+				t.Fatalf("job leaks serialized transport error: %s", encoded)
+			}
+		})
 	}
 }
 

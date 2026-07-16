@@ -124,6 +124,7 @@ func Run(cfg *config.Config) error {
 	mux.HandleFunc("/api/venues", s.cors(s.auth(http.HandlerFunc(s.handleVenues))).ServeHTTP)
 	mux.HandleFunc("/api/venues/", s.cors(s.auth(http.HandlerFunc(s.handleVenueByID))).ServeHTTP)
 	mux.HandleFunc("/api/strategy-sessions/", s.cors(s.auth(http.HandlerFunc(s.handleStrategySession))).ServeHTTP)
+	mux.HandleFunc("/api/strategy/validate-source", s.cors(s.auth(http.HandlerFunc(s.handleValidateStrategySource))).ServeHTTP)
 	mux.HandleFunc("/api/strategy/download-and-run-jobs/", s.cors(s.auth(http.HandlerFunc(s.handleDownloadRunJobStatus))).ServeHTTP)
 	mux.HandleFunc("/api/strategies", s.cors(s.auth(http.HandlerFunc(s.handleStrategiesCollection))).ServeHTTP)
 	mux.HandleFunc("/api/strategies/", s.cors(s.auth(http.HandlerFunc(s.handleStrategiesByID))).ServeHTTP)

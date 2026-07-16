@@ -35,15 +35,16 @@ type downloadAndRunRequest struct {
 }
 
 type downloadRunJob struct {
-	JobID     string                  `json:"job_id"`
-	Status    downloadRunJobStatus    `json:"status"`
-	Progress  float64                 `json:"progress"`
-	Message   string                  `json:"message,omitempty"`
-	Requests  []marketDataRequestJSON `json:"requests,omitempty"`
-	SessionID string                  `json:"session_id,omitempty"`
-	Error     string                  `json:"error,omitempty"`
-	CreatedAt time.Time               `json:"created_at"`
-	UpdatedAt time.Time               `json:"updated_at"`
+	JobID        string                      `json:"job_id"`
+	Status       downloadRunJobStatus        `json:"status"`
+	Progress     float64                     `json:"progress"`
+	Message      string                      `json:"message,omitempty"`
+	Requests     []marketDataRequestJSON     `json:"requests,omitempty"`
+	SessionID    string                      `json:"session_id,omitempty"`
+	Error        string                      `json:"error,omitempty"`
+	RuntimeError *runtimeDependencyHTTPError `json:"runtime_error,omitempty"`
+	CreatedAt    time.Time                   `json:"created_at"`
+	UpdatedAt    time.Time                   `json:"updated_at"`
 }
 
 type downloadRunJobStore struct {
@@ -84,6 +85,7 @@ func (s *downloadRunJobStore) get(jobID string) (downloadRunJob, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	job, ok := s.jobs[jobID]
+	job.RuntimeError = cloneRuntimeDependencyHTTPError(job.RuntimeError)
 	return job, ok
 }
 
@@ -173,7 +175,13 @@ func (s *server) runDownloadAndRunJob(ctx context.Context, jobID string, cli str
 	fail := func(err error) {
 		store.update(jobID, func(job *downloadRunJob) {
 			job.Status = downloadRunError
+			if runtimeErr, ok := runtimeDependencyErrorFromGRPC(err); ok {
+				job.Error = runtimeErr.Message
+				job.RuntimeError = cloneRuntimeDependencyHTTPError(runtimeErr)
+				return
+			}
 			job.Error = err.Error()
+			job.RuntimeError = nil
 		})
 	}
 	store.update(jobID, func(job *downloadRunJob) {
@@ -185,7 +193,7 @@ func (s *server) runDownloadAndRunJob(ctx context.Context, jobID string, cli str
 	defer cancel()
 
 	preview, err := cli.PreviewRunStrategy(ctx, &strategyv1.PreviewRunStrategyRequest{
-		PortfolioId:       portfolioID,
+		PortfolioId:     portfolioID,
 		StrategyPath:    body.StrategyPath,
 		StartTimeMs:     body.StartTimeMS,
 		EndTimeMs:       body.EndTimeMS,
@@ -226,7 +234,7 @@ func (s *server) runDownloadAndRunJob(ctx context.Context, jobID string, cli str
 	})
 
 	run, err := cli.RunStrategy(ctx, &strategyv1.RunStrategyRequest{
-		PortfolioId:       portfolioID,
+		PortfolioId:     portfolioID,
 		StrategyPath:    body.StrategyPath,
 		Interval:        body.Interval,
 		StartTimeMs:     body.StartTimeMS,
@@ -246,6 +254,7 @@ func (s *server) runDownloadAndRunJob(ctx context.Context, jobID string, cli str
 		job.Message = "backtest session started"
 		job.SessionID = run.GetSessionId()
 		job.Error = ""
+		job.RuntimeError = nil
 	})
 }
 
@@ -267,7 +276,7 @@ func (s *server) createMissingCoverageRequests(ctx context.Context, uid int64, p
 		for _, missing := range coverage.GetMissingSegments() {
 			resp, err := s.marketData.CreateMarketDataRequest(ctx, &mdv1.CreateMarketDataRequestRequest{
 				UserId:            uid,
-				PortfolioId:         portfolioID,
+				PortfolioId:       portfolioID,
 				Key:               key,
 				Scope:             "historical",
 				NeedsLiveDelivery: false,

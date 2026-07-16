@@ -221,6 +221,38 @@ func TestPreviewRunStrategy_PropagatesFailedPreconditionFromBackend(t *testing.T
 	}
 }
 
+func TestPreviewRunStrategyEmitsStructuredRuntimeDependencyError(t *testing.T) {
+	proxy := &fakeControlPanelStrategyProxy{
+		previewErr: runtimeDependencyTestError(codes.FailedPrecondition, "STRATEGY_DEPENDENCY_UNAVAILABLE"),
+	}
+	s := &server{
+		controlPanel: &fakeResolver{
+			resp:        controlpanel.Route{RuntimeID: "rt-preview"},
+			runtimeResp: controlpanel.Runtime{RuntimeID: "rt-preview", Role: "executor"},
+		},
+		cpRuntime: proxy,
+	}
+	req := withUID(httptest.NewRequest(http.MethodPost,
+		"/api/portfolios/7/preview-run-strategy", bytes.NewBufferString(`{"runtime_id":"rt-preview"}`)), 17)
+	rec := httptest.NewRecorder()
+
+	s.handlePreviewRunStrategy(rec, req, 7)
+
+	if rec.Code != http.StatusPreconditionFailed {
+		t.Fatalf("status = %d, want 412; body=%s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Error        string                      `json:"error"`
+		RuntimeError *runtimeDependencyHTTPError `json:"runtime_error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Error != runtimeDependencyTestMessage || body.RuntimeError == nil || body.RuntimeError.Module != "google.cloud" {
+		t.Fatalf("response = %+v", body)
+	}
+}
+
 func TestPreviewRunStrategy_RejectsGETMethod(t *testing.T) {
 	proxy := &fakeControlPanelStrategyProxy{}
 	s := &server{
