@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -22,6 +23,7 @@ import (
 
 type fakeControlPanelStrategyProxy struct {
 	controlpanelv1.ControlPanelServiceClient
+	mu                      sync.RWMutex
 	runReq                  *strategyv1.RunStrategyRequest
 	runResp                 *strategyv1.RunStrategyResponse
 	runErr                  error
@@ -47,6 +49,8 @@ type fakeControlPanelStrategyProxy struct {
 }
 
 func (f *fakeControlPanelStrategyProxy) RunStrategy(ctx context.Context, in *strategyv1.RunStrategyRequest, _ ...grpc.CallOption) (*strategyv1.RunStrategyResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.runReq = in
 	if deadline, ok := ctx.Deadline(); ok {
 		f.runDeadlineSet = true
@@ -62,6 +66,8 @@ func (f *fakeControlPanelStrategyProxy) RunStrategy(ctx context.Context, in *str
 }
 
 func (f *fakeControlPanelStrategyProxy) GetStrategyStatus(ctx context.Context, in *strategyv1.GetStrategyStatusRequest, _ ...grpc.CallOption) (*strategyv1.GetStrategyStatusResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.statusReq = in
 	if deadline, ok := ctx.Deadline(); ok {
 		f.statusDeadlineSet = true
@@ -78,6 +84,8 @@ func (f *fakeControlPanelStrategyProxy) GetStrategyStatus(ctx context.Context, i
 }
 
 func (f *fakeControlPanelStrategyProxy) StopStrategy(ctx context.Context, in *strategyv1.StopStrategyRequest, _ ...grpc.CallOption) (*strategyv1.StopStrategyResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.stopReq = in
 	if f.stopErr != nil {
 		return nil, f.stopErr
@@ -89,6 +97,8 @@ func (f *fakeControlPanelStrategyProxy) StopStrategy(ctx context.Context, in *st
 }
 
 func (f *fakeControlPanelStrategyProxy) PreviewRunStrategy(ctx context.Context, in *strategyv1.PreviewRunStrategyRequest, _ ...grpc.CallOption) (*strategyv1.PreviewRunStrategyResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.previewReq = in
 	if deadline, ok := ctx.Deadline(); ok {
 		f.previewDeadlineSet = true
@@ -104,6 +114,8 @@ func (f *fakeControlPanelStrategyProxy) PreviewRunStrategy(ctx context.Context, 
 }
 
 func (f *fakeControlPanelStrategyProxy) ValidateStrategySource(_ context.Context, in *strategyv1.ValidateStrategySourceRequest, _ ...grpc.CallOption) (*strategyv1.ValidateStrategySourceResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.validateReq = in
 	if f.validateErr != nil {
 		return nil, f.validateErr
@@ -112,6 +124,18 @@ func (f *fakeControlPanelStrategyProxy) ValidateStrategySource(_ context.Context
 		return f.validateResp, nil
 	}
 	return &strategyv1.ValidateStrategySourceResponse{Ok: true}, nil
+}
+
+func (f *fakeControlPanelStrategyProxy) strategyRequests() (*strategyv1.PreviewRunStrategyRequest, *strategyv1.RunStrategyRequest) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.previewReq, f.runReq
+}
+
+func (f *fakeControlPanelStrategyProxy) runRequest() *strategyv1.RunStrategyRequest {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.runReq
 }
 
 func TestValidateStrategySourceRoutesOnlyByExplicitRuntimeID(t *testing.T) {
@@ -135,11 +159,14 @@ func TestValidateStrategySourceRoutesOnlyByExplicitRuntimeID(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
 	}
-	if resolver.resolveByIDCalls != 1 || resolver.ensureCalls != 0 {
-		t.Fatalf("route calls resolve_by_id/ensure = %d/%d, want 1/0", resolver.resolveByIDCalls, resolver.ensureCalls)
+	if resolver.getRuntimeCalls != 1 || resolver.resolveByIDCalls != 1 || resolver.ensureCalls != 0 {
+		t.Fatalf("route calls get_runtime/resolve_by_id/ensure = %d/%d/%d, want 1/1/0", resolver.getRuntimeCalls, resolver.resolveByIDCalls, resolver.ensureCalls)
 	}
 	if resolver.gotUserID != 42 || resolver.gotRuntimeID != "rt-validate" {
 		t.Fatalf("resolved user/runtime = %d/%q, want 42/rt-validate", resolver.gotUserID, resolver.gotRuntimeID)
+	}
+	if resolver.gotRole != "executor" || resolver.gotEnvironment != 0 {
+		t.Fatalf("resolved role/environment = %q/%d, want executor/0", resolver.gotRole, resolver.gotEnvironment)
 	}
 	if proxy.validateReq == nil || proxy.validateReq.GetUserId() != 42 || proxy.validateReq.GetRuntimeId() != "rt-validate" || proxy.validateReq.GetSource() != "import google.cloud" {
 		t.Fatalf("validate request = %+v", proxy.validateReq)
@@ -867,7 +894,7 @@ func TestResolveStrategyRuntime_EnsureRequiresRuntimeID(t *testing.T) {
 		controlPanel: resolver,
 	}
 	rec := httptest.NewRecorder()
-	cli, _ := s.resolveStrategyRuntime(context.Background(), rec, 42, routeEnsure, "", defaultStrategyRoutePolicy())
+	cli, _ := s.resolveStrategyRuntime(context.Background(), rec, 42, routeEnsure, "", strategyRoutePolicy{role: "executor", environment: 0})
 	if cli != nil {
 		t.Fatal("client returned without runtime_id")
 	}
@@ -887,7 +914,7 @@ func TestResolveStrategyRuntime_RouteByIDErrorDoesNotProvisionHosted(t *testing.
 		controlPanel: resolver,
 	}
 	rec := httptest.NewRecorder()
-	cli, _ := s.resolveStrategyRuntime(context.Background(), rec, 42, routeEnsure, "rt_unhealthy", defaultStrategyRoutePolicy())
+	cli, _ := s.resolveStrategyRuntime(context.Background(), rec, 42, routeEnsure, "rt_unhealthy", strategyRoutePolicy{role: "executor", environment: 0})
 	if cli != nil {
 		t.Fatal("client returned; route error must fail closed")
 	}

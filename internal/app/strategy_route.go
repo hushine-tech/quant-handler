@@ -54,10 +54,6 @@ type strategyRoutePolicy struct {
 	environment int
 }
 
-func defaultStrategyRoutePolicy() strategyRoutePolicy {
-	return strategyRoutePolicy{role: "executor", environment: -1}
-}
-
 func strategyRoutePolicyForEnvironment(environment int32) strategyRoutePolicy {
 	if environment == 0 {
 		return strategyRoutePolicy{environment: 0}

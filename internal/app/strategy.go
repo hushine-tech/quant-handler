@@ -264,7 +264,11 @@ func (s *server) handleValidateStrategySource(w http.ResponseWriter, r *http.Req
 		writeErr(w, http.StatusUnauthorized, "missing user context")
 		return
 	}
-	cli, selectedRuntimeID, ok := s.strategyClient(r.Context(), w, uid, routeEnsure, runtimeID, defaultStrategyRoutePolicy())
+	policy, ok := s.strategyRoutePolicyForSelectedRuntime(r.Context(), w, uid, runtimeID, 0)
+	if !ok {
+		return
+	}
+	cli, selectedRuntimeID, ok := s.strategyClient(r.Context(), w, uid, routeEnsure, runtimeID, policy)
 	if !ok {
 		return
 	}

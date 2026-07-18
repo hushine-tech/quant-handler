@@ -220,19 +220,22 @@ func TestDownloadAndRunCreatesJob(t *testing.T) {
 		t.Fatal("job_id is empty")
 	}
 	deadline := time.Now().Add(2 * time.Second)
+	var previewReq *strategyv1.PreviewRunStrategyRequest
+	var runReq *strategyv1.RunStrategyRequest
 	for time.Now().Before(deadline) {
-		if proxy.runReq != nil {
+		previewReq, runReq = proxy.strategyRequests()
+		if runReq != nil {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	if proxy.previewReq == nil || proxy.runReq == nil {
-		t.Fatalf("strategy proxy requests not completed: preview=%v run=%v", proxy.previewReq != nil, proxy.runReq != nil)
+	if previewReq == nil || runReq == nil {
+		t.Fatalf("strategy proxy requests not completed: preview=%v run=%v", previewReq != nil, runReq != nil)
 	}
-	if got := proxy.previewReq.GetMaxLossClosePct(); got != 0.25 {
+	if got := previewReq.GetMaxLossClosePct(); got != 0.25 {
 		t.Fatalf("preview max_loss_close_pct=%v want 0.25", got)
 	}
-	if got := proxy.runReq.GetMaxLossClosePct(); got != 0.25 {
+	if got := runReq.GetMaxLossClosePct(); got != 0.25 {
 		t.Fatalf("run max_loss_close_pct=%v want 0.25", got)
 	}
 }
@@ -400,7 +403,7 @@ func TestDownloadAndRunJobStatusSurfacesHistoricalRequestState(t *testing.T) {
 
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		if proxy.runReq != nil {
+		if proxy.runRequest() != nil {
 			return
 		}
 		time.Sleep(10 * time.Millisecond)
