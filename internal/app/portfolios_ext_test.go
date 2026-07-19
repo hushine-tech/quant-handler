@@ -20,6 +20,59 @@ type fakeWalletPortfoliosClient struct {
 	err  error
 }
 
+type fakeSymbolCatalogClient struct {
+	portfoliov1.PortfolioServiceClient
+
+	response *portfoliov1.ListSymbolsResponse
+	request  *portfoliov1.ListSymbolsRequest
+}
+
+func (f *fakeSymbolCatalogClient) ListSymbols(_ context.Context, request *portfoliov1.ListSymbolsRequest, _ ...grpc.CallOption) (*portfoliov1.ListSymbolsResponse, error) {
+	f.request = request
+	return f.response, nil
+}
+
+func TestSymbolsEndpointPreservesCanonicalAssetMetadata(t *testing.T) {
+	fake := &fakeSymbolCatalogClient{response: &portfoliov1.ListSymbolsResponse{
+		Symbols: []string{"BTCUSDT"},
+		Entries: []*portfoliov1.SymbolCatalogEntry{{
+			Symbol: "BTCUSDT", BaseAsset: "BTC", QuoteAsset: "USDT", Status: "TRADING", SpotTradingAllowed: true,
+		}},
+	}}
+	s := &server{portfolios: fake}
+	req := withUID(httptest.NewRequest(http.MethodGet, "/api/symbols?market=spot&q=btc&limit=7", nil), 42)
+	rec := httptest.NewRecorder()
+
+	s.handleSymbols(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if fake.request == nil || fake.request.GetMarket() != "spot" || fake.request.GetQuery() != "btc" || fake.request.GetLimit() != 7 {
+		t.Fatalf("request=%#v", fake.request)
+	}
+	var body struct {
+		Symbols []string `json:"symbols"`
+		Entries []struct {
+			Symbol             string `json:"symbol"`
+			BaseAsset          string `json:"base_asset"`
+			QuoteAsset         string `json:"quote_asset"`
+			Status             string `json:"status"`
+			SpotTradingAllowed bool   `json:"spot_trading_allowed"`
+		} `json:"entries"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Symbols) != 1 || body.Symbols[0] != "BTCUSDT" || len(body.Entries) != 1 {
+		t.Fatalf("response=%#v body=%s", body, rec.Body.String())
+	}
+	entry := body.Entries[0]
+	if entry.Symbol != "BTCUSDT" || entry.BaseAsset != "BTC" || entry.QuoteAsset != "USDT" || entry.Status != "TRADING" || !entry.SpotTradingAllowed {
+		t.Fatalf("entry=%#v", entry)
+	}
+}
+
 func (f *fakeWalletPortfoliosClient) GetPortfolioSnapshot(_ context.Context, _ *portfoliov1.GetPortfolioSnapshotRequest, _ ...grpc.CallOption) (*portfoliov1.GetPortfolioSnapshotResponse, error) {
 	if f.err != nil {
 		return nil, f.err
@@ -43,18 +96,59 @@ func (f *fakePortfolioSnapshotClient) GetPortfolioSnapshot(_ context.Context, re
 	return f.resp, nil
 }
 
+func TestPortfolioSnapshotEndpointForwardsAuthoritativeRouteQualifiedSymbols(t *testing.T) {
+	fake := &fakePortfolioSnapshotClient{resp: &portfoliov1.GetPortfolioSnapshotResponse{Snapshot: &portfoliov1.PortfolioSnapshot{
+		PortfolioId: 42, UserId: 7,
+	}}}
+	s := &server{portfolios: fake}
+	req := withUID(httptest.NewRequest(http.MethodGet,
+		"/api/portfolios/42/portfolio-snapshot?required_symbol=binance:spot:BTCUSDT&required_symbol=binance:spot:ETHUSDT", nil), 7)
+	rec := httptest.NewRecorder()
+
+	s.getPortfolioPortfolioSnapshot(rec, req, 42)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if fake.lastReq == nil || len(fake.lastReq.GetRequiredSymbols()) != 2 {
+		t.Fatalf("snapshot request=%#v", fake.lastReq)
+	}
+	first, second := fake.lastReq.GetRequiredSymbols()[0], fake.lastReq.GetRequiredSymbols()[1]
+	if first.GetExchange() != 1 || first.GetMarket() != 1 || first.GetSymbol() != "BTCUSDT" ||
+		second.GetExchange() != 1 || second.GetMarket() != 1 || second.GetSymbol() != "ETHUSDT" {
+		t.Fatalf("required symbols=%+v", fake.lastReq.GetRequiredSymbols())
+	}
+}
+
+func TestPortfolioSnapshotEndpointRejectsMalformedRequiredSymbolBeforeCore(t *testing.T) {
+	fake := &fakePortfolioSnapshotClient{}
+	s := &server{portfolios: fake}
+	req := withUID(httptest.NewRequest(http.MethodGet,
+		"/api/portfolios/42/portfolio-snapshot?required_symbol=BTCUSDT", nil), 7)
+	rec := httptest.NewRecorder()
+
+	s.getPortfolioPortfolioSnapshot(rec, req, 42)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d want=400 body=%s", rec.Code, rec.Body.String())
+	}
+	if fake.lastReq != nil {
+		t.Fatalf("malformed symbol reached core: %#v", fake.lastReq)
+	}
+}
+
 type fakeCreatePortfolioClient struct {
 	portfoliov1.PortfolioServiceClient
 
-	createPortfolioReq  *portfoliov1.CreatePortfolioRequest
-	createVenueReq    *portfoliov1.CreateVenueRequest
-	updateSnapshotReq *portfoliov1.UpdatePortfolioSnapshotRequest
+	createPortfolioReq *portfoliov1.CreatePortfolioRequest
+	createVenueReq     *portfoliov1.CreateVenueRequest
+	updateSnapshotReq  *portfoliov1.UpdatePortfolioSnapshotRequest
 }
 
 func (f *fakeCreatePortfolioClient) CreatePortfolio(_ context.Context, req *portfoliov1.CreatePortfolioRequest, _ ...grpc.CallOption) (*portfoliov1.CreatePortfolioResponse, error) {
 	f.createPortfolioReq = req
 	return &portfoliov1.CreatePortfolioResponse{
-		PortfolioId:   42,
+		PortfolioId: 42,
 		Name:        req.GetName(),
 		Description: req.GetDescription(),
 		Environment: req.GetEnvironment(),
@@ -190,7 +284,7 @@ func TestPortfolioSnapshotEndpointReturnsVenues(t *testing.T) {
 	fake := &fakePortfolioSnapshotClient{
 		resp: &portfoliov1.GetPortfolioSnapshotResponse{
 			Snapshot: &portfoliov1.PortfolioSnapshot{
-				PortfolioId:        42,
+				PortfolioId:      42,
 				UserId:           7,
 				TotalValue:       2500,
 				WalletBalance:    2000,
@@ -239,7 +333,7 @@ func TestPortfolioSnapshotEndpointReturnsVenues(t *testing.T) {
 		t.Fatalf("snapshot request = %+v", fake.lastReq)
 	}
 	var body struct {
-		PortfolioID        int64   `json:"portfolio_id"`
+		PortfolioID      int64   `json:"portfolio_id"`
 		TotalValue       float64 `json:"total_value"`
 		WalletBalance    float64 `json:"wallet_balance"`
 		AvailableBalance float64 `json:"available_balance"`
@@ -287,7 +381,7 @@ func TestPortfolioSnapshotWalletIncludesMarginBalanceFields(t *testing.T) {
 		resp: &portfoliov1.GetPortfolioSnapshotResponse{
 			Snapshot: &portfoliov1.PortfolioSnapshot{
 				PortfolioId: 42,
-				UserId:    7,
+				UserId:      7,
 				Wallet: &portfoliov1.PortfolioWalletState{
 					TotalValue:            20759.4682,
 					Environment:           2,
@@ -326,7 +420,7 @@ func TestPortfolioSnapshotWalletIncludesMarginBalanceFields(t *testing.T) {
 		},
 	}
 	s := &server{
-		portfolios:    fake,
+		portfolios:  fake,
 		jwtSecret:   []byte("secret"),
 		corsOrigins: []string{"*"},
 	}
@@ -395,6 +489,167 @@ func float64Ptr(v float64) *float64 {
 	return &x
 }
 
+func TestProtoSpotToJSONEmitsCanonicalExactAssetShape(t *testing.T) {
+	price := 42000.5
+	encoded, err := json.Marshal(protoSpotToJSON(&portfoliov1.SpotWallet{Assets: []*portfoliov1.SpotAsset{
+		{Asset: "USDT", Free: 1000, FreeDecimal: "1000.00000000", LockedDecimal: "0.00000000"},
+		{Asset: "BTC", Free: 0.01, FreeDecimal: "0.01000000", Locked: 0.001, LockedDecimal: "0.00100000", AvgEntryPrice: 40000, Price: &price},
+	}}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body struct {
+		Assets []struct {
+			Asset         string `json:"asset"`
+			Free          string `json:"free"`
+			Locked        string `json:"locked"`
+			AvgEntryPrice string `json:"avg_entry_price"`
+			Price         string `json:"price"`
+		} `json:"assets"`
+	}
+	if err := json.Unmarshal(encoded, &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Assets) != 2 || body.Assets[0].Asset != "USDT" || body.Assets[0].Free != "1000.00000000" || body.Assets[0].Locked != "0.00000000" {
+		t.Fatalf("USDT asset=%#v JSON=%s", body.Assets, encoded)
+	}
+	btc := body.Assets[1]
+	if btc.Asset != "BTC" || btc.Free != "0.01000000" || btc.Locked != "0.00100000" || btc.AvgEntryPrice != "40000" || btc.Price != "42000.5" {
+		t.Fatalf("BTC asset=%#v JSON=%s", btc, encoded)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(encoded, &raw); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := raw["free"]; exists {
+		t.Fatalf("legacy wallet free leaked: %s", encoded)
+	}
+	if bytes.Contains(encoded, []byte(`"symbol"`)) || bytes.Contains(encoded, []byte(`"qty"`)) {
+		t.Fatalf("legacy asset fields leaked: %s", encoded)
+	}
+}
+
+func TestProtoSpotToJSONReadsLegacyCoreShapeButWritesCanonicalAssets(t *testing.T) {
+	encoded, err := json.Marshal(protoSpotToJSON(&portfoliov1.SpotWallet{
+		Free: 100, Locked: 2,
+		Assets: []*portfoliov1.SpotAsset{{Symbol: "BTC", Qty: 0.25, Locked: 0.01}},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body struct {
+		Assets []spotAssetResponse `json:"assets"`
+	}
+	if err := json.Unmarshal(encoded, &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Assets) != 2 {
+		t.Fatalf("assets=%#v JSON=%s", body.Assets, encoded)
+	}
+	if body.Assets[0] != (spotAssetResponse{Asset: "USDT", Free: "100", Locked: "2"}) {
+		t.Fatalf("legacy USDT=%#v", body.Assets[0])
+	}
+	if body.Assets[1] != (spotAssetResponse{Asset: "BTC", Free: "0.25", Locked: "0.01"}) {
+		t.Fatalf("legacy BTC=%#v", body.Assets[1])
+	}
+}
+
+func TestVenueSnapshotJSONExposesCanonicalSpotSymbolMetadata(t *testing.T) {
+	encoded, err := json.Marshal(venueSnapshotToJSON(&portfoliov1.VenueSnapshot{
+		VenueId: 88,
+		SpotSymbols: []*portfoliov1.SpotSymbolMetadata{{
+			Symbol: "BTCUSDT", BaseAsset: "BTC", QuoteAsset: "USDT", Status: "TRADING",
+			BaseAssetPrecision: 8, QuoteAssetPrecision: 8, SpotTradingAllowed: true,
+			PermissionSets: []*portfoliov1.SpotSymbolPermissionSet{{Alternatives: []string{"SPOT"}}},
+			OrderTypes:     []string{"LIMIT", "MARKET"},
+			Filters: []*portfoliov1.SpotSymbolFilter{{
+				FilterType: "LOT_SIZE", MinQty: "0.00001000", MaxQty: "9000.00000000", StepSize: "0.00001000",
+			}},
+			SnapshotTimeMs: 123456789,
+		}},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body struct {
+		SpotSymbols []struct {
+			Symbol              string   `json:"symbol"`
+			BaseAsset           string   `json:"base_asset"`
+			QuoteAsset          string   `json:"quote_asset"`
+			Status              string   `json:"status"`
+			BaseAssetPrecision  int32    `json:"base_asset_precision"`
+			QuoteAssetPrecision int32    `json:"quote_asset_precision"`
+			SpotTradingAllowed  bool     `json:"spot_trading_allowed"`
+			OrderTypes          []string `json:"order_types"`
+			PermissionSets      []struct {
+				Alternatives []string `json:"alternatives"`
+			} `json:"permission_sets"`
+			Filters []struct {
+				FilterType string `json:"filter_type"`
+				MinQty     string `json:"min_qty"`
+				MaxQty     string `json:"max_qty"`
+				StepSize   string `json:"step_size"`
+			} `json:"filters"`
+			SnapshotTimeMs int64 `json:"snapshot_time_ms"`
+		} `json:"spot_symbols"`
+	}
+	if err := json.Unmarshal(encoded, &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.SpotSymbols) != 1 {
+		t.Fatalf("spot symbols=%#v JSON=%s", body.SpotSymbols, encoded)
+	}
+	metadata := body.SpotSymbols[0]
+	if metadata.Symbol != "BTCUSDT" || metadata.BaseAsset != "BTC" || metadata.QuoteAsset != "USDT" || metadata.Status != "TRADING" ||
+		metadata.BaseAssetPrecision != 8 || metadata.QuoteAssetPrecision != 8 || !metadata.SpotTradingAllowed || metadata.SnapshotTimeMs != 123456789 {
+		t.Fatalf("metadata=%#v JSON=%s", metadata, encoded)
+	}
+	if len(metadata.OrderTypes) != 2 || len(metadata.PermissionSets) != 1 || metadata.PermissionSets[0].Alternatives[0] != "SPOT" ||
+		len(metadata.Filters) != 1 || metadata.Filters[0].FilterType != "LOT_SIZE" || metadata.Filters[0].MinQty != "0.00001000" ||
+		metadata.Filters[0].MaxQty != "9000.00000000" || metadata.Filters[0].StepSize != "0.00001000" {
+		t.Fatalf("metadata contract=%#v JSON=%s", metadata, encoded)
+	}
+}
+
+func TestPortfolioSnapshotValuationDoesNotInventSpotSymbolWithoutMetadataMapping(t *testing.T) {
+	price := 50000.0
+	wallet := &portfoliov1.PortfolioWalletState{
+		Environment: 0,
+		TotalValue:  100,
+		Spot: &portfoliov1.SpotWallet{Assets: []*portfoliov1.SpotAsset{
+			{Asset: "USDT", Free: 100, FreeDecimal: "100", LockedDecimal: "0"},
+			{Asset: "BTC", Free: 0.1, FreeDecimal: "0.1", LockedDecimal: "0", Price: &price},
+		}},
+	}
+	snapshot := &portfoliov1.PortfolioSnapshot{
+		Wallet: wallet,
+		Venues: []*portfoliov1.VenueSnapshot{{
+			VenueId: 7,
+			Wallet:  wallet,
+			SpotSymbols: []*portfoliov1.SpotSymbolMetadata{{
+				Symbol: "ETHUSDT", BaseAsset: "ETH", QuoteAsset: "USDT",
+			}},
+		}},
+	}
+
+	body := portfolioSnapshotToJSON(snapshot)
+	items := body["items"].([]portfolioPortfolioSnapshotItemJSON)
+	display := items[0].Wallet["display"].(map[string]any)
+	if got := display["spot_estimated_value"]; got != float64(100) {
+		t.Fatalf("unmapped BTC was valued without metadata: got=%v wallet=%#v", got, items[0].Wallet)
+	}
+
+	snapshot.Venues[0].SpotSymbols = []*portfoliov1.SpotSymbolMetadata{{
+		Symbol: "BTCUSDT", BaseAsset: "BTC", QuoteAsset: "USDT",
+	}}
+	body = portfolioSnapshotToJSON(snapshot)
+	items = body["items"].([]portfolioPortfolioSnapshotItemJSON)
+	display = items[0].Wallet["display"].(map[string]any)
+	if got := display["spot_estimated_value"]; got != float64(5100) {
+		t.Fatalf("metadata-mapped BTC was not valued: got=%v wallet=%#v", got, items[0].Wallet)
+	}
+}
+
 // ── canonical-wallet-display-boundary (task 3.3) ───────────────────────────
 //
 // Prove the gateway response structurally separates canonical runtime values
@@ -407,7 +662,7 @@ func TestPortfolioSnapshotWalletStructurallySeparatesCanonicalFromDisplay(t *tes
 		resp: &portfoliov1.GetPortfolioSnapshotResponse{
 			Snapshot: &portfoliov1.PortfolioSnapshot{
 				PortfolioId: 42,
-				UserId:    7,
+				UserId:      7,
 				Wallet: &portfoliov1.PortfolioWalletState{
 					TotalValue:            20759.4682,
 					Environment:           2,

@@ -2,6 +2,8 @@ package app
 
 import (
 	"encoding/json"
+	"math"
+	"math/big"
 	"net/http"
 	"strconv"
 	"strings"
@@ -12,20 +14,107 @@ import (
 )
 
 type orderHistoryFilters struct {
-	userID     int64
-	portfolioID  int64
-	strategyID int64
-	sessionID  string
-	intentID   string
-	attemptID  string
-	orderID    string
-	limit      int32
-	offset     int32
+	userID      int64
+	portfolioID int64
+	strategyID  int64
+	sessionID   string
+	intentID    string
+	attemptID   string
+	orderID     string
+	limit       int32
+	offset      int32
 }
 
 type riskReasonJSON struct {
 	Code    string `json:"code,omitempty"`
 	Message string `json:"message,omitempty"`
+}
+
+func exactDecimalOrLegacy(exact string, legacy float64) string {
+	if strings.TrimSpace(exact) != "" {
+		return exact
+	}
+	return strconv.FormatFloat(legacy, 'f', -1, 64)
+}
+
+func optionalExactDecimalOrLegacy(exact *string, legacy float64) string {
+	if exact != nil && strings.TrimSpace(*exact) != "" {
+		return *exact
+	}
+	if legacy == 0 {
+		return ""
+	}
+	return strconv.FormatFloat(legacy, 'f', -1, 64)
+}
+
+func exactQuoteQtyOrProduct(exact, exactQty string, qty float64, exactPrice string, price float64) string {
+	if strings.TrimSpace(exact) != "" {
+		return exact
+	}
+	if math.IsNaN(qty) || math.IsInf(qty, 0) || math.IsNaN(price) || math.IsInf(price, 0) {
+		return ""
+	}
+	qtyText := strings.TrimSpace(exactQty)
+	if qtyText == "" {
+		qtyText = strconv.FormatFloat(qty, 'f', -1, 64)
+	}
+	priceText := strings.TrimSpace(exactPrice)
+	if priceText == "" {
+		priceText = strconv.FormatFloat(price, 'f', -1, 64)
+	}
+	qtyCoefficient, qtyScale, ok := decimalCoefficient(qtyText)
+	if !ok {
+		return ""
+	}
+	priceCoefficient, priceScale, ok := decimalCoefficient(priceText)
+	if !ok {
+		return ""
+	}
+	product := new(big.Int).Mul(qtyCoefficient, priceCoefficient)
+	return formatDecimalCoefficient(product, qtyScale+priceScale)
+}
+
+func decimalCoefficient(raw string) (*big.Int, int, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, 0, false
+	}
+	sign := ""
+	if raw[0] == '-' || raw[0] == '+' {
+		sign, raw = raw[:1], raw[1:]
+	}
+	parts := strings.Split(raw, ".")
+	if len(parts) > 2 || parts[0] == "" {
+		return nil, 0, false
+	}
+	scale := 0
+	digits := parts[0]
+	if len(parts) == 2 {
+		scale = len(parts[1])
+		digits += parts[1]
+	}
+	coefficient, ok := new(big.Int).SetString(sign+digits, 10)
+	return coefficient, scale, ok
+}
+
+func formatDecimalCoefficient(coefficient *big.Int, scale int) string {
+	if coefficient == nil || coefficient.Sign() == 0 {
+		return "0"
+	}
+	negative := coefficient.Sign() < 0
+	abs := new(big.Int).Abs(new(big.Int).Set(coefficient)).String()
+	if scale > 0 {
+		if len(abs) <= scale {
+			abs = strings.Repeat("0", scale-len(abs)+1) + abs
+		}
+		split := len(abs) - scale
+		abs = abs[:split] + "." + abs[split:]
+		abs = strings.TrimRight(strings.TrimRight(abs, "0"), ".")
+	}
+	if negative {
+		return "-" + abs
+	}
+	return abs
 }
 
 func (s *server) handleOrders(w http.ResponseWriter, r *http.Request) {
@@ -53,12 +142,12 @@ func (s *server) handleOrderIntents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp, err := s.orders.QueryOrderIntents(r.Context(), &orderv1.QueryOrderIntentsRequest{
-		PortfolioId:  filters.portfolioID,
-		StrategyId: filters.strategyID,
-		SessionId:  filters.sessionID,
-		Limit:      filters.limit,
-		Offset:     filters.offset,
-		UserId:     filters.userID,
+		PortfolioId: filters.portfolioID,
+		StrategyId:  filters.strategyID,
+		SessionId:   filters.sessionID,
+		Limit:       filters.limit,
+		Offset:      filters.offset,
+		UserId:      filters.userID,
 	})
 	if err != nil {
 		code, msg := grpcToHTTP(err)
@@ -67,53 +156,61 @@ func (s *server) handleOrderIntents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type intentJSON struct {
-		Time           string  `json:"time"`
-		IntentID       string  `json:"intent_id"`
-		PortfolioID      int64   `json:"portfolio_id"`
-		Symbol         string  `json:"symbol"`
-		Side           string  `json:"side"`
-		RequestedQty   float64 `json:"requested_qty"`
-		RequestedPrice float64 `json:"requested_price"`
-		StrategyID     int64   `json:"strategy_id"`
-		Market         string  `json:"market"`
-		MarketLabel    string  `json:"market_label"`
-		VenueID        int64   `json:"venue_id,omitempty"`
-		Exchange       int32   `json:"exchange"`
-		ExchangeLabel  string  `json:"exchange_label"`
-		PositionSide   string  `json:"position_side"`
-		SessionID      string  `json:"session_id,omitempty"`
-		Status         string  `json:"status,omitempty"`
-		RejectCode     string  `json:"reject_code,omitempty"`
-		RejectMessage  string  `json:"reject_message,omitempty"`
-		PostOnly       bool    `json:"post_only"`
-		GoodTillDate   string  `json:"good_till_date,omitempty"`
-		ReduceOnly     bool    `json:"reduce_only"`
+		Time                  string  `json:"time"`
+		IntentID              string  `json:"intent_id"`
+		PortfolioID           int64   `json:"portfolio_id"`
+		Symbol                string  `json:"symbol"`
+		Side                  string  `json:"side"`
+		RequestedQty          float64 `json:"requested_qty"`
+		RequestedPrice        float64 `json:"requested_price"`
+		RequestedQtyDecimal   string  `json:"requested_qty_decimal"`
+		RequestedPriceDecimal string  `json:"requested_price_decimal,omitempty"`
+		StrategyID            int64   `json:"strategy_id"`
+		Environment           int32   `json:"environment"`
+		EnvironmentLabel      string  `json:"environment_label"`
+		Market                string  `json:"market"`
+		MarketLabel           string  `json:"market_label"`
+		VenueID               int64   `json:"venue_id,omitempty"`
+		Exchange              int32   `json:"exchange"`
+		ExchangeLabel         string  `json:"exchange_label"`
+		PositionSide          string  `json:"position_side"`
+		SessionID             string  `json:"session_id,omitempty"`
+		Status                string  `json:"status,omitempty"`
+		RejectCode            string  `json:"reject_code,omitempty"`
+		RejectMessage         string  `json:"reject_message,omitempty"`
+		PostOnly              bool    `json:"post_only"`
+		GoodTillDate          string  `json:"good_till_date,omitempty"`
+		ReduceOnly            bool    `json:"reduce_only"`
 	}
 
 	items := make([]intentJSON, 0, len(resp.GetIntents()))
 	for _, it := range resp.GetIntents() {
 		items = append(items, intentJSON{
-			Time:           protoTime(it.GetTime()),
-			IntentID:       it.GetIntentId(),
-			PortfolioID:      it.GetPortfolioId(),
-			Symbol:         it.GetSymbol(),
-			Side:           it.GetSide(),
-			RequestedQty:   it.GetRequestedQty(),
-			RequestedPrice: it.GetRequestedPrice(),
-			StrategyID:     it.GetStrategyId(),
-			Market:         orderMarketLabel(it.GetMarket()),
-			MarketLabel:    orderMarketLabel(it.GetMarket()),
-			VenueID:        it.GetVenueId(),
-			Exchange:       it.GetExchange(),
-			ExchangeLabel:  orderExchangeLabel(it.GetExchange()),
-			PositionSide:   orderPositionSideLabel(it.GetPositionSide()),
-			SessionID:      it.GetSessionId(),
-			Status:         it.GetStatus(),
-			RejectCode:     it.GetRejectCode(),
-			RejectMessage:  it.GetRejectMessage(),
-			PostOnly:       it.GetPostOnly(),
-			GoodTillDate:   protoTime(it.GetGoodTillDate()),
-			ReduceOnly:     it.GetReduceOnly(),
+			Time:                  protoTime(it.GetTime()),
+			IntentID:              it.GetIntentId(),
+			PortfolioID:           it.GetPortfolioId(),
+			Symbol:                it.GetSymbol(),
+			Side:                  it.GetSide(),
+			RequestedQty:          it.GetRequestedQty(),
+			RequestedPrice:        it.GetRequestedPrice(),
+			RequestedQtyDecimal:   exactDecimalOrLegacy(it.GetRequestedQtyDecimal(), it.GetRequestedQty()),
+			RequestedPriceDecimal: optionalExactDecimalOrLegacy(it.RequestedPriceDecimal, it.GetRequestedPrice()),
+			StrategyID:            it.GetStrategyId(),
+			Environment:           it.GetEnvironment(),
+			EnvironmentLabel:      venueEnvironmentLabel(it.GetEnvironment()),
+			Market:                orderMarketLabel(it.GetMarket()),
+			MarketLabel:           orderMarketLabel(it.GetMarket()),
+			VenueID:               it.GetVenueId(),
+			Exchange:              it.GetExchange(),
+			ExchangeLabel:         orderExchangeLabel(it.GetExchange()),
+			PositionSide:          orderPositionSideLabel(it.GetPositionSide()),
+			SessionID:             it.GetSessionId(),
+			Status:                it.GetStatus(),
+			RejectCode:            it.GetRejectCode(),
+			RejectMessage:         it.GetRejectMessage(),
+			PostOnly:              it.GetPostOnly(),
+			GoodTillDate:          protoTime(it.GetGoodTillDate()),
+			ReduceOnly:            it.GetReduceOnly(),
 		})
 	}
 
@@ -130,14 +227,14 @@ func (s *server) handleOrderHistory(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp, err := s.orders.QueryOrders(r.Context(), &orderv1.QueryOrdersRequest{
-		PortfolioId:  filters.portfolioID,
-		StrategyId: filters.strategyID,
-		SessionId:  filters.sessionID,
-		IntentId:   filters.intentID,
-		AttemptId:  filters.attemptID,
-		Limit:      filters.limit,
-		Offset:     filters.offset,
-		UserId:     filters.userID,
+		PortfolioId: filters.portfolioID,
+		StrategyId:  filters.strategyID,
+		SessionId:   filters.sessionID,
+		IntentId:    filters.intentID,
+		AttemptId:   filters.attemptID,
+		Limit:       filters.limit,
+		Offset:      filters.offset,
+		UserId:      filters.userID,
 	})
 	if err != nil {
 		code, msg := grpcToHTTP(err)
@@ -146,75 +243,91 @@ func (s *server) handleOrderHistory(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type orderJSON struct {
-		Time               string  `json:"time"`
-		OrderID            string  `json:"order_id"`
-		ExchangeOrderID    string  `json:"exchange_order_id,omitempty"`
-		ClientOrderID      string  `json:"client_order_id,omitempty"`
-		AttemptID          string  `json:"attempt_id,omitempty"`
-		IntentID           string  `json:"intent_id,omitempty"`
-		PortfolioID          int64   `json:"portfolio_id"`
-		Symbol             string  `json:"symbol"`
-		Side               string  `json:"side"`
-		OrigQty            float64 `json:"orig_qty"`
-		ExecutedQty        float64 `json:"executed_qty"`
-		RemainingQty       float64 `json:"remaining_qty"`
-		AvgPrice           float64 `json:"avg_price"`
-		Price              float64 `json:"price"`
-		Status             string  `json:"status"`
-		Market             string  `json:"market"`
-		MarketLabel        string  `json:"market_label"`
-		VenueID            int64   `json:"venue_id,omitempty"`
-		Exchange           int32   `json:"exchange"`
-		ExchangeLabel      string  `json:"exchange_label"`
-		PositionSide       string  `json:"position_side"`
-		StrategyID         int64   `json:"strategy_id"`
-		SessionID          string  `json:"session_id,omitempty"`
-		ErrorMessage       string  `json:"error_message,omitempty"`
-		PostOnly           bool    `json:"post_only"`
-		GoodTillDate       string  `json:"good_till_date,omitempty"`
-		ReduceOnly         bool    `json:"reduce_only"`
-		RecoveryStatus     string  `json:"recovery_status,omitempty"`
-		NextCheckAt        string  `json:"next_check_at,omitempty"`
-		RecoveryDeadlineAt string  `json:"recovery_deadline_at,omitempty"`
-		LastRecoveryError  string  `json:"last_recovery_error,omitempty"`
-		ForceClosedAt      string  `json:"force_closed_at,omitempty"`
+		Time                      string  `json:"time"`
+		OrderID                   string  `json:"order_id"`
+		ExchangeOrderID           string  `json:"exchange_order_id,omitempty"`
+		ClientOrderID             string  `json:"client_order_id,omitempty"`
+		AttemptID                 string  `json:"attempt_id,omitempty"`
+		IntentID                  string  `json:"intent_id,omitempty"`
+		PortfolioID               int64   `json:"portfolio_id"`
+		Symbol                    string  `json:"symbol"`
+		Side                      string  `json:"side"`
+		OrigQty                   float64 `json:"orig_qty"`
+		ExecutedQty               float64 `json:"executed_qty"`
+		RemainingQty              float64 `json:"remaining_qty"`
+		AvgPrice                  float64 `json:"avg_price"`
+		Price                     float64 `json:"price"`
+		OrigQtyDecimal            string  `json:"orig_qty_decimal"`
+		ExecutedQtyDecimal        string  `json:"executed_qty_decimal"`
+		RemainingQtyDecimal       string  `json:"remaining_qty_decimal"`
+		AvgPriceDecimal           string  `json:"avg_price_decimal"`
+		PriceDecimal              string  `json:"price_decimal,omitempty"`
+		CumulativeQuoteQtyDecimal string  `json:"cumulative_quote_qty_decimal"`
+		Status                    string  `json:"status"`
+		Environment               int32   `json:"environment"`
+		EnvironmentLabel          string  `json:"environment_label"`
+		Market                    string  `json:"market"`
+		MarketLabel               string  `json:"market_label"`
+		VenueID                   int64   `json:"venue_id,omitempty"`
+		Exchange                  int32   `json:"exchange"`
+		ExchangeLabel             string  `json:"exchange_label"`
+		PositionSide              string  `json:"position_side"`
+		StrategyID                int64   `json:"strategy_id"`
+		SessionID                 string  `json:"session_id,omitempty"`
+		ErrorMessage              string  `json:"error_message,omitempty"`
+		PostOnly                  bool    `json:"post_only"`
+		GoodTillDate              string  `json:"good_till_date,omitempty"`
+		ReduceOnly                bool    `json:"reduce_only"`
+		RecoveryStatus            string  `json:"recovery_status,omitempty"`
+		NextCheckAt               string  `json:"next_check_at,omitempty"`
+		RecoveryDeadlineAt        string  `json:"recovery_deadline_at,omitempty"`
+		LastRecoveryError         string  `json:"last_recovery_error,omitempty"`
+		ForceClosedAt             string  `json:"force_closed_at,omitempty"`
 	}
 
 	items := make([]orderJSON, 0, len(resp.GetOrders()))
 	for _, o := range resp.GetOrders() {
 		items = append(items, orderJSON{
-			Time:               protoTime(o.GetTime()),
-			OrderID:            o.GetOrderId(),
-			ExchangeOrderID:    o.GetExchangeOrderId(),
-			ClientOrderID:      o.GetClientOrderId(),
-			AttemptID:          o.GetAttemptId(),
-			IntentID:           o.GetIntentId(),
-			PortfolioID:          o.GetPortfolioId(),
-			Symbol:             o.GetSymbol(),
-			Side:               o.GetSide(),
-			OrigQty:            o.GetOrigQty(),
-			ExecutedQty:        o.GetExecutedQty(),
-			RemainingQty:       o.GetRemainingQty(),
-			AvgPrice:           o.GetAvgPrice(),
-			Price:              o.GetPrice(),
-			Status:             o.GetStatus(),
-			Market:             orderMarketLabel(o.GetMarket()),
-			MarketLabel:        orderMarketLabel(o.GetMarket()),
-			VenueID:            o.GetVenueId(),
-			Exchange:           o.GetExchange(),
-			ExchangeLabel:      orderExchangeLabel(o.GetExchange()),
-			PositionSide:       orderPositionSideLabel(o.GetPositionSide()),
-			StrategyID:         o.GetStrategyId(),
-			SessionID:          o.GetSessionId(),
-			ErrorMessage:       o.GetErrorMessage(),
-			PostOnly:           o.GetPostOnly(),
-			GoodTillDate:       protoTime(o.GetGoodTillDate()),
-			ReduceOnly:         o.GetReduceOnly(),
-			RecoveryStatus:     o.GetRecoveryStatus(),
-			NextCheckAt:        protoTime(o.GetNextCheckAt()),
-			RecoveryDeadlineAt: protoTime(o.GetRecoveryDeadlineAt()),
-			LastRecoveryError:  o.GetLastRecoveryError(),
-			ForceClosedAt:      protoTime(o.GetForceClosedAt()),
+			Time:                      protoTime(o.GetTime()),
+			OrderID:                   o.GetOrderId(),
+			ExchangeOrderID:           o.GetExchangeOrderId(),
+			ClientOrderID:             o.GetClientOrderId(),
+			AttemptID:                 o.GetAttemptId(),
+			IntentID:                  o.GetIntentId(),
+			PortfolioID:               o.GetPortfolioId(),
+			Symbol:                    o.GetSymbol(),
+			Side:                      o.GetSide(),
+			OrigQty:                   o.GetOrigQty(),
+			ExecutedQty:               o.GetExecutedQty(),
+			RemainingQty:              o.GetRemainingQty(),
+			AvgPrice:                  o.GetAvgPrice(),
+			Price:                     o.GetPrice(),
+			OrigQtyDecimal:            exactDecimalOrLegacy(o.GetOrigQtyDecimal(), o.GetOrigQty()),
+			ExecutedQtyDecimal:        exactDecimalOrLegacy(o.GetExecutedQtyDecimal(), o.GetExecutedQty()),
+			RemainingQtyDecimal:       exactDecimalOrLegacy(o.GetRemainingQtyDecimal(), o.GetRemainingQty()),
+			AvgPriceDecimal:           exactDecimalOrLegacy(o.GetAvgPriceDecimal(), o.GetAvgPrice()),
+			PriceDecimal:              optionalExactDecimalOrLegacy(o.PriceDecimal, o.GetPrice()),
+			CumulativeQuoteQtyDecimal: exactQuoteQtyOrProduct(o.GetCumulativeQuoteQtyDecimal(), o.GetExecutedQtyDecimal(), o.GetExecutedQty(), o.GetAvgPriceDecimal(), o.GetAvgPrice()),
+			Status:                    o.GetStatus(),
+			Environment:               o.GetEnvironment(),
+			EnvironmentLabel:          venueEnvironmentLabel(o.GetEnvironment()),
+			Market:                    orderMarketLabel(o.GetMarket()),
+			MarketLabel:               orderMarketLabel(o.GetMarket()),
+			VenueID:                   o.GetVenueId(),
+			Exchange:                  o.GetExchange(),
+			ExchangeLabel:             orderExchangeLabel(o.GetExchange()),
+			PositionSide:              orderPositionSideLabel(o.GetPositionSide()),
+			StrategyID:                o.GetStrategyId(),
+			SessionID:                 o.GetSessionId(),
+			ErrorMessage:              o.GetErrorMessage(),
+			PostOnly:                  o.GetPostOnly(),
+			GoodTillDate:              protoTime(o.GetGoodTillDate()),
+			ReduceOnly:                o.GetReduceOnly(),
+			RecoveryStatus:            o.GetRecoveryStatus(),
+			NextCheckAt:               protoTime(o.GetNextCheckAt()),
+			RecoveryDeadlineAt:        protoTime(o.GetRecoveryDeadlineAt()),
+			LastRecoveryError:         o.GetLastRecoveryError(),
+			ForceClosedAt:             protoTime(o.GetForceClosedAt()),
 		})
 	}
 
@@ -231,13 +344,13 @@ func (s *server) handleOrderAttempts(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp, err := s.orders.QueryOrderAttempts(r.Context(), &orderv1.QueryOrderAttemptsRequest{
-		PortfolioId:  filters.portfolioID,
-		StrategyId: filters.strategyID,
-		SessionId:  filters.sessionID,
-		IntentId:   filters.intentID,
-		Limit:      filters.limit,
-		Offset:     filters.offset,
-		UserId:     filters.userID,
+		PortfolioId: filters.portfolioID,
+		StrategyId:  filters.strategyID,
+		SessionId:   filters.sessionID,
+		IntentId:    filters.intentID,
+		Limit:       filters.limit,
+		Offset:      filters.offset,
+		UserId:      filters.userID,
 	})
 	if err != nil {
 		code, msg := grpcToHTTP(err)
@@ -246,67 +359,77 @@ func (s *server) handleOrderAttempts(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type attemptJSON struct {
-		Time            string           `json:"time"`
-		AttemptID       string           `json:"attempt_id"`
-		IntentID        string           `json:"intent_id,omitempty"`
-		OrderID         string           `json:"order_id,omitempty"`
-		ExchangeOrderID string           `json:"exchange_order_id,omitempty"`
-		ClientOrderID   string           `json:"client_order_id,omitempty"`
-		PortfolioID       int64            `json:"portfolio_id"`
-		Symbol          string           `json:"symbol"`
-		Side            string           `json:"side"`
-		RequestedQty    float64          `json:"requested_qty"`
-		RequestedPrice  float64          `json:"requested_price"`
-		MarkPrice       float64          `json:"mark_price"`
-		Status          string           `json:"status"`
-		Market          string           `json:"market"`
-		MarketLabel     string           `json:"market_label"`
-		VenueID         int64            `json:"venue_id,omitempty"`
-		Exchange        int32            `json:"exchange"`
-		ExchangeLabel   string           `json:"exchange_label"`
-		PositionSide    string           `json:"position_side"`
-		StrategyID      int64            `json:"strategy_id"`
-		SessionID       string           `json:"session_id,omitempty"`
-		ErrorMessage    string           `json:"error_message,omitempty"`
-		RecoveryError   string           `json:"recovery_error,omitempty"`
-		PostOnly        bool             `json:"post_only"`
-		GoodTillDate    string           `json:"good_till_date,omitempty"`
-		ReduceOnly      bool             `json:"reduce_only"`
-		RiskStatus      string           `json:"risk_status,omitempty"`
-		RiskReasons     []riskReasonJSON `json:"risk_reasons,omitempty"`
+		Time                  string           `json:"time"`
+		AttemptID             string           `json:"attempt_id"`
+		IntentID              string           `json:"intent_id,omitempty"`
+		OrderID               string           `json:"order_id,omitempty"`
+		ExchangeOrderID       string           `json:"exchange_order_id,omitempty"`
+		ClientOrderID         string           `json:"client_order_id,omitempty"`
+		PortfolioID           int64            `json:"portfolio_id"`
+		Symbol                string           `json:"symbol"`
+		Side                  string           `json:"side"`
+		RequestedQty          float64          `json:"requested_qty"`
+		RequestedPrice        float64          `json:"requested_price"`
+		MarkPrice             float64          `json:"mark_price"`
+		RequestedQtyDecimal   string           `json:"requested_qty_decimal"`
+		RequestedPriceDecimal string           `json:"requested_price_decimal,omitempty"`
+		MarkPriceDecimal      string           `json:"mark_price_decimal"`
+		Status                string           `json:"status"`
+		Environment           int32            `json:"environment"`
+		EnvironmentLabel      string           `json:"environment_label"`
+		Market                string           `json:"market"`
+		MarketLabel           string           `json:"market_label"`
+		VenueID               int64            `json:"venue_id,omitempty"`
+		Exchange              int32            `json:"exchange"`
+		ExchangeLabel         string           `json:"exchange_label"`
+		PositionSide          string           `json:"position_side"`
+		StrategyID            int64            `json:"strategy_id"`
+		SessionID             string           `json:"session_id,omitempty"`
+		ErrorMessage          string           `json:"error_message,omitempty"`
+		RecoveryError         string           `json:"recovery_error,omitempty"`
+		PostOnly              bool             `json:"post_only"`
+		GoodTillDate          string           `json:"good_till_date,omitempty"`
+		ReduceOnly            bool             `json:"reduce_only"`
+		RiskStatus            string           `json:"risk_status,omitempty"`
+		RiskReasons           []riskReasonJSON `json:"risk_reasons,omitempty"`
 	}
 
 	items := make([]attemptJSON, 0, len(resp.GetAttempts()))
 	for _, a := range resp.GetAttempts() {
 		items = append(items, attemptJSON{
-			Time:            protoTime(a.GetTime()),
-			AttemptID:       a.GetAttemptId(),
-			IntentID:        a.GetIntentId(),
-			OrderID:         a.GetOrderId(),
-			ExchangeOrderID: a.GetExchangeOrderId(),
-			ClientOrderID:   a.GetClientOrderId(),
-			PortfolioID:       a.GetPortfolioId(),
-			Symbol:          a.GetSymbol(),
-			Side:            a.GetSide(),
-			RequestedQty:    a.GetRequestedQty(),
-			RequestedPrice:  a.GetRequestedPrice(),
-			MarkPrice:       a.GetMarkPrice(),
-			Status:          a.GetStatus(),
-			Market:          orderMarketLabel(a.GetMarket()),
-			MarketLabel:     orderMarketLabel(a.GetMarket()),
-			VenueID:         a.GetVenueId(),
-			Exchange:        a.GetExchange(),
-			ExchangeLabel:   orderExchangeLabel(a.GetExchange()),
-			PositionSide:    orderPositionSideLabel(a.GetPositionSide()),
-			StrategyID:      a.GetStrategyId(),
-			SessionID:       a.GetSessionId(),
-			ErrorMessage:    a.GetErrorMessage(),
-			RecoveryError:   a.GetRecoveryError(),
-			PostOnly:        a.GetPostOnly(),
-			GoodTillDate:    protoTime(a.GetGoodTillDate()),
-			ReduceOnly:      a.GetReduceOnly(),
-			RiskStatus:      a.GetRiskStatus(),
-			RiskReasons:     parseRiskReasonsJSON(a.GetRiskReasonsJson()),
+			Time:                  protoTime(a.GetTime()),
+			AttemptID:             a.GetAttemptId(),
+			IntentID:              a.GetIntentId(),
+			OrderID:               a.GetOrderId(),
+			ExchangeOrderID:       a.GetExchangeOrderId(),
+			ClientOrderID:         a.GetClientOrderId(),
+			PortfolioID:           a.GetPortfolioId(),
+			Symbol:                a.GetSymbol(),
+			Side:                  a.GetSide(),
+			RequestedQty:          a.GetRequestedQty(),
+			RequestedPrice:        a.GetRequestedPrice(),
+			MarkPrice:             a.GetMarkPrice(),
+			RequestedQtyDecimal:   exactDecimalOrLegacy(a.GetRequestedQtyDecimal(), a.GetRequestedQty()),
+			RequestedPriceDecimal: optionalExactDecimalOrLegacy(a.RequestedPriceDecimal, a.GetRequestedPrice()),
+			MarkPriceDecimal:      exactDecimalOrLegacy(a.GetMarkPriceDecimal(), a.GetMarkPrice()),
+			Status:                a.GetStatus(),
+			Environment:           a.GetEnvironment(),
+			EnvironmentLabel:      venueEnvironmentLabel(a.GetEnvironment()),
+			Market:                orderMarketLabel(a.GetMarket()),
+			MarketLabel:           orderMarketLabel(a.GetMarket()),
+			VenueID:               a.GetVenueId(),
+			Exchange:              a.GetExchange(),
+			ExchangeLabel:         orderExchangeLabel(a.GetExchange()),
+			PositionSide:          orderPositionSideLabel(a.GetPositionSide()),
+			StrategyID:            a.GetStrategyId(),
+			SessionID:             a.GetSessionId(),
+			ErrorMessage:          a.GetErrorMessage(),
+			RecoveryError:         a.GetRecoveryError(),
+			PostOnly:              a.GetPostOnly(),
+			GoodTillDate:          protoTime(a.GetGoodTillDate()),
+			ReduceOnly:            a.GetReduceOnly(),
+			RiskStatus:            a.GetRiskStatus(),
+			RiskReasons:           parseRiskReasonsJSON(a.GetRiskReasonsJson()),
 		})
 	}
 
@@ -323,15 +446,15 @@ func (s *server) handleOrderFills(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp, err := s.orders.QueryOrderFills(r.Context(), &orderv1.QueryOrderFillsRequest{
-		PortfolioId:  filters.portfolioID,
-		StrategyId: filters.strategyID,
-		SessionId:  filters.sessionID,
-		IntentId:   filters.intentID,
-		AttemptId:  filters.attemptID,
-		OrderId:    filters.orderID,
-		Limit:      filters.limit,
-		Offset:     filters.offset,
-		UserId:     filters.userID,
+		PortfolioId: filters.portfolioID,
+		StrategyId:  filters.strategyID,
+		SessionId:   filters.sessionID,
+		IntentId:    filters.intentID,
+		AttemptId:   filters.attemptID,
+		OrderId:     filters.orderID,
+		Limit:       filters.limit,
+		Offset:      filters.offset,
+		UserId:      filters.userID,
 	})
 	if err != nil {
 		code, msg := grpcToHTTP(err)
@@ -340,55 +463,69 @@ func (s *server) handleOrderFills(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type fillJSON struct {
-		Time            string  `json:"time"`
-		FillID          string  `json:"fill_id"`
-		ExchangeTradeID string  `json:"exchange_trade_id,omitempty"`
-		OrderID         string  `json:"order_id"`
-		ExchangeOrderID string  `json:"exchange_order_id,omitempty"`
-		AttemptID       string  `json:"attempt_id,omitempty"`
-		IntentID        string  `json:"intent_id,omitempty"`
-		PortfolioID       int64   `json:"portfolio_id"`
-		Symbol          string  `json:"symbol"`
-		Side            string  `json:"side"`
-		Qty             float64 `json:"qty"`
-		FillPrice       float64 `json:"fill_price"`
-		Fee             float64 `json:"fee"`
-		Status          string  `json:"status"`
-		Market          string  `json:"market"`
-		MarketLabel     string  `json:"market_label"`
-		VenueID         int64   `json:"venue_id,omitempty"`
-		Exchange        int32   `json:"exchange"`
-		ExchangeLabel   string  `json:"exchange_label"`
-		PositionSide    string  `json:"position_side"`
-		StrategyID      int64   `json:"strategy_id"`
-		SessionID       string  `json:"session_id,omitempty"`
+		Time             string  `json:"time"`
+		FillID           string  `json:"fill_id"`
+		ExchangeTradeID  string  `json:"exchange_trade_id,omitempty"`
+		OrderID          string  `json:"order_id"`
+		ExchangeOrderID  string  `json:"exchange_order_id,omitempty"`
+		AttemptID        string  `json:"attempt_id,omitempty"`
+		IntentID         string  `json:"intent_id,omitempty"`
+		PortfolioID      int64   `json:"portfolio_id"`
+		Symbol           string  `json:"symbol"`
+		Side             string  `json:"side"`
+		Qty              float64 `json:"qty"`
+		FillPrice        float64 `json:"fill_price"`
+		Fee              float64 `json:"fee"`
+		FeeAsset         string  `json:"fee_asset"`
+		QtyDecimal       string  `json:"qty_decimal"`
+		FillPriceDecimal string  `json:"fill_price_decimal"`
+		FeeDecimal       string  `json:"fee_decimal"`
+		QuoteQtyDecimal  string  `json:"quote_qty_decimal"`
+		Status           string  `json:"status"`
+		Environment      int32   `json:"environment"`
+		EnvironmentLabel string  `json:"environment_label"`
+		Market           string  `json:"market"`
+		MarketLabel      string  `json:"market_label"`
+		VenueID          int64   `json:"venue_id,omitempty"`
+		Exchange         int32   `json:"exchange"`
+		ExchangeLabel    string  `json:"exchange_label"`
+		PositionSide     string  `json:"position_side"`
+		StrategyID       int64   `json:"strategy_id"`
+		SessionID        string  `json:"session_id,omitempty"`
 	}
 
 	items := make([]fillJSON, 0, len(resp.GetFills()))
 	for _, f := range resp.GetFills() {
 		items = append(items, fillJSON{
-			Time:            protoTime(f.GetTime()),
-			FillID:          f.GetFillId(),
-			ExchangeTradeID: f.GetExchangeTradeId(),
-			OrderID:         f.GetOrderId(),
-			ExchangeOrderID: f.GetExchangeOrderId(),
-			AttemptID:       f.GetAttemptId(),
-			IntentID:        f.GetIntentId(),
-			PortfolioID:       f.GetPortfolioId(),
-			Symbol:          f.GetSymbol(),
-			Side:            f.GetSide(),
-			Qty:             f.GetQty(),
-			FillPrice:       f.GetFillPrice(),
-			Fee:             f.GetFee(),
-			Status:          f.GetStatus(),
-			Market:          orderMarketLabel(f.GetMarket()),
-			MarketLabel:     orderMarketLabel(f.GetMarket()),
-			VenueID:         f.GetVenueId(),
-			Exchange:        f.GetExchange(),
-			ExchangeLabel:   orderExchangeLabel(f.GetExchange()),
-			PositionSide:    orderPositionSideLabel(f.GetPositionSide()),
-			StrategyID:      f.GetStrategyId(),
-			SessionID:       f.GetSessionId(),
+			Time:             protoTime(f.GetTime()),
+			FillID:           f.GetFillId(),
+			ExchangeTradeID:  f.GetExchangeTradeId(),
+			OrderID:          f.GetOrderId(),
+			ExchangeOrderID:  f.GetExchangeOrderId(),
+			AttemptID:        f.GetAttemptId(),
+			IntentID:         f.GetIntentId(),
+			PortfolioID:      f.GetPortfolioId(),
+			Symbol:           f.GetSymbol(),
+			Side:             f.GetSide(),
+			Qty:              f.GetQty(),
+			FillPrice:        f.GetFillPrice(),
+			Fee:              f.GetFee(),
+			FeeAsset:         f.GetFeeAsset(),
+			QtyDecimal:       exactDecimalOrLegacy(f.GetQtyDecimal(), f.GetQty()),
+			FillPriceDecimal: exactDecimalOrLegacy(f.GetFillPriceDecimal(), f.GetFillPrice()),
+			FeeDecimal:       exactDecimalOrLegacy(f.GetFeeDecimal(), f.GetFee()),
+			QuoteQtyDecimal:  exactQuoteQtyOrProduct(f.GetQuoteQtyDecimal(), f.GetQtyDecimal(), f.GetQty(), f.GetFillPriceDecimal(), f.GetFillPrice()),
+			Status:           f.GetStatus(),
+			Environment:      f.GetEnvironment(),
+			EnvironmentLabel: venueEnvironmentLabel(f.GetEnvironment()),
+			Market:           orderMarketLabel(f.GetMarket()),
+			MarketLabel:      orderMarketLabel(f.GetMarket()),
+			VenueID:          f.GetVenueId(),
+			Exchange:         f.GetExchange(),
+			ExchangeLabel:    orderExchangeLabel(f.GetExchange()),
+			PositionSide:     orderPositionSideLabel(f.GetPositionSide()),
+			StrategyID:       f.GetStrategyId(),
+			SessionID:        f.GetSessionId(),
 		})
 	}
 
@@ -449,15 +586,15 @@ func (s *server) parseOrderHistoryFilters(w http.ResponseWriter, r *http.Request
 	}
 
 	return orderHistoryFilters{
-		userID:     uid,
-		portfolioID:  portfolioID,
-		strategyID: strategyID,
-		sessionID:  strings.TrimSpace(q.Get("session_id")),
-		intentID:   strings.TrimSpace(q.Get("intent_id")),
-		attemptID:  strings.TrimSpace(q.Get("attempt_id")),
-		orderID:    strings.TrimSpace(q.Get("order_id")),
-		limit:      limit,
-		offset:     offset,
+		userID:      uid,
+		portfolioID: portfolioID,
+		strategyID:  strategyID,
+		sessionID:   strings.TrimSpace(q.Get("session_id")),
+		intentID:    strings.TrimSpace(q.Get("intent_id")),
+		attemptID:   strings.TrimSpace(q.Get("attempt_id")),
+		orderID:     strings.TrimSpace(q.Get("order_id")),
+		limit:       limit,
+		offset:      offset,
 	}, true
 }
 

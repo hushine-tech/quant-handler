@@ -10,7 +10,7 @@ import (
 )
 
 type venueBody struct {
-	PortfolioID      int64           `json:"portfolio_id"`
+	PortfolioID    int64           `json:"portfolio_id"`
 	Exchange       string          `json:"exchange"`
 	Market         string          `json:"market"`
 	Environment    string          `json:"environment"`
@@ -28,13 +28,13 @@ type venueBody struct {
 
 type venueActionBody struct {
 	PortfolioID int64  `json:"portfolio_id"`
-	Reason    string `json:"reason"`
+	Reason      string `json:"reason"`
 }
 
 type venueJSON struct {
 	VenueID               int64  `json:"venue_id"`
 	UserID                int64  `json:"user_id"`
-	PortfolioID             int64  `json:"portfolio_id,omitempty"`
+	PortfolioID           int64  `json:"portfolio_id,omitempty"`
 	Exchange              int32  `json:"exchange"`
 	ExchangeLabel         string `json:"exchange_label"`
 	Market                int32  `json:"market"`
@@ -178,11 +178,43 @@ func (s *server) createVenue(w http.ResponseWriter, r *http.Request) {
 	}
 	bootstrap := walletBootstrap{}
 	if environment == 0 {
-		bootstrap = buildWalletBootstrap(body.Spot, body.Futures, body.InitialBalance)
+		if market == 1 {
+			if body.Spot == nil {
+				writeErr(w, http.StatusBadRequest, "backtest Spot venue requires a canonical spot.assets wallet including USDT")
+				return
+			}
+			if body.Futures != nil || body.InitialBalance != nil {
+				writeErr(w, http.StatusBadRequest, "backtest Spot venue accepts only the canonical spot wallet")
+				return
+			}
+			bootstrap, err = buildWalletBootstrap(body.Spot, nil, nil)
+		} else {
+			if body.Spot != nil {
+				writeErr(w, http.StatusBadRequest, "backtest Futures venue cannot include a Spot wallet")
+				return
+			}
+			futuresInput := body.Futures
+			if body.InitialBalance != nil {
+				if futuresInput != nil {
+					writeErr(w, http.StatusBadRequest, "use either futures or legacy initial_balance, not both")
+					return
+				}
+				futuresInput = &futIn{
+					MarginMode:     body.MarginMode,
+					PositionMode:   body.PositionMode,
+					InitialBalance: *body.InitialBalance,
+				}
+			}
+			bootstrap, err = buildWalletBootstrap(nil, futuresInput, nil)
+		}
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	}
 	resp, err := s.portfolios.CreateVenue(r.Context(), &portfoliov1.CreateVenueRequest{
 		UserId:           uid,
-		PortfolioId:        body.PortfolioID,
+		PortfolioId:      body.PortfolioID,
 		Exchange:         exchange,
 		Market:           market,
 		Environment:      environment,
@@ -226,7 +258,7 @@ func (s *server) listVenues(w http.ResponseWriter, r *http.Request, portfolioID 
 	limit, offset := parseCollectionPaging(r)
 	resp, err := s.portfolios.ListVenues(r.Context(), &portfoliov1.ListVenuesRequest{
 		UserId:          uid,
-		PortfolioId:       portfolioID,
+		PortfolioId:     portfolioID,
 		IncludeUnbound:  boolQuery(r, "include_unbound"),
 		IncludeInactive: boolQuery(r, "include_inactive"),
 		Limit:           limit,
@@ -311,10 +343,10 @@ func (s *server) bindVenue(w http.ResponseWriter, r *http.Request, venueID int64
 		return
 	}
 	resp, err := s.portfolios.BindVenue(r.Context(), &portfoliov1.BindVenueRequest{
-		UserId:    uid,
+		UserId:      uid,
 		PortfolioId: body.PortfolioID,
-		VenueId:   venueID,
-		Reason:    strings.TrimSpace(body.Reason),
+		VenueId:     venueID,
+		Reason:      strings.TrimSpace(body.Reason),
 	})
 	if err != nil {
 		code, msg := grpcToHTTP(err)
@@ -410,7 +442,7 @@ func venueToJSON(venue *portfoliov1.VenueEntry) venueJSON {
 	return venueJSON{
 		VenueID:               venue.GetVenueId(),
 		UserID:                venue.GetUserId(),
-		PortfolioID:             venue.GetPortfolioId(),
+		PortfolioID:           venue.GetPortfolioId(),
 		Exchange:              venue.GetExchange(),
 		ExchangeLabel:         venueExchangeLabel(venue.GetExchange()),
 		Market:                venue.GetMarket(),

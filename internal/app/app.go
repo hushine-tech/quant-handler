@@ -118,6 +118,7 @@ func Run(cfg *config.Config) error {
 	})
 	mux.Handle("/api/auth/signup", s.cors(http.HandlerFunc(s.handleSignup)))
 	mux.Handle("/api/auth/login", s.cors(http.HandlerFunc(s.handleLogin)))
+	mux.HandleFunc("/api/capabilities", s.cors(s.auth(http.HandlerFunc(s.handleProductCapabilities))).ServeHTTP)
 	mux.Handle("/api/symbols", s.cors(s.auth(http.HandlerFunc(s.handleSymbols))))
 	mux.Handle("/api/portfolios", s.cors(s.auth(s.handlePortfoliosCollection())))
 	mux.HandleFunc("/api/portfolios/", s.cors(s.auth(s.handlePortfoliosByID())).ServeHTTP)

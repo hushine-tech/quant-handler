@@ -7,8 +7,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/hushine-tech/core-service/gen/portfoliov1"
 	orderv1 "github.com/hushine-tech/core-service/gen/orderv1"
+	"github.com/hushine-tech/core-service/gen/portfoliov1"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -23,7 +23,7 @@ type fakeSessionPortfoliosClient struct {
 	lastReconciliationReq        *portfoliov1.ListReconciliationRunsRequest
 	lastReconciliationSummaryReq *portfoliov1.GetSessionReconciliationSummaryRequest
 	lastGetSessionReq            *portfoliov1.GetSessionRequest
-	lastGetPortfolioReq            *portfoliov1.GetPortfolioRequest
+	lastGetPortfolioReq          *portfoliov1.GetPortfolioRequest
 	lastListSessionsReq          *portfoliov1.ListSessionsRequest
 	lastUpdateSessionReq         *portfoliov1.UpdateSessionRequest
 	lastIndicatorDefinitionsReq  *portfoliov1.ListStrategyIndicatorsRequest
@@ -35,8 +35,8 @@ type fakeSessionPortfoliosClient struct {
 	reconciliationSummaryResp *portfoliov1.GetSessionReconciliationSummaryResponse
 	getSessionResp            *portfoliov1.GetSessionResponse
 	getSessionErr             error
-	getPortfolioResp            *portfoliov1.GetPortfolioResponse
-	getPortfolioErr             error
+	getPortfolioResp          *portfoliov1.GetPortfolioResponse
+	getPortfolioErr           error
 	listSessionsResp          *portfoliov1.ListSessionsResponse
 	listSessionsErr           error
 	updateSessionErr          error
@@ -44,7 +44,7 @@ type fakeSessionPortfoliosClient struct {
 	indicatorDefinitionsErr   error
 	indicatorChunksResp       *portfoliov1.ListStrategyIndicatorChunksResponse
 	indicatorChunksErr        error
-	portfolioEnvironment        int32
+	portfolioEnvironment      int32
 	reconciliationSummaryErr  error
 }
 
@@ -57,7 +57,7 @@ func (f *fakeSessionPortfoliosClient) GetPortfolio(_ context.Context, in *portfo
 		return f.getPortfolioResp, nil
 	}
 	return &portfoliov1.GetPortfolioResponse{Portfolio: &portfoliov1.PortfolioRegistryEntry{
-		PortfolioId:   in.GetPortfolioId(),
+		PortfolioId: in.GetPortfolioId(),
 		UserId:      in.GetUserId(),
 		Environment: f.portfolioEnvironment,
 	}}, nil
@@ -148,7 +148,7 @@ func TestListSessions_IncludesRuntimeAndDebugMetadata(t *testing.T) {
 			Sessions: []*portfoliov1.StrategySessionEntry{
 				{
 					SessionId:      "debug-1",
-					PortfolioId:      7,
+					PortfolioId:    7,
 					Environment:    0,
 					Status:         "finished",
 					Interval:       "1m",
@@ -191,6 +191,51 @@ func TestListSessions_IncludesRuntimeAndDebugMetadata(t *testing.T) {
 	}
 	if got := body[0]["runtime_version"]; got != "0.1.0" {
 		t.Errorf("runtime_version = %v, want 0.1.0", got)
+	}
+}
+
+func TestProtoSessionToJSONPreservesStructuredErrorFacts(t *testing.T) {
+	detail := `{"code":"SPOT_MIN_NOTIONAL","route":"binance/spot","symbol":"BTCUSDT","filter_type":"MIN_NOTIONAL","environment":1,"retryable":false,"source":"risk","message":"notional below minimum"}`
+	encoded, err := json.Marshal(protoSessionToJSON(&portfoliov1.StrategySessionEntry{
+		SessionId:       "spot-preflight",
+		Environment:     1,
+		Status:          "preflight_failed",
+		ErrorCode:       "SPOT_MIN_NOTIONAL",
+		ErrorMessage:    "notional below minimum",
+		ErrorDetailJson: detail,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body struct {
+		Environment     int32           `json:"environment"`
+		ErrorCode       string          `json:"error_code"`
+		ErrorMessage    string          `json:"error_message"`
+		ErrorDetail     json.RawMessage `json:"error_detail"`
+		ErrorDetailJSON string          `json:"error_detail_json"`
+	}
+	if err := json.Unmarshal(encoded, &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Environment != 1 || body.ErrorCode != "SPOT_MIN_NOTIONAL" || body.ErrorMessage != "notional below minimum" || body.ErrorDetailJSON != detail {
+		t.Fatalf("session error=%#v JSON=%s", body, encoded)
+	}
+	var facts struct {
+		Code        string `json:"code"`
+		Route       string `json:"route"`
+		Symbol      string `json:"symbol"`
+		FilterType  string `json:"filter_type"`
+		Environment int32  `json:"environment"`
+		Retryable   bool   `json:"retryable"`
+		Source      string `json:"source"`
+		Message     string `json:"message"`
+	}
+	if err := json.Unmarshal(body.ErrorDetail, &facts); err != nil {
+		t.Fatalf("structured error=%s: %v", body.ErrorDetail, err)
+	}
+	if facts.Code != "SPOT_MIN_NOTIONAL" || facts.Route != "binance/spot" || facts.Symbol != "BTCUSDT" || facts.FilterType != "MIN_NOTIONAL" ||
+		facts.Environment != 1 || facts.Retryable || facts.Source != "risk" || facts.Message != "notional below minimum" {
+		t.Fatalf("structured facts=%#v", facts)
 	}
 }
 
@@ -286,10 +331,10 @@ func TestSessionOrderLifecycleEndpointReturnsEvents(t *testing.T) {
 	occurred := timestamppb.Now()
 	acct := &fakeSessionPortfoliosClient{
 		getSessionResp: &portfoliov1.GetSessionResponse{Session: &portfoliov1.StrategySessionEntry{
-			SessionId: "sess-1",
-			UserId:    7,
+			SessionId:   "sess-1",
+			UserId:      7,
 			PortfolioId: 42,
-			RuntimeId: "rt-1",
+			RuntimeId:   "rt-1",
 		}},
 	}
 	orders := &fakeOrdersClient{
@@ -298,7 +343,7 @@ func TestSessionOrderLifecycleEndpointReturnsEvents(t *testing.T) {
 				{
 					EventId:         101,
 					SessionId:       "sess-1",
-					PortfolioId:       42,
+					PortfolioId:     42,
 					VenueId:         88,
 					IntentId:        "intent-1",
 					AttemptId:       "attempt-1",
@@ -315,12 +360,8 @@ func TestSessionOrderLifecycleEndpointReturnsEvents(t *testing.T) {
 					OccurredAt:      occurred,
 					CreatedAt:       occurred,
 					FillDelta: &orderv1.FillDeltaEntry{
-						Symbol:    "ETHUSDT",
-						Qty:       0.25,
-						FillPrice: 3100,
-						Fee:       0.12,
-						FeeAsset:  "USDT",
-						TradeTime: occurred,
+						Symbol: "ETHUSDT", Qty: 0.25, FillPrice: 3100, Fee: 0.12, FeeAsset: "USDT", TradeTime: occurred,
+						QtyDecimal: "0.25000000", FillPriceDecimal: "3100.00000001", FeeDecimal: "0.12000000", QuoteQtyDecimal: "775.00000000",
 					},
 					OrderState: &orderv1.OrderStateEntry{
 						ExchangeOrderId: "ex-order-1",
@@ -331,6 +372,8 @@ func TestSessionOrderLifecycleEndpointReturnsEvents(t *testing.T) {
 						RemainingQty:    0.75,
 						AvgPrice:        3100,
 						UpdatedAt:       occurred,
+						OrigQtyDecimal:  "1.00000000", ExecutedQtyDecimal: "0.25000000", RemainingQtyDecimal: "0.75000000",
+						AvgPriceDecimal: "3100.00000001", CumulativeQuoteQtyDecimal: "775.00000000",
 					},
 				},
 			},
@@ -365,14 +408,20 @@ func TestSessionOrderLifecycleEndpointReturnsEvents(t *testing.T) {
 			PositionSide  string `json:"position_side"`
 			Side          string `json:"side"`
 			FillDelta     struct {
-				Symbol    string  `json:"symbol"`
-				Qty       float64 `json:"qty"`
-				FillPrice float64 `json:"fill_price"`
+				Symbol           string  `json:"symbol"`
+				Qty              float64 `json:"qty"`
+				QtyDecimal       string  `json:"qty_decimal"`
+				FillPriceDecimal string  `json:"fill_price_decimal"`
+				FeeDecimal       string  `json:"fee_decimal"`
+				QuoteQtyDecimal  string  `json:"quote_qty_decimal"`
 			} `json:"fill_delta"`
 			OrderState struct {
-				Status       string  `json:"status"`
-				ExecutedQty  float64 `json:"executed_qty"`
-				RemainingQty float64 `json:"remaining_qty"`
+				Status                    string  `json:"status"`
+				ExecutedQty               float64 `json:"executed_qty"`
+				RemainingQty              float64 `json:"remaining_qty"`
+				ExecutedQtyDecimal        string  `json:"executed_qty_decimal"`
+				RemainingQtyDecimal       string  `json:"remaining_qty_decimal"`
+				CumulativeQuoteQtyDecimal string  `json:"cumulative_quote_qty_decimal"`
 			} `json:"order_state"`
 		} `json:"items"`
 		NextEventID int64 `json:"next_event_id"`
@@ -389,6 +438,12 @@ func TestSessionOrderLifecycleEndpointReturnsEvents(t *testing.T) {
 	if item.EventID != 101 || item.EventType != "fill" || item.OrderStatus != "PARTIALLY_FILLED" {
 		t.Fatalf("item = %+v", item)
 	}
+	if item.FillDelta.QtyDecimal != "0.25000000" || item.FillDelta.FillPriceDecimal != "3100.00000001" || item.FillDelta.FeeDecimal != "0.12000000" || item.FillDelta.QuoteQtyDecimal != "775.00000000" {
+		t.Fatalf("fill delta exact decimals = %+v", item.FillDelta)
+	}
+	if item.OrderState.ExecutedQtyDecimal != "0.25000000" || item.OrderState.RemainingQtyDecimal != "0.75000000" || item.OrderState.CumulativeQuoteQtyDecimal != "775.00000000" {
+		t.Fatalf("order state exact decimals = %+v", item.OrderState)
+	}
 	if item.ExchangeLabel != "binance" || item.MarketLabel != "perpetual_futures" || item.PositionSide != "LONG" || item.Side != "BUY" {
 		t.Fatalf("route facts = %+v", item)
 	}
@@ -403,12 +458,12 @@ func TestSessionOrderLifecycleEndpointReturnsEvents(t *testing.T) {
 func TestStoppingFailedStatusReturnedToFrontend(t *testing.T) {
 	acct := &fakeSessionPortfoliosClient{
 		getSessionResp: &portfoliov1.GetSessionResponse{Session: &portfoliov1.StrategySessionEntry{
-			SessionId: "sess-stop-failed",
-			UserId:    7,
+			SessionId:   "sess-stop-failed",
+			UserId:      7,
 			PortfolioId: 42,
-			Status:    "stopping_failed",
-			Error:     "manual exchange close required",
-			RuntimeId: "rt-1",
+			Status:      "stopping_failed",
+			Error:       "manual exchange close required",
+			RuntimeId:   "rt-1",
 		}},
 	}
 	s := &server{portfolios: acct, jwtSecret: []byte("s"), corsOrigins: []string{"*"}}
@@ -526,6 +581,71 @@ func TestGetSessionOrders_HasMoreComputedFromTotal(t *testing.T) {
 	if !body.HasMore {
 		t.Errorf("has_more = false, want true")
 	}
+}
+
+func TestSessionOrderAuditHandlersPreserveExactDecimalFields(t *testing.T) {
+	requestedPrice := "0.00000001"
+	orderPrice := "50000.00000001"
+	orders := &fakeOrdersClient{
+		intentsResp: &orderv1.QueryOrderIntentsResponse{Intents: []*orderv1.OrderIntentEntry{{
+			IntentId: "i-exact", Environment: 1, RequestedQtyDecimal: "9007199254740993.00000000", RequestedPriceDecimal: &requestedPrice,
+		}}},
+		attemptsResp: &orderv1.QueryOrderAttemptsResponse{Attempts: []*orderv1.OrderAttemptEntry{{
+			AttemptId: "a-exact", Environment: 1, RequestedQtyDecimal: "9007199254740993.00000000", RequestedPriceDecimal: &requestedPrice, MarkPriceDecimal: "50000.00000001",
+		}}},
+		ordersResp: &orderv1.QueryOrdersResponse{Orders: []*orderv1.ExchangeOrderEntry{{
+			OrderId: "o-exact", Environment: 1, OrigQtyDecimal: "9007199254740993.00000000", ExecutedQtyDecimal: "0.00000001",
+			RemainingQtyDecimal: "0.09999999", AvgPriceDecimal: "50000.00000001", PriceDecimal: &orderPrice,
+			CumulativeQuoteQtyDecimal: "123456789.00000001",
+		}}},
+		fillsResp: &orderv1.QueryOrderFillsResponse{Fills: []*orderv1.OrderFillEntry{{
+			FillId: "f-exact", Environment: 1, FeeAsset: "BNB", QtyDecimal: "0.00000001", FillPriceDecimal: "50000.00000001",
+			FeeDecimal: "0.00100000", QuoteQtyDecimal: "0.00050000",
+		}}},
+	}
+	s := &server{orders: orders}
+
+	assert := func(path string, handler func(http.ResponseWriter, *http.Request, string), want map[string]string) {
+		t.Helper()
+		req := withUID(httptest.NewRequest(http.MethodGet, path, nil), 7)
+		rec := httptest.NewRecorder()
+		handler(rec, req, "sess-exact")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s status=%d body=%s", path, rec.Code, rec.Body.String())
+		}
+		var body struct {
+			Items []map[string]any `json:"items"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		if len(body.Items) != 1 {
+			t.Fatalf("%s items=%#v", path, body.Items)
+		}
+		for field, value := range want {
+			if got := body.Items[0][field]; got != value {
+				t.Errorf("%s %s=%#v want %q", path, field, got, value)
+			}
+		}
+		if got := body.Items[0]["environment"]; got != float64(1) {
+			t.Errorf("%s environment=%#v want=1", path, got)
+		}
+	}
+
+	assert("/api/sessions/sess-exact/intents", s.getSessionIntents, map[string]string{
+		"requested_qty_decimal": "9007199254740993.00000000", "requested_price_decimal": requestedPrice,
+	})
+	assert("/api/sessions/sess-exact/attempts", s.getSessionAttempts, map[string]string{
+		"requested_qty_decimal": "9007199254740993.00000000", "requested_price_decimal": requestedPrice, "mark_price_decimal": "50000.00000001",
+	})
+	assert("/api/sessions/sess-exact/orders", s.getSessionOrders, map[string]string{
+		"orig_qty_decimal": "9007199254740993.00000000", "executed_qty_decimal": "0.00000001", "remaining_qty_decimal": "0.09999999",
+		"avg_price_decimal": "50000.00000001", "price_decimal": orderPrice, "cumulative_quote_qty_decimal": "123456789.00000001",
+	})
+	assert("/api/sessions/sess-exact/fills", s.getSessionFills, map[string]string{
+		"qty_decimal": "0.00000001", "fill_price_decimal": "50000.00000001", "fee_decimal": "0.00100000",
+		"quote_qty_decimal": "0.00050000", "fee_asset": "BNB",
+	})
 }
 
 func TestGetSessionOrders_LastPageReportsHasMoreFalse(t *testing.T) {

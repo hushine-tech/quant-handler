@@ -30,10 +30,17 @@ func SpotEstimatedValue(sw *portfoliov1.SpotWallet) float64 {
 	if sw == nil {
 		return 0
 	}
-	ev := sw.GetFree() + sw.GetLocked()
+	ev := 0.0
+	hasUSDT := false
 	for _, a := range sw.GetAssets() {
-		q := a.GetQty()
+		asset, free := spotAssetIdentity(a)
+		q := free + a.GetLocked()
 		if math.Abs(q) <= qtyEps {
+			continue
+		}
+		if asset == "USDT" {
+			hasUSDT = true
+			ev += q
 			continue
 		}
 		mark := spotAssetMark(a)
@@ -42,7 +49,62 @@ func SpotEstimatedValue(sw *portfoliov1.SpotWallet) float64 {
 		}
 		ev += q * mark
 	}
+	if !hasUSDT {
+		ev += sw.GetFree() + sw.GetLocked()
+	}
 	return ev
+}
+
+// SpotEstimatedValueWithMetadata values canonical base assets using the exact
+// symbol relation supplied by Binance metadata. It intentionally never builds
+// a symbol by appending USDT to an asset code or by stripping a symbol suffix.
+func SpotEstimatedValueWithMetadata(sw *portfoliov1.SpotWallet, metadata []*portfoliov1.SpotSymbolMetadata, symbolPrices map[string]float64) float64 {
+	if sw == nil {
+		return 0
+	}
+	marksByAsset := make(map[string]float64, len(metadata))
+	for _, item := range metadata {
+		if item == nil || !strings.EqualFold(strings.TrimSpace(item.GetQuoteAsset()), "USDT") {
+			continue
+		}
+		asset := strings.ToUpper(strings.TrimSpace(item.GetBaseAsset()))
+		symbol := strings.ToUpper(strings.TrimSpace(item.GetSymbol()))
+		price := symbolPrices[symbol]
+		if asset != "" && symbol != "" && price > 0 && !math.IsNaN(price) && !math.IsInf(price, 0) {
+			marksByAsset[asset] = price
+		}
+	}
+	total := 0.0
+	hasUSDT := false
+	for _, item := range sw.GetAssets() {
+		asset, free := spotAssetIdentity(item)
+		quantity := free + item.GetLocked()
+		if asset == "USDT" {
+			hasUSDT = true
+			total += quantity
+			continue
+		}
+		if price := marksByAsset[asset]; price > 0 {
+			total += quantity * price
+		}
+	}
+	if !hasUSDT {
+		total += sw.GetFree() + sw.GetLocked()
+	}
+	return total
+}
+
+func spotAssetIdentity(a *portfoliov1.SpotAsset) (string, float64) {
+	if a == nil {
+		return "", 0
+	}
+	asset := strings.ToUpper(strings.TrimSpace(a.GetAsset()))
+	free := a.GetFree()
+	if asset == "" {
+		asset = strings.ToUpper(strings.TrimSpace(a.GetSymbol()))
+		free = a.GetQty()
+	}
+	return asset, free
 }
 
 func spotAssetMark(a *portfoliov1.SpotAsset) float64 {
@@ -114,26 +176,11 @@ func isolatedWBRaw(p *portfoliov1.FuturesPosition) float64 {
 	return p.GetInitialBalance()
 }
 
-// TotalValue matches strategy _compute_total_value: futures equity + spot estimated (spot falls back to free+locked if no priced assets).
+// TotalValue matches strategy _compute_total_value: futures equity plus Spot
+// estimated value. SpotEstimatedValue already applies the rolling legacy cash
+// fallback without discarding canonical USDT assets.
 func TotalValue(fw *portfoliov1.FuturesWallet, sw *portfoliov1.SpotWallet) float64 {
-	feq := FuturesPositionEquity(fw)
-	se := SpotEstimatedValue(sw)
-	if sw != nil && len(sw.GetAssets()) > 0 {
-		hasMark := false
-		for _, a := range sw.GetAssets() {
-			if math.Abs(a.GetQty()) <= qtyEps {
-				continue
-			}
-			if a.Price != nil || a.GetAvgEntryPrice() > 0 {
-				hasMark = true
-				break
-			}
-		}
-		if !hasMark {
-			se = sw.GetFree() + sw.GetLocked()
-		}
-	}
-	return feq + se
+	return FuturesPositionEquity(fw) + SpotEstimatedValue(sw)
 }
 
 // FuturesWalletBalanceAndAvailable sets bootstrap aggregates with a flat-book approximation.

@@ -71,6 +71,177 @@ func withOrderUID(r *http.Request, uid int64) *http.Request {
 
 // ────────────────────────────────────────────────────────────────────────────
 
+func TestOptionalExactDecimalOrLegacyPreservesAbsentMarketPrice(t *testing.T) {
+	if got := optionalExactDecimalOrLegacy(nil, 0); got != "" {
+		t.Fatalf("absent optional price = %q, want empty", got)
+	}
+	if got := optionalExactDecimalOrLegacy(nil, 12.5); got != "12.5" {
+		t.Fatalf("legacy LIMIT price = %q, want 12.5", got)
+	}
+	exact := "9007199254740993.00000000"
+	if got := optionalExactDecimalOrLegacy(&exact, 0); got != exact {
+		t.Fatalf("exact price = %q, want %q", got, exact)
+	}
+}
+
+func TestMarketOrderHistoryOmitsAbsentOptionalPrices(t *testing.T) {
+	fake := &fakeOrdersClient{
+		intentsResp:  &orderv1.QueryOrderIntentsResponse{Intents: []*orderv1.OrderIntentEntry{{IntentId: "intent-market"}}, Total: 1},
+		attemptsResp: &orderv1.QueryOrderAttemptsResponse{Attempts: []*orderv1.OrderAttemptEntry{{AttemptId: "attempt-market"}}, Total: 1},
+		ordersResp:   &orderv1.QueryOrdersResponse{Orders: []*orderv1.ExchangeOrderEntry{{OrderId: "order-market"}}, Total: 1},
+	}
+	s := newOrderHistoryServer(fake)
+	cases := []struct {
+		name string
+		path string
+		call func(http.ResponseWriter, *http.Request)
+	}{
+		{name: "global intent", path: "/api/orders/intents", call: s.handleOrderIntents},
+		{name: "global attempt", path: "/api/orders/attempts", call: s.handleOrderAttempts},
+		{name: "global order", path: "/api/orders", call: s.handleOrderHistory},
+		{name: "session intent", path: "/api/sessions/sess-market/intents", call: func(w http.ResponseWriter, r *http.Request) { s.getSessionIntents(w, r, "sess-market") }},
+		{name: "session attempt", path: "/api/sessions/sess-market/attempts", call: func(w http.ResponseWriter, r *http.Request) { s.getSessionAttempts(w, r, "sess-market") }},
+		{name: "session order", path: "/api/sessions/sess-market/orders", call: func(w http.ResponseWriter, r *http.Request) { s.getSessionOrders(w, r, "sess-market") }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := withOrderUID(httptest.NewRequest(http.MethodGet, tc.path, nil), 7)
+			rec := httptest.NewRecorder()
+			tc.call(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+			}
+			var body struct {
+				Items []map[string]any `json:"items"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+				t.Fatal(err)
+			}
+			if len(body.Items) != 1 {
+				t.Fatalf("items=%#v", body.Items)
+			}
+			for _, field := range []string{"requested_price_decimal", "price_decimal"} {
+				if value, exists := body.Items[0][field]; exists {
+					t.Fatalf("absent MARKET %s leaked as %#v: %s", field, value, rec.Body.String())
+				}
+			}
+		})
+	}
+
+	state := orderStateToJSON(&orderv1.OrderStateEntry{ExchangeOrderId: "market-state"})
+	if value, exists := state["price_decimal"]; exists {
+		t.Fatalf("absent lifecycle MARKET price_decimal leaked as %#v", value)
+	}
+}
+
+func TestLegacyFillQuoteFallbackUsesDecimalMultiplication(t *testing.T) {
+	fake := &fakeOrdersClient{fillsResp: &orderv1.QueryOrderFillsResponse{
+		Fills: []*orderv1.OrderFillEntry{{FillId: "fill-legacy", Qty: 0.1, FillPrice: 0.2}},
+		Total: 1,
+	}}
+	s := newOrderHistoryServer(fake)
+	cases := []struct {
+		name string
+		path string
+		call func(http.ResponseWriter, *http.Request)
+	}{
+		{name: "global", path: "/api/orders/fills", call: s.handleOrderFills},
+		{name: "session", path: "/api/sessions/sess-legacy/fills", call: func(w http.ResponseWriter, r *http.Request) { s.getSessionFills(w, r, "sess-legacy") }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := withOrderUID(httptest.NewRequest(http.MethodGet, tc.path, nil), 7)
+			rec := httptest.NewRecorder()
+			tc.call(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+			}
+			var body struct {
+				Items []struct {
+					QuoteQtyDecimal string `json:"quote_qty_decimal"`
+				} `json:"items"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+				t.Fatal(err)
+			}
+			if len(body.Items) != 1 || body.Items[0].QuoteQtyDecimal != "0.02" {
+				t.Fatalf("quote fallback=%#v body=%s", body.Items, rec.Body.String())
+			}
+		})
+	}
+
+	delta := fillDeltaToJSON(&orderv1.FillDeltaEntry{Qty: 0.1, FillPrice: 0.2})
+	if got := delta["quote_qty_decimal"]; got != "0.02" {
+		t.Fatalf("lifecycle quote fallback=%#v", got)
+	}
+}
+
+func TestLegacyOrderCumulativeQuoteFallbackUsesDecimalMultiplication(t *testing.T) {
+	fake := &fakeOrdersClient{ordersResp: &orderv1.QueryOrdersResponse{
+		Orders: []*orderv1.ExchangeOrderEntry{{OrderId: "order-legacy", ExecutedQty: 0.1, AvgPrice: 0.2}},
+		Total:  1,
+	}}
+	s := newOrderHistoryServer(fake)
+	cases := []struct {
+		name string
+		path string
+		call func(http.ResponseWriter, *http.Request)
+	}{
+		{name: "global", path: "/api/orders", call: s.handleOrderHistory},
+		{name: "session", path: "/api/sessions/sess-legacy/orders", call: func(w http.ResponseWriter, r *http.Request) { s.getSessionOrders(w, r, "sess-legacy") }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := withOrderUID(httptest.NewRequest(http.MethodGet, tc.path, nil), 7)
+			rec := httptest.NewRecorder()
+			tc.call(rec, req)
+			var body struct {
+				Items []struct {
+					CumulativeQuoteQtyDecimal string `json:"cumulative_quote_qty_decimal"`
+				} `json:"items"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+				t.Fatal(err)
+			}
+			if len(body.Items) != 1 || body.Items[0].CumulativeQuoteQtyDecimal != "0.02" {
+				t.Fatalf("cumulative quote fallback=%#v body=%s", body.Items, rec.Body.String())
+			}
+		})
+	}
+
+	state := orderStateToJSON(&orderv1.OrderStateEntry{ExecutedQty: 0.1, AvgPrice: 0.2})
+	if got := state["cumulative_quote_qty_decimal"]; got != "0.02" {
+		t.Fatalf("lifecycle cumulative quote fallback=%#v", got)
+	}
+}
+
+func TestMissingQuoteUsesExactQuantityAndPriceOperandsBeforeLegacyDoubles(t *testing.T) {
+	fake := &fakeOrdersClient{fillsResp: &orderv1.QueryOrderFillsResponse{
+		Fills: []*orderv1.OrderFillEntry{{
+			FillId: "fill-exact-operands", Qty: 9007199254740992, FillPrice: 0.00000001,
+			QtyDecimal: "9007199254740993.00000000", FillPriceDecimal: "0.00000001",
+		}},
+		Total: 1,
+	}}
+	s := newOrderHistoryServer(fake)
+	req := withOrderUID(httptest.NewRequest(http.MethodGet, "/api/orders/fills", nil), 7)
+	rec := httptest.NewRecorder()
+
+	s.handleOrderFills(rec, req)
+
+	var body struct {
+		Items []struct {
+			QuoteQtyDecimal string `json:"quote_qty_decimal"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Items) != 1 || body.Items[0].QuoteQtyDecimal != "90071992.54740993" {
+		t.Fatalf("exact-operand quote=%#v body=%s", body.Items, rec.Body.String())
+	}
+}
+
 func TestOrderHistory_omittedPortfolioIDIsAllowed(t *testing.T) {
 	// Previously required — now portfolio_id is optional and 0 means user-wide.
 	fake := &fakeOrdersClient{ordersResp: &orderv1.QueryOrdersResponse{Total: 0}}
@@ -191,7 +362,7 @@ func TestOrderHistory_envelopeShape(t *testing.T) {
 			Orders: []*orderv1.ExchangeOrderEntry{
 				{
 					OrderId:            "o1",
-					PortfolioId:          3,
+					PortfolioId:        3,
 					Symbol:             "BTCUSDT",
 					Side:               "BUY",
 					OrigQty:            0.1,
@@ -221,7 +392,7 @@ func TestOrderHistory_envelopeShape(t *testing.T) {
 	var body struct {
 		Items []struct {
 			OrderID            string  `json:"order_id"`
-			PortfolioID          int64   `json:"portfolio_id"`
+			PortfolioID        int64   `json:"portfolio_id"`
 			Symbol             string  `json:"symbol"`
 			OrigQty            float64 `json:"orig_qty"`
 			ExecutedQty        float64 `json:"executed_qty"`
@@ -303,6 +474,82 @@ func TestOrderHistory_rejectsNonGET(t *testing.T) {
 	}
 }
 
+func TestOrderHistoryPreservesExactDecimalFieldsAndFeeAsset(t *testing.T) {
+	requestedPrice := "0.00000001"
+	orderPrice := "50000.00000001"
+	fake := &fakeOrdersClient{
+		intentsResp: &orderv1.QueryOrderIntentsResponse{Intents: []*orderv1.OrderIntentEntry{{
+			IntentId: "i-exact", Environment: 1, RequestedQty: 9007199254740992, RequestedPrice: 0.00000001,
+			RequestedQtyDecimal: "9007199254740993.00000000", RequestedPriceDecimal: &requestedPrice,
+		}}},
+		attemptsResp: &orderv1.QueryOrderAttemptsResponse{Attempts: []*orderv1.OrderAttemptEntry{{
+			AttemptId: "a-exact", Environment: 1, RequestedQty: 9007199254740992, RequestedPrice: 0.00000001, MarkPrice: 50000,
+			RequestedQtyDecimal: "9007199254740993.00000000", RequestedPriceDecimal: &requestedPrice, MarkPriceDecimal: "50000.00000001",
+		}}},
+		ordersResp: &orderv1.QueryOrdersResponse{Orders: []*orderv1.ExchangeOrderEntry{{
+			OrderId: "o-exact", Environment: 1, OrigQty: 9007199254740992, ExecutedQty: 0.00000001, RemainingQty: 0.1, AvgPrice: 50000, Price: 50000,
+			OrigQtyDecimal: "9007199254740993.00000000", ExecutedQtyDecimal: "0.00000001", RemainingQtyDecimal: "0.09999999",
+			AvgPriceDecimal: "50000.00000001", PriceDecimal: &orderPrice, CumulativeQuoteQtyDecimal: "123456789.00000001",
+		}}},
+		fillsResp: &orderv1.QueryOrderFillsResponse{Fills: []*orderv1.OrderFillEntry{{
+			FillId: "f-exact", Environment: 1, Qty: 0.00000001, FillPrice: 50000, Fee: 0.001, FeeAsset: "BNB",
+			QtyDecimal: "0.00000001", FillPriceDecimal: "50000.00000001", FeeDecimal: "0.00100000", QuoteQtyDecimal: "0.00050000",
+		}}},
+	}
+	s := newOrderHistoryServer(fake)
+
+	assert := func(path string, handler func(http.ResponseWriter, *http.Request), want map[string]string) {
+		t.Helper()
+		req := withOrderUID(httptest.NewRequest(http.MethodGet, path, nil), 7)
+		rec := httptest.NewRecorder()
+		handler(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s status=%d body=%s", path, rec.Code, rec.Body.String())
+		}
+		var body struct {
+			Items []map[string]any `json:"items"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		if len(body.Items) != 1 {
+			t.Fatalf("%s items=%#v", path, body.Items)
+		}
+		for field, value := range want {
+			if got := body.Items[0][field]; got != value {
+				t.Errorf("%s %s=%#v want exact string %q", path, field, got, value)
+			}
+		}
+		if got := body.Items[0]["environment"]; got != float64(1) {
+			t.Errorf("%s environment=%#v want=1", path, got)
+		}
+	}
+
+	assert("/api/orders/intents", s.handleOrderIntents, map[string]string{
+		"requested_qty_decimal": "9007199254740993.00000000", "requested_price_decimal": requestedPrice,
+	})
+	assert("/api/orders/attempts", s.handleOrderAttempts, map[string]string{
+		"requested_qty_decimal": "9007199254740993.00000000", "requested_price_decimal": requestedPrice, "mark_price_decimal": "50000.00000001",
+	})
+	assert("/api/orders", s.handleOrderHistory, map[string]string{
+		"orig_qty_decimal": "9007199254740993.00000000", "executed_qty_decimal": "0.00000001", "remaining_qty_decimal": "0.09999999",
+		"avg_price_decimal": "50000.00000001", "price_decimal": orderPrice, "cumulative_quote_qty_decimal": "123456789.00000001",
+	})
+	assert("/api/orders/fills", s.handleOrderFills, map[string]string{
+		"qty_decimal": "0.00000001", "fill_price_decimal": "50000.00000001", "fee_decimal": "0.00100000",
+		"quote_qty_decimal": "0.00050000", "fee_asset": "BNB",
+	})
+}
+
+func TestExactDecimalFallbackNeverReformatsPresentExactValue(t *testing.T) {
+	if got := exactDecimalOrLegacy("9007199254740993.00000000", 9007199254740992); got != "9007199254740993.00000000" {
+		t.Fatalf("present exact value was reformatted: %q", got)
+	}
+	if got := exactDecimalOrLegacy("", 0.00000001); got != "0.00000001" {
+		t.Fatalf("legacy fallback=%q want=0.00000001", got)
+	}
+}
+
 func TestOrderAttempts_envelopeShape(t *testing.T) {
 	goodTillDate := timestamppb.New(time.Unix(1893456000, 0).UTC())
 	fake := &fakeOrdersClient{
@@ -311,7 +558,7 @@ func TestOrderAttempts_envelopeShape(t *testing.T) {
 			Attempts: []*orderv1.OrderAttemptEntry{
 				{
 					AttemptId:       "a1",
-					PortfolioId:       3,
+					PortfolioId:     3,
 					Symbol:          "BTCUSDT",
 					Side:            "BUY",
 					RequestedQty:    0.1,
@@ -337,7 +584,7 @@ func TestOrderAttempts_envelopeShape(t *testing.T) {
 	var body struct {
 		Items []struct {
 			AttemptID    string  `json:"attempt_id"`
-			PortfolioID    int64   `json:"portfolio_id"`
+			PortfolioID  int64   `json:"portfolio_id"`
 			RequestedQty float64 `json:"requested_qty"`
 			Status       string  `json:"status"`
 			PostOnly     bool    `json:"post_only"`
@@ -481,7 +728,7 @@ func TestOrderIntents_envelopeShape(t *testing.T) {
 			Intents: []*orderv1.OrderIntentEntry{
 				{
 					IntentId:       "i1",
-					PortfolioId:      9,
+					PortfolioId:    9,
 					Symbol:         "BTCUSDT",
 					Side:           "BUY",
 					RequestedQty:   0.1,
@@ -521,7 +768,7 @@ func TestOrderIntents_envelopeShape(t *testing.T) {
 	var body struct {
 		Items []struct {
 			IntentID       string  `json:"intent_id"`
-			PortfolioID      int64   `json:"portfolio_id"`
+			PortfolioID    int64   `json:"portfolio_id"`
 			Symbol         string  `json:"symbol"`
 			Side           string  `json:"side"`
 			RequestedQty   float64 `json:"requested_qty"`
@@ -626,12 +873,12 @@ func TestOrderFills_envelopeShape(t *testing.T) {
 	}
 	var body struct {
 		Items []struct {
-			FillID    string  `json:"fill_id"`
-			OrderID   string  `json:"order_id"`
+			FillID      string  `json:"fill_id"`
+			OrderID     string  `json:"order_id"`
 			PortfolioID int64   `json:"portfolio_id"`
-			Qty       float64 `json:"qty"`
-			FillPrice float64 `json:"fill_price"`
-			Fee       float64 `json:"fee"`
+			Qty         float64 `json:"qty"`
+			FillPrice   float64 `json:"fill_price"`
+			Fee         float64 `json:"fee"`
 		} `json:"items"`
 		Total int64 `json:"total"`
 	}

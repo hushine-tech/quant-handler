@@ -1,24 +1,31 @@
 package app
 
 import (
+	"fmt"
+	"math"
+	"regexp"
+	"strconv"
 	"strings"
 
 	portfoliov1 "github.com/hushine-tech/core-service/gen/portfoliov1"
 )
 
 type spotAssetIn struct {
-	Symbol        string   `json:"symbol"`
-	Qty           float64  `json:"qty"`
-	Locked        float64  `json:"locked"`
-	AvgEntryPrice float64  `json:"avg_entry_price"`
-	Price         *float64 `json:"price"`
+	Asset         string `json:"asset"`
+	Free          string `json:"free"`
+	Locked        string `json:"locked"`
+	AvgEntryPrice string `json:"avg_entry_price"`
+	Price         string `json:"price"`
 }
 
 type spotIn struct {
-	Free   float64       `json:"free"`
-	Locked float64       `json:"locked"`
 	Assets []spotAssetIn `json:"assets"`
 }
+
+var (
+	spotAssetCodePattern = regexp.MustCompile(`^[A-Za-z0-9]{1,20}$`)
+	spotDecimalPattern   = regexp.MustCompile(`^[0-9]+(?:\.[0-9]{1,8})?$`)
+)
 
 type futPosIn struct {
 	Symbol         string  `json:"symbol"`
@@ -52,31 +59,76 @@ func normPositionMode(s string) string {
 	return s
 }
 
-func buildSpotWallet(in *spotIn, initialBalance float64) *portfoliov1.SpotWallet {
+func buildSpotWallet(in *spotIn, initialBalance float64) (*portfoliov1.SpotWallet, error) {
 	if in == nil {
 		if initialBalance <= 0 {
-			return nil
+			return nil, nil
 		}
-		return &portfoliov1.SpotWallet{Free: initialBalance}
+		exact := strconv.FormatFloat(initialBalance, 'f', -1, 64)
+		return &portfoliov1.SpotWallet{Assets: []*portfoliov1.SpotAsset{{
+			Asset: "USDT", Free: initialBalance, FreeDecimal: exact, LockedDecimal: "0",
+		}}}, nil
 	}
-	sw := &portfoliov1.SpotWallet{Free: in.Free, Locked: in.Locked}
-	for _, a := range in.Assets {
-		sym := strings.ToUpper(strings.TrimSpace(a.Symbol))
-		if sym == "" {
-			continue
+	sw := &portfoliov1.SpotWallet{Assets: make([]*portfoliov1.SpotAsset, 0, len(in.Assets))}
+	seen := make(map[string]struct{}, len(in.Assets))
+	hasUSDT := false
+	for index, input := range in.Assets {
+		rawAsset := strings.TrimSpace(input.Asset)
+		if !spotAssetCodePattern.MatchString(rawAsset) {
+			return nil, fmt.Errorf("spot.assets[%d].asset is invalid", index)
+		}
+		assetCode := strings.ToUpper(rawAsset)
+		if assetCode != "USDT" && strings.HasSuffix(assetCode, "USDT") {
+			return nil, fmt.Errorf("spot.assets[%d].asset must be a base asset, not trading symbol %s", index, assetCode)
+		}
+		if _, exists := seen[assetCode]; exists {
+			return nil, fmt.Errorf("spot.assets contains duplicate asset %s", assetCode)
+		}
+		seen[assetCode] = struct{}{}
+		hasUSDT = hasUSDT || assetCode == "USDT"
+		free, err := parseSpotBootstrapDecimal(fmt.Sprintf("spot.assets[%d].free", index), input.Free)
+		if err != nil {
+			return nil, err
+		}
+		locked, err := parseSpotBootstrapDecimal(fmt.Sprintf("spot.assets[%d].locked", index), input.Locked)
+		if err != nil {
+			return nil, err
 		}
 		asset := &portfoliov1.SpotAsset{
-			Symbol:        sym,
-			Qty:           a.Qty,
-			Locked:        a.Locked,
-			AvgEntryPrice: a.AvgEntryPrice,
+			Asset: assetCode, Free: free, Locked: locked,
+			FreeDecimal: input.Free, LockedDecimal: input.Locked,
 		}
-		if a.Price != nil {
-			asset.Price = a.Price
+		if input.AvgEntryPrice != "" {
+			value, err := parseSpotBootstrapDecimal(fmt.Sprintf("spot.assets[%d].avg_entry_price", index), input.AvgEntryPrice)
+			if err != nil {
+				return nil, err
+			}
+			asset.AvgEntryPrice = value
+		}
+		if input.Price != "" {
+			value, err := parseSpotBootstrapDecimal(fmt.Sprintf("spot.assets[%d].price", index), input.Price)
+			if err != nil {
+				return nil, err
+			}
+			asset.Price = &value
 		}
 		sw.Assets = append(sw.Assets, asset)
 	}
-	return sw
+	if !hasUSDT {
+		return nil, fmt.Errorf("spot.assets must include USDT")
+	}
+	return sw, nil
+}
+
+func parseSpotBootstrapDecimal(field, raw string) (float64, error) {
+	if !spotDecimalPattern.MatchString(raw) {
+		return 0, fmt.Errorf("%s must be a non-negative decimal string with at most 8 fractional digits", field)
+	}
+	value, err := strconv.ParseFloat(raw, 64)
+	if err != nil || math.IsNaN(value) || math.IsInf(value, 0) || value < 0 {
+		return 0, fmt.Errorf("%s is invalid", field)
+	}
+	return value, nil
 }
 
 func buildFuturesWallet(in *futIn) *portfoliov1.FuturesWallet {
@@ -143,12 +195,17 @@ func spotBootstrapValue(s *portfoliov1.SpotWallet) float64 {
 	}
 	total := s.GetFree() + s.GetLocked()
 	for _, asset := range s.GetAssets() {
+		quantity := asset.GetFree() + asset.GetLocked()
+		if strings.EqualFold(strings.TrimSpace(asset.GetAsset()), "USDT") {
+			total += quantity
+			continue
+		}
 		price := asset.GetAvgEntryPrice()
 		if asset.Price != nil {
 			price = asset.GetPrice()
 		}
 		if price > 0 {
-			total += (asset.GetQty() + asset.GetLocked()) * price
+			total += quantity * price
 		}
 	}
 	return total
@@ -174,12 +231,15 @@ func futuresBootstrapValue(f *portfoliov1.FuturesWallet) float64 {
 	return total
 }
 
-func buildWalletBootstrap(spotIn *spotIn, futuresIn *futIn, initialBalance *float64) walletBootstrap {
+func buildWalletBootstrap(spotIn *spotIn, futuresIn *futIn, initialBalance *float64) (walletBootstrap, error) {
 	var initial float64
 	if initialBalance != nil {
 		initial = *initialBalance
 	}
-	spot := buildSpotWallet(spotIn, initial)
+	spot, err := buildSpotWallet(spotIn, initial)
+	if err != nil {
+		return walletBootstrap{}, err
+	}
 	futures := buildFuturesWallet(futuresIn)
 	spotValue := spotBootstrapValue(spot)
 	futuresValue := futuresBootstrapValue(futures)
@@ -193,8 +253,13 @@ func buildWalletBootstrap(spotIn *spotIn, futuresIn *futIn, initialBalance *floa
 	if futures == nil {
 		bootstrap.WalletBalance = spotValue
 		if spot != nil {
-			bootstrap.AvailableBalance = spot.GetFree()
+			for _, asset := range spot.GetAssets() {
+				if strings.EqualFold(strings.TrimSpace(asset.GetAsset()), "USDT") {
+					bootstrap.AvailableBalance = asset.GetFree()
+					break
+				}
+			}
 		}
 	}
-	return bootstrap
+	return bootstrap, nil
 }

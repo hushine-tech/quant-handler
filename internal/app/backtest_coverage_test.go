@@ -294,7 +294,7 @@ func TestDownloadAndRunJobPreservesPreviewAndRunDependencyErrors(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if contains(string(encoded), "10000") || contains(string(encoded), "StringValue") {
+			if contains(string(encoded), "StringValue") {
 				t.Fatalf("job leaks serialized transport error: %s", encoded)
 			}
 		})

@@ -10,9 +10,9 @@ import (
 func TestSpotEstimatedValue(t *testing.T) {
 	p := 41000.0
 	sw := &portfoliov1.SpotWallet{
-		Free: 5000, Locked: 100,
 		Assets: []*portfoliov1.SpotAsset{
-			{Symbol: "BTCUSDT", Qty: 0.1, Price: &p},
+			{Asset: "USDT", Free: 5000, Locked: 100},
+			{Asset: "BTC", Free: 0.1, Price: &p},
 		},
 	}
 	got := SpotEstimatedValue(sw)
@@ -24,9 +24,9 @@ func TestSpotEstimatedValue(t *testing.T) {
 
 func TestSpotEstimatedValueUsesAvgWhenNoPrice(t *testing.T) {
 	sw := &portfoliov1.SpotWallet{
-		Free: 100,
 		Assets: []*portfoliov1.SpotAsset{
-			{Symbol: "ETHUSDT", Qty: 2, AvgEntryPrice: 2500},
+			{Asset: "USDT", Free: 100},
+			{Asset: "ETH", Free: 2, AvgEntryPrice: 2500},
 		},
 	}
 	got := SpotEstimatedValue(sw)
@@ -46,14 +46,50 @@ func TestTotalValueFlatIsolated(t *testing.T) {
 	}
 	p := 3000.0
 	sw := &portfoliov1.SpotWallet{
-		Free: 1000,
 		Assets: []*portfoliov1.SpotAsset{
-			{Symbol: "ETHUSDT", Qty: 1, Price: &p},
+			{Asset: "USDT", Free: 1000},
+			{Asset: "ETH", Free: 1, Price: &p},
 		},
 	}
 	tv := TotalValue(fw, sw)
 	want := 7500.0
 	if math.Abs(tv-want) > 1e-6 {
 		t.Fatalf("total got %v want %v", tv, want)
+	}
+}
+
+func TestTotalValuePreservesCanonicalUSDTOnlyWallet(t *testing.T) {
+	sw := &portfoliov1.SpotWallet{Assets: []*portfoliov1.SpotAsset{{
+		Asset: "USDT", Free: 1000, Locked: 25, FreeDecimal: "1000.00000000", LockedDecimal: "25.00000000",
+	}}}
+	if got := TotalValue(nil, sw); got != 1025 {
+		t.Fatalf("canonical USDT-only total=%v want=1025", got)
+	}
+}
+
+func TestSpotEstimatedValueWithMetadataMapsBaseAssetToSymbolPrice(t *testing.T) {
+	sw := &portfoliov1.SpotWallet{Assets: []*portfoliov1.SpotAsset{
+		{Asset: "USDT", Free: 100},
+		{Asset: "BTC", Free: 0.1},
+		{Asset: "1000SATS", Free: 2},
+	}}
+	metadata := []*portfoliov1.SpotSymbolMetadata{
+		{Symbol: "BTCUSDT", BaseAsset: "BTC", QuoteAsset: "USDT", Status: "TRADING"},
+		{Symbol: "1000SATSUSDT", BaseAsset: "1000SATS", QuoteAsset: "USDT", Status: "TRADING"},
+	}
+	prices := map[string]float64{"BTCUSDT": 41000, "1000SATSUSDT": 3.5}
+
+	got := SpotEstimatedValueWithMetadata(sw, metadata, prices)
+	want := 100 + 0.1*41000 + 2*3.5
+	if math.Abs(got-want) > 1e-6 {
+		t.Fatalf("got %v want %v", got, want)
+	}
+}
+
+func TestSpotEstimatedValueWithMetadataDoesNotInventSymbolFromAssetText(t *testing.T) {
+	sw := &portfoliov1.SpotWallet{Assets: []*portfoliov1.SpotAsset{{Asset: "USDT", Free: 100}, {Asset: "BTC", Free: 1}}}
+	got := SpotEstimatedValueWithMetadata(sw, nil, map[string]float64{"BTCUSDT": 41000})
+	if got != 100 {
+		t.Fatalf("valuation invented BTCUSDT without metadata: %v", got)
 	}
 }

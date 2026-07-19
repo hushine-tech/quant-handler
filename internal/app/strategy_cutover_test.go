@@ -1064,6 +1064,64 @@ func TestStop_UsesSessionRuntimeID(t *testing.T) {
 	}
 }
 
+func TestStop_PreservesMixedRouteTargetResultsAndOperationFacts(t *testing.T) {
+	proxy := &fakeControlPanelStrategyProxy{stopResp: &strategyv1.StopStrategyResponse{
+		Stopped:             false,
+		Status:              "stop_failed",
+		Code:                "SPOT_CLOSE_PARTIAL_FAILURE",
+		ReconciliationRunId: "reconcile-7",
+		OperationId:         "operation-7",
+		TargetResults: []*strategyv1.StopTargetResult{
+			{Exchange: 1, Market: 1, Symbol: "BTCUSDT", Status: "failed", Code: "SPOT_LOCKED_BALANCE", Message: "locked balance"},
+			{Exchange: 1, Market: 2, Symbol: "BTCUSDT", Status: "unchanged", Code: "FUTURES_UNCHANGED"},
+		},
+	}}
+	resolver := &fakeResolver{resolveByIDResp: controlpanel.Route{RuntimeID: "rt-session", Name: "default", Source: "hosted"}}
+	portfolios := &fakeSessionPortfoliosClient{getSessionResp: &portfoliov1.GetSessionResponse{Session: &portfoliov1.StrategySessionEntry{
+		SessionId: "sess-mixed", UserId: 42, RuntimeId: "rt-session", Status: "running",
+	}}}
+	s := &server{portfolios: portfolios, controlPanel: resolver, cpRuntime: proxy, jwtSecret: []byte("s"), corsOrigins: []string{"*"}}
+	req := withUID(httptest.NewRequest(http.MethodPost, "/api/strategy-sessions/sess-mixed/stop",
+		bytes.NewBufferString(`{"stop_action":"STOP_AND_CLOSE_POSITIONS","operation_id":"operation-7"}`)), 42)
+	rec := httptest.NewRecorder()
+
+	s.handleStrategySession(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if proxy.stopReq == nil || proxy.stopReq.GetOperationId() != "operation-7" {
+		t.Fatalf("stop request operation_id=%#v", proxy.stopReq)
+	}
+	var body struct {
+		Status              string `json:"status"`
+		Code                string `json:"code"`
+		ReconciliationRunID string `json:"reconciliation_run_id"`
+		OperationID         string `json:"operation_id"`
+		TargetResults       []struct {
+			Exchange      int32  `json:"exchange"`
+			ExchangeLabel string `json:"exchange_label"`
+			Market        int32  `json:"market"`
+			MarketLabel   string `json:"market_label"`
+			Symbol        string `json:"symbol"`
+			Status        string `json:"status"`
+			Code          string `json:"code"`
+			Message       string `json:"message"`
+		} `json:"target_results"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Status != "stop_failed" || body.Code != "SPOT_CLOSE_PARTIAL_FAILURE" || body.ReconciliationRunID != "reconcile-7" || body.OperationID != "operation-7" {
+		t.Fatalf("stop facts=%#v body=%s", body, rec.Body.String())
+	}
+	if len(body.TargetResults) != 2 || body.TargetResults[0].Market != 1 || body.TargetResults[0].MarketLabel != "spot" ||
+		body.TargetResults[1].Market != 2 || body.TargetResults[1].MarketLabel != "perpetual_futures" ||
+		body.TargetResults[0].Symbol != "BTCUSDT" || body.TargetResults[1].Symbol != "BTCUSDT" {
+		t.Fatalf("mixed target results=%#v body=%s", body.TargetResults, rec.Body.String())
+	}
+}
+
 func TestStop_StaleRuntimeSessionMarksRecoverable(t *testing.T) {
 	proxy := &fakeControlPanelStrategyProxy{
 		stopErr: status.Error(codes.NotFound, "session sess_abc not found"),

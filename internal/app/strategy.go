@@ -36,7 +36,8 @@ type runStrategyRequest struct {
 }
 
 type stopStrategyRequest struct {
-	StopAction string `json:"stop_action"`
+	StopAction  string `json:"stop_action"`
+	OperationID string `json:"operation_id"`
 }
 
 type previewRunStrategyRequest struct {
@@ -90,9 +91,21 @@ type preflightInputKeyJSON struct {
 }
 
 type preflightFailureJSON struct {
-	Kind     string                 `json:"kind"`
-	Reason   string                 `json:"reason"`
-	InputKey *preflightInputKeyJSON `json:"input_key,omitempty"`
+	Kind          string                 `json:"kind"`
+	Reason        string                 `json:"reason"`
+	InputKey      *preflightInputKeyJSON `json:"input_key,omitempty"`
+	Code          string                 `json:"code,omitempty"`
+	Route         string                 `json:"route,omitempty"`
+	Exchange      int32                  `json:"exchange,omitempty"`
+	ExchangeLabel string                 `json:"exchange_label,omitempty"`
+	Market        int32                  `json:"market,omitempty"`
+	MarketLabel   string                 `json:"market_label,omitempty"`
+	Symbol        string                 `json:"symbol,omitempty"`
+	VenueID       int64                  `json:"venue_id,omitempty"`
+	FilterType    string                 `json:"filter_type,omitempty"`
+	Environment   int32                  `json:"environment"`
+	Retryable     bool                   `json:"retryable"`
+	Source        string                 `json:"source,omitempty"`
 }
 
 type previewRunStrategyResponse struct {
@@ -207,6 +220,71 @@ func (s *server) handleRunStrategy(w http.ResponseWriter, r *http.Request, portf
 	}
 	cli, _, ok := s.strategyClient(r.Context(), w, uid, routeEnsure, runtimeID, policy)
 	if !ok {
+		return
+	}
+	previewCtx, previewCancel := context.WithTimeout(r.Context(), previewRunStrategyRPCTimeout)
+	preview, err := cli.PreviewRunStrategy(previewCtx, &strategyv1.PreviewRunStrategyRequest{
+		PortfolioId:     portfolioID,
+		StrategyPath:    body.StrategyPath,
+		StartTimeMs:     body.StartTimeMs,
+		EndTimeMs:       body.EndTimeMs,
+		UserId:          uid,
+		RuntimeId:       runtimeID,
+		MaxLossClosePct: body.MaxLossClosePct,
+		Leverage:        body.Leverage,
+	})
+	previewCancel()
+	if err != nil {
+		if writeRuntimeDependencyError(w, err) {
+			return
+		}
+		code, msg := grpcToHTTP(err)
+		writeErr(w, code, msg)
+		return
+	}
+	if preview == nil {
+		writeErr(w, http.StatusBadGateway, "runtime returned an empty strategy preview")
+		return
+	}
+	if !preview.GetOk() {
+		failures := preview.GetFailures()
+		if len(failures) == 0 {
+			writeStructuredError(w, http.StatusPreconditionFailed, structuredErrorJSON{
+				Error: "strategy preflight failed", Code: "STRATEGY_PREFLIGHT_FAILED",
+				Environment: int32(policy.environment), Source: "strategy-service",
+			})
+			return
+		}
+		failure := failures[0]
+		failureDetails := make([]preflightFailureJSON, 0, len(failures))
+		for _, candidate := range failures {
+			failureDetails = append(failureDetails, preflightFailureToJSON(candidate))
+		}
+		code := strings.TrimSpace(failure.GetCode())
+		if code == "" {
+			code = "STRATEGY_PREFLIGHT_FAILED"
+		}
+		source := strings.TrimSpace(failure.GetSource())
+		if source == "" {
+			source = "strategy-service"
+		}
+		writeStructuredError(w, http.StatusPreconditionFailed, structuredErrorJSON{
+			Error:       failure.GetReason(),
+			Code:        code,
+			Route:       preflightFailureRoute(failure),
+			Exchange:    failure.GetExchange(),
+			Market:      failure.GetMarket(),
+			VenueID:     failure.GetVenueId(),
+			Symbol:      failure.GetSymbol(),
+			FilterType:  failure.GetFilterType(),
+			Environment: failure.GetEnvironment(),
+			Retryable:   failure.GetRetryable(),
+			Source:      source,
+			Failures:    failureDetails,
+		})
+		return
+	}
+	if previewDeclaresSpot(preview) && !s.requireSpotStartCapability(r.Context(), w, int32(policy.environment)) {
 		return
 	}
 	rpcCtx, cancel := context.WithTimeout(r.Context(), runStrategyRPCTimeout)
@@ -373,21 +451,13 @@ func (s *server) handlePreviewRunStrategy(w http.ResponseWriter, r *http.Request
 		writeErr(w, code, msg)
 		return
 	}
+	if resp.GetOk() && previewDeclaresSpot(resp) && !s.requireSpotStartCapability(r.Context(), w, int32(policy.environment)) {
+		return
+	}
 
 	failures := make([]preflightFailureJSON, 0, len(resp.GetFailures()))
 	for _, f := range resp.GetFailures() {
-		j := preflightFailureJSON{
-			Kind:   f.GetKind(),
-			Reason: f.GetReason(),
-		}
-		if k := f.GetInputKey(); k != nil && (k.GetMarket() != "" || k.GetSymbol() != "" || k.GetInterval() != "") {
-			j.InputKey = &preflightInputKeyJSON{
-				Market:   marketDataMarketToStrategyMarket(k.GetMarket()),
-				Symbol:   k.GetSymbol(),
-				Interval: k.GetInterval(),
-			}
-		}
-		failures = append(failures, j)
+		failures = append(failures, preflightFailureToJSON(f))
 	}
 	required := make([]streamKeyJSON, 0, len(resp.GetRequiredStreams()))
 	for _, b := range resp.GetRequiredStreams() {
@@ -415,6 +485,54 @@ func (s *server) handlePreviewRunStrategy(w http.ResponseWriter, r *http.Request
 			LeverageSource:     resp.GetRiskControls().GetLeverageSource(),
 		},
 	})
+}
+
+func preflightFailureToJSON(failure *strategyv1.PreflightFailureProto) preflightFailureJSON {
+	if failure == nil {
+		return preflightFailureJSON{}
+	}
+	exchangeLabel := orderExchangeLabel(failure.GetExchange())
+	if exchangeLabel == "unknown" {
+		exchangeLabel = ""
+	}
+	marketLabel := orderMarketLabel(failure.GetMarket())
+	if marketLabel == "unknown" {
+		marketLabel = ""
+	}
+	out := preflightFailureJSON{
+		Kind:          failure.GetKind(),
+		Reason:        failure.GetReason(),
+		Code:          failure.GetCode(),
+		Route:         preflightFailureRoute(failure),
+		Exchange:      failure.GetExchange(),
+		ExchangeLabel: exchangeLabel,
+		Market:        failure.GetMarket(),
+		MarketLabel:   marketLabel,
+		Symbol:        failure.GetSymbol(),
+		VenueID:       failure.GetVenueId(),
+		FilterType:    failure.GetFilterType(),
+		Environment:   failure.GetEnvironment(),
+		Retryable:     failure.GetRetryable(),
+		Source:        failure.GetSource(),
+	}
+	if key := failure.GetInputKey(); key != nil && (key.GetMarket() != "" || key.GetSymbol() != "" || key.GetInterval() != "") {
+		out.InputKey = &preflightInputKeyJSON{
+			Market: marketDataMarketToStrategyMarket(key.GetMarket()), Symbol: key.GetSymbol(), Interval: key.GetInterval(),
+		}
+	}
+	return out
+}
+
+func preflightFailureRoute(failure *strategyv1.PreflightFailureProto) string {
+	if failure == nil {
+		return ""
+	}
+	exchange := orderExchangeLabel(failure.GetExchange())
+	market := orderMarketLabel(failure.GetMarket())
+	if exchange == "unknown" || market == "unknown" {
+		return ""
+	}
+	return exchange + "/" + market
 }
 
 func liveBindingsToStreamKeys(bindings []*strategyv1.LiveStreamBinding) []streamKeyJSON {
@@ -623,10 +741,11 @@ func (s *server) handleStopStrategy(w http.ResponseWriter, r *http.Request, sess
 		runtimeID = selectedRuntimeID
 	}
 	resp, err := cli.StopStrategy(r.Context(), &strategyv1.StopStrategyRequest{
-		SessionId:  sessionID,
-		StopAction: action,
-		UserId:     uid,
-		RuntimeId:  runtimeID,
+		SessionId:   sessionID,
+		StopAction:  action,
+		OperationId: strings.TrimSpace(body.OperationID),
+		UserId:      uid,
+		RuntimeId:   runtimeID,
 	})
 	if err != nil {
 		if reason, ok := s.markRecoverableForStaleRuntimeStop(r.Context(), session, runtimeID, err); ok {
@@ -643,7 +762,8 @@ func (s *server) handleStopStrategy(w http.ResponseWriter, r *http.Request, sess
 		writeErr(w, code, msg)
 		return
 	}
-	if !resp.GetStopped() && action != strategyv1.StopAction_STOP_ACTION_CANCEL {
+	if !resp.GetStopped() && action != strategyv1.StopAction_STOP_ACTION_CANCEL &&
+		strings.TrimSpace(resp.GetStatus()) == "" && strings.TrimSpace(resp.GetCode()) == "" && len(resp.GetTargetResults()) == 0 {
 		if reason, ok := s.markRecoverableForRejectedRuntimeStop(r.Context(), session, runtimeID); ok {
 			writeJSON(w, http.StatusOK, map[string]any{
 				"stopped":     true,
@@ -660,11 +780,46 @@ func (s *server) handleStopStrategy(w http.ResponseWriter, r *http.Request, sess
 		"stop_action": action.String(),
 		"runtime_id":  runtimeID,
 	}
+	if value := strings.TrimSpace(resp.GetStatus()); value != "" {
+		out["status"] = value
+	}
+	if value := strings.TrimSpace(resp.GetCode()); value != "" {
+		out["code"] = value
+	}
+	if value := strings.TrimSpace(resp.GetReconciliationRunId()); value != "" {
+		out["reconciliation_run_id"] = value
+	}
+	if value := strings.TrimSpace(resp.GetOperationId()); value != "" {
+		out["operation_id"] = value
+	}
+	if targets := resp.GetTargetResults(); len(targets) > 0 {
+		results := make([]map[string]any, 0, len(targets))
+		for _, target := range targets {
+			if target == nil {
+				continue
+			}
+			results = append(results, map[string]any{
+				"exchange":       target.GetExchange(),
+				"exchange_label": orderExchangeLabel(target.GetExchange()),
+				"market":         target.GetMarket(),
+				"market_label":   orderMarketLabel(target.GetMarket()),
+				"symbol":         target.GetSymbol(),
+				"status":         target.GetStatus(),
+				"code":           target.GetCode(),
+				"message":        target.GetMessage(),
+			})
+		}
+		out["target_results"] = results
+	}
 	if s.portfolios != nil {
 		if current, err := s.portfolios.GetSession(r.Context(), &portfoliov1.GetSessionRequest{SessionId: sessionID, UserId: uid}); err == nil {
 			if session := current.GetSession(); session != nil {
-				out["status"] = session.GetStatus()
-				out["error"] = session.GetError()
+				if _, exists := out["status"]; !exists && strings.TrimSpace(session.GetStatus()) != "" {
+					out["status"] = session.GetStatus()
+				}
+				if strings.TrimSpace(session.GetError()) != "" {
+					out["error"] = session.GetError()
+				}
 			}
 		}
 	}

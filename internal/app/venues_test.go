@@ -174,7 +174,7 @@ func TestCreateBacktestVenueAllowsUnbound(t *testing.T) {
 	}
 }
 
-func TestCreateBacktestVenueForwardsWalletBootstrap(t *testing.T) {
+func TestCreateBacktestFuturesVenueForwardsOnlyFuturesWallet(t *testing.T) {
 	fake := &fakeVenuePortfoliosClient{createResp: &portfoliov1.CreateVenueResponse{Venue: &portfoliov1.VenueEntry{VenueId: 88}}}
 	s := &server{portfolios: fake, jwtSecret: []byte("secret"), corsOrigins: []string{"*"}}
 	body := strings.NewReader(`{
@@ -183,7 +183,6 @@ func TestCreateBacktestVenueForwardsWalletBootstrap(t *testing.T) {
 		"environment":"backtest",
 		"margin_mode":"cross",
 		"position_mode":"one_way",
-		"spot":{"free":250,"assets":[{"symbol":"BTCUSDT","qty":0.01,"avg_entry_price":25000}]},
 		"futures":{
 			"margin_mode":"cross",
 			"position_mode":"one_way",
@@ -202,12 +201,170 @@ func TestCreateBacktestVenueForwardsWalletBootstrap(t *testing.T) {
 	if fake.createReq.GetFutures().GetInitialBalance() != 1500 || len(fake.createReq.GetFutures().GetPositions()) != 1 {
 		t.Fatalf("futures bootstrap not forwarded: %+v", fake.createReq.GetFutures())
 	}
-	if fake.createReq.GetSpot().GetFree() != 250 || len(fake.createReq.GetSpot().GetAssets()) != 1 {
-		t.Fatalf("spot bootstrap not forwarded: %+v", fake.createReq.GetSpot())
+	if fake.createReq.GetSpot() != nil {
+		t.Fatalf("Spot wallet leaked into Futures venue: %+v", fake.createReq.GetSpot())
 	}
-	if fake.createReq.GetTotalValue() != 2000 || fake.createReq.GetWalletBalance() != 1500 || fake.createReq.GetAvailableBalance() != 1500 {
+	if fake.createReq.GetTotalValue() != 1500 || fake.createReq.GetWalletBalance() != 1500 || fake.createReq.GetAvailableBalance() != 1500 {
 		t.Fatalf("bootstrap totals = total:%v wallet:%v available:%v",
 			fake.createReq.GetTotalValue(), fake.createReq.GetWalletBalance(), fake.createReq.GetAvailableBalance())
+	}
+}
+
+func TestCreateBacktestFuturesVenueMapsLegacyInitialBalanceToFuturesOnly(t *testing.T) {
+	fake := &fakeVenuePortfoliosClient{createResp: &portfoliov1.CreateVenueResponse{Venue: &portfoliov1.VenueEntry{VenueId: 90}}}
+	s := &server{portfolios: fake}
+	body := strings.NewReader(`{
+		"exchange":"binance","market":"perpetual_futures","environment":"backtest",
+		"margin_mode":"cross","position_mode":"one_way","initial_balance":1500
+	}`)
+	req := withUID(httptest.NewRequest(http.MethodPost, "/api/venues", body), 42)
+	rec := httptest.NewRecorder()
+
+	s.handleVenues(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if fake.createReq.GetSpot() != nil || fake.createReq.GetFutures().GetInitialBalance() != 1500 || fake.createReq.GetFutures().GetMarginMode() != "cross" {
+		t.Fatalf("legacy Futures bootstrap crossed route: %#v", fake.createReq)
+	}
+}
+
+func TestCreateBacktestSpotVenueForwardsOnlyCanonicalSpotWallet(t *testing.T) {
+	fake := &fakeVenuePortfoliosClient{createResp: &portfoliov1.CreateVenueResponse{Venue: &portfoliov1.VenueEntry{VenueId: 89}}}
+	s := &server{portfolios: fake, jwtSecret: []byte("secret"), corsOrigins: []string{"*"}}
+	body := strings.NewReader(`{
+		"exchange":"binance",
+		"market":"spot",
+		"environment":"backtest",
+		"spot":{"assets":[
+			{"asset":"USDT","free":"250.00000000","locked":"0.00000000"},
+			{"asset":"BTC","free":"0.01000000","locked":"0.00000000","avg_entry_price":"25000.00000000"}
+		]}
+	}`)
+	req := withUID(httptest.NewRequest(http.MethodPost, "/api/venues", body), 42)
+	rec := httptest.NewRecorder()
+
+	s.handleVenues(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", rec.Code, rec.Body.String())
+	}
+	if fake.createReq.GetFutures() != nil {
+		t.Fatalf("Futures wallet leaked into Spot venue: %+v", fake.createReq.GetFutures())
+	}
+	spotAssets := fake.createReq.GetSpot().GetAssets()
+	if len(spotAssets) != 2 || spotAssets[0].GetAsset() != "USDT" || spotAssets[0].GetFreeDecimal() != "250.00000000" || spotAssets[0].GetLockedDecimal() != "0.00000000" {
+		t.Fatalf("canonical USDT bootstrap = %+v", spotAssets)
+	}
+	if spotAssets[1].GetAsset() != "BTC" || spotAssets[1].GetFreeDecimal() != "0.01000000" || spotAssets[1].GetSymbol() != "" || spotAssets[1].GetQty() != 0 {
+		t.Fatalf("canonical BTC bootstrap = %+v", spotAssets[1])
+	}
+	if fake.createReq.GetTotalValue() != 500 || fake.createReq.GetWalletBalance() != 500 || fake.createReq.GetAvailableBalance() != 250 {
+		t.Fatalf("bootstrap totals = total:%v wallet:%v available:%v",
+			fake.createReq.GetTotalValue(), fake.createReq.GetWalletBalance(), fake.createReq.GetAvailableBalance())
+	}
+}
+
+func TestCreateBacktestVenueRejectsWalletFromAnotherMarket(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "Spot rejects Futures wallet",
+			body: `{
+				"exchange":"binance","market":"spot","environment":"backtest",
+				"spot":{"assets":[{"asset":"USDT","free":"100","locked":"0"}]},
+				"futures":{"margin_mode":"cross","initial_balance":1000}
+			}`,
+		},
+		{
+			name: "Spot rejects legacy initial balance",
+			body: `{
+				"exchange":"binance","market":"spot","environment":"backtest",
+				"initial_balance":1000,
+				"spot":{"assets":[{"asset":"USDT","free":"100","locked":"0"}]}
+			}`,
+		},
+		{
+			name: "Futures rejects Spot wallet",
+			body: `{
+				"exchange":"binance","market":"perpetual_futures","environment":"backtest",
+				"margin_mode":"cross","position_mode":"one_way",
+				"spot":{"assets":[{"asset":"USDT","free":"100","locked":"0"}]},
+				"futures":{"margin_mode":"cross","initial_balance":1000}
+			}`,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := &fakeVenuePortfoliosClient{}
+			s := &server{portfolios: fake}
+			req := withUID(httptest.NewRequest(http.MethodPost, "/api/venues", strings.NewReader(tc.body)), 42)
+			rec := httptest.NewRecorder()
+
+			s.handleVenues(rec, req)
+
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status=%d want=400 body=%s", rec.Code, rec.Body.String())
+			}
+			if fake.createReq != nil {
+				t.Fatalf("cross-market wallet reached core: %#v", fake.createReq)
+			}
+		})
+	}
+}
+
+func TestCreateBacktestSpotVenueRejectsNonCanonicalWalletAssets(t *testing.T) {
+	tests := []struct {
+		name string
+		spot string
+	}{
+		{name: "missing spot wallet", spot: ""},
+		{name: "missing USDT", spot: `,"spot":{"assets":[{"asset":"BTC","free":"0.1","locked":"0"}]}`},
+		{name: "duplicate asset", spot: `,"spot":{"assets":[{"asset":"USDT","free":"1","locked":"0"},{"asset":"usdt","free":"2","locked":"0"}]}`},
+		{name: "trading symbol is not an asset", spot: `,"spot":{"assets":[{"asset":"USDT","free":"1","locked":"0"},{"asset":"BTCUSDT","free":"1","locked":"0"}]}`},
+		{name: "negative free", spot: `,"spot":{"assets":[{"asset":"USDT","free":"-1","locked":"0"}]}`},
+		{name: "unsupported precision", spot: `,"spot":{"assets":[{"asset":"USDT","free":"0.000000001","locked":"0"}]}`},
+		{name: "number instead of exact string", spot: `,"spot":{"assets":[{"asset":"USDT","free":1,"locked":"0"}]}`},
+		{name: "invalid asset code", spot: `,"spot":{"assets":[{"asset":"USD_T","free":"1","locked":"0"}]}`},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := &fakeVenuePortfoliosClient{}
+			s := &server{portfolios: fake}
+			body := `{"exchange":"binance","market":"spot","environment":"backtest"` + tc.spot + `}`
+			req := withUID(httptest.NewRequest(http.MethodPost, "/api/venues", strings.NewReader(body)), 42)
+			rec := httptest.NewRecorder()
+
+			s.handleVenues(rec, req)
+
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status=%d want=400 body=%s", rec.Code, rec.Body.String())
+			}
+			if fake.createReq != nil {
+				t.Fatalf("invalid Spot wallet reached core: %+v", fake.createReq)
+			}
+		})
+	}
+}
+
+func TestCreateBacktestSpotVenueNormalizesValidatedAssetCodes(t *testing.T) {
+	fake := &fakeVenuePortfoliosClient{}
+	s := &server{portfolios: fake}
+	body := `{"exchange":"binance","market":"spot","environment":"backtest","spot":{"assets":[{"asset":"usdt","free":"1000.00000000","locked":"0.00000000"},{"asset":"btc","free":"0.01000000","locked":"0.00100000"}]}}`
+	req := withUID(httptest.NewRequest(http.MethodPost, "/api/venues", strings.NewReader(body)), 42)
+	rec := httptest.NewRecorder()
+
+	s.handleVenues(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	assets := fake.createReq.GetSpot().GetAssets()
+	if fake.createReq.GetMarket() != 1 || len(assets) != 2 || assets[0].GetAsset() != "USDT" || assets[1].GetAsset() != "BTC" {
+		t.Fatalf("market=%d normalized assets=%+v", fake.createReq.GetMarket(), assets)
 	}
 }
 
@@ -282,7 +439,7 @@ func TestGetVenueWalletForwardsVenueIDAndUserID(t *testing.T) {
 			Venue: &portfoliov1.VenueEntry{
 				VenueId:     53,
 				UserId:      7,
-				PortfolioId:   42,
+				PortfolioId: 42,
 				Exchange:    1,
 				Market:      2,
 				Environment: 0,

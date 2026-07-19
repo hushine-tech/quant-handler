@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hushine-tech/core-service/gen/portfoliov1"
 	orderv1 "github.com/hushine-tech/core-service/gen/orderv1"
+	"github.com/hushine-tech/core-service/gen/portfoliov1"
 )
 
 // ── Session-scoped audit list pagination contract ─────────────────────────
@@ -174,9 +174,9 @@ func (s *server) listSessionsHandler(w http.ResponseWriter, r *http.Request) {
 
 	req := &portfoliov1.ListSessionsRequest{
 		PortfolioId: aid,
-		Limit:     limit,
-		Offset:    offset,
-		UserId:    uid,
+		Limit:       limit,
+		Offset:      offset,
+		UserId:      uid,
 	}
 	if v := strings.TrimSpace(q.Get("runtime_id")); v != "" {
 		req.RuntimeId = v
@@ -267,7 +267,7 @@ func (s *server) getSessionSnapshots(w http.ResponseWriter, r *http.Request, ses
 
 	type snapshotJSON struct {
 		Time             string  `json:"time"`
-		PortfolioID        int64   `json:"portfolio_id"`
+		PortfolioID      int64   `json:"portfolio_id"`
 		SnapshotReason   int32   `json:"snapshot_reason"`
 		TotalValue       float64 `json:"total_value"`
 		WalletBalance    float64 `json:"wallet_balance"`
@@ -285,7 +285,7 @@ func (s *server) getSessionSnapshots(w http.ResponseWriter, r *http.Request, ses
 		}
 		out = append(out, snapshotJSON{
 			Time:             t,
-			PortfolioID:        snap.GetPortfolioId(),
+			PortfolioID:      snap.GetPortfolioId(),
 			SnapshotReason:   snap.GetSnapshotReason(),
 			TotalValue:       snap.GetTotalValue(),
 			WalletBalance:    snap.GetWalletBalance(),
@@ -328,48 +328,56 @@ func (s *server) getSessionIntents(w http.ResponseWriter, r *http.Request, sessi
 	}
 
 	type intentJSON struct {
-		Time           string  `json:"time"`
-		IntentID       string  `json:"intent_id"`
-		PortfolioID      int64   `json:"portfolio_id"`
-		Symbol         string  `json:"symbol"`
-		Side           string  `json:"side"`
-		RequestedQty   float64 `json:"requested_qty"`
-		RequestedPrice float64 `json:"requested_price"`
-		StrategyID     int64   `json:"strategy_id"`
-		Market         string  `json:"market"`
-		MarketLabel    string  `json:"market_label"`
-		VenueID        int64   `json:"venue_id,omitempty"`
-		Exchange       int32   `json:"exchange"`
-		ExchangeLabel  string  `json:"exchange_label"`
-		PositionSide   string  `json:"position_side"`
-		SessionID      string  `json:"session_id,omitempty"`
-		Status         string  `json:"status,omitempty"`
-		RejectCode     string  `json:"reject_code,omitempty"`
-		RejectMessage  string  `json:"reject_message,omitempty"`
+		Time                  string  `json:"time"`
+		IntentID              string  `json:"intent_id"`
+		PortfolioID           int64   `json:"portfolio_id"`
+		Symbol                string  `json:"symbol"`
+		Side                  string  `json:"side"`
+		RequestedQty          float64 `json:"requested_qty"`
+		RequestedPrice        float64 `json:"requested_price"`
+		RequestedQtyDecimal   string  `json:"requested_qty_decimal"`
+		RequestedPriceDecimal string  `json:"requested_price_decimal,omitempty"`
+		StrategyID            int64   `json:"strategy_id"`
+		Environment           int32   `json:"environment"`
+		EnvironmentLabel      string  `json:"environment_label"`
+		Market                string  `json:"market"`
+		MarketLabel           string  `json:"market_label"`
+		VenueID               int64   `json:"venue_id,omitempty"`
+		Exchange              int32   `json:"exchange"`
+		ExchangeLabel         string  `json:"exchange_label"`
+		PositionSide          string  `json:"position_side"`
+		SessionID             string  `json:"session_id,omitempty"`
+		Status                string  `json:"status,omitempty"`
+		RejectCode            string  `json:"reject_code,omitempty"`
+		RejectMessage         string  `json:"reject_message,omitempty"`
 	}
 
 	intents := resp.GetIntents()
 	out := make([]intentJSON, 0, len(intents))
 	for _, it := range intents {
 		out = append(out, intentJSON{
-			Time:           protoTime(it.GetTime()),
-			IntentID:       it.GetIntentId(),
-			PortfolioID:      it.GetPortfolioId(),
-			Symbol:         it.GetSymbol(),
-			Side:           it.GetSide(),
-			RequestedQty:   it.GetRequestedQty(),
-			RequestedPrice: it.GetRequestedPrice(),
-			StrategyID:     it.GetStrategyId(),
-			Market:         orderMarketLabel(it.GetMarket()),
-			MarketLabel:    orderMarketLabel(it.GetMarket()),
-			VenueID:        it.GetVenueId(),
-			Exchange:       it.GetExchange(),
-			ExchangeLabel:  orderExchangeLabel(it.GetExchange()),
-			PositionSide:   orderPositionSideLabel(it.GetPositionSide()),
-			SessionID:      it.GetSessionId(),
-			Status:         it.GetStatus(),
-			RejectCode:     it.GetRejectCode(),
-			RejectMessage:  it.GetRejectMessage(),
+			Time:                  protoTime(it.GetTime()),
+			IntentID:              it.GetIntentId(),
+			PortfolioID:           it.GetPortfolioId(),
+			Symbol:                it.GetSymbol(),
+			Side:                  it.GetSide(),
+			RequestedQty:          it.GetRequestedQty(),
+			RequestedPrice:        it.GetRequestedPrice(),
+			RequestedQtyDecimal:   exactDecimalOrLegacy(it.GetRequestedQtyDecimal(), it.GetRequestedQty()),
+			RequestedPriceDecimal: optionalExactDecimalOrLegacy(it.RequestedPriceDecimal, it.GetRequestedPrice()),
+			StrategyID:            it.GetStrategyId(),
+			Environment:           it.GetEnvironment(),
+			EnvironmentLabel:      venueEnvironmentLabel(it.GetEnvironment()),
+			Market:                orderMarketLabel(it.GetMarket()),
+			MarketLabel:           orderMarketLabel(it.GetMarket()),
+			VenueID:               it.GetVenueId(),
+			Exchange:              it.GetExchange(),
+			ExchangeLabel:         orderExchangeLabel(it.GetExchange()),
+			PositionSide:          orderPositionSideLabel(it.GetPositionSide()),
+			SessionID:             it.GetSessionId(),
+			Status:                it.GetStatus(),
+			RejectCode:            it.GetRejectCode(),
+			RejectMessage:         it.GetRejectMessage(),
 		})
 	}
 	nextOffset := int32(int(offset) + len(intents))
@@ -410,56 +418,72 @@ func (s *server) getSessionOrders(w http.ResponseWriter, r *http.Request, sessio
 	}
 
 	type orderJSON struct {
-		Time            string  `json:"time"`
-		OrderID         string  `json:"order_id"`
-		ExchangeOrderID string  `json:"exchange_order_id,omitempty"`
-		ClientOrderID   string  `json:"client_order_id,omitempty"`
-		AttemptID       string  `json:"attempt_id,omitempty"`
-		IntentID        string  `json:"intent_id,omitempty"`
-		Symbol          string  `json:"symbol"`
-		Side            string  `json:"side"`
-		OrigQty         float64 `json:"orig_qty"`
-		ExecutedQty     float64 `json:"executed_qty"`
-		RemainingQty    float64 `json:"remaining_qty"`
-		AvgPrice        float64 `json:"avg_price"`
-		Price           float64 `json:"price"`
-		Status          string  `json:"status"`
-		Market          string  `json:"market"`
-		MarketLabel     string  `json:"market_label"`
-		VenueID         int64   `json:"venue_id,omitempty"`
-		Exchange        int32   `json:"exchange"`
-		ExchangeLabel   string  `json:"exchange_label"`
-		PositionSide    string  `json:"position_side"`
-		StrategyID      int64   `json:"strategy_id"`
-		ErrorMessage    string  `json:"error_message,omitempty"`
+		Time                      string  `json:"time"`
+		OrderID                   string  `json:"order_id"`
+		ExchangeOrderID           string  `json:"exchange_order_id,omitempty"`
+		ClientOrderID             string  `json:"client_order_id,omitempty"`
+		AttemptID                 string  `json:"attempt_id,omitempty"`
+		IntentID                  string  `json:"intent_id,omitempty"`
+		Symbol                    string  `json:"symbol"`
+		Side                      string  `json:"side"`
+		OrigQty                   float64 `json:"orig_qty"`
+		ExecutedQty               float64 `json:"executed_qty"`
+		RemainingQty              float64 `json:"remaining_qty"`
+		AvgPrice                  float64 `json:"avg_price"`
+		Price                     float64 `json:"price"`
+		OrigQtyDecimal            string  `json:"orig_qty_decimal"`
+		ExecutedQtyDecimal        string  `json:"executed_qty_decimal"`
+		RemainingQtyDecimal       string  `json:"remaining_qty_decimal"`
+		AvgPriceDecimal           string  `json:"avg_price_decimal"`
+		PriceDecimal              string  `json:"price_decimal,omitempty"`
+		CumulativeQuoteQtyDecimal string  `json:"cumulative_quote_qty_decimal"`
+		Status                    string  `json:"status"`
+		Environment               int32   `json:"environment"`
+		EnvironmentLabel          string  `json:"environment_label"`
+		Market                    string  `json:"market"`
+		MarketLabel               string  `json:"market_label"`
+		VenueID                   int64   `json:"venue_id,omitempty"`
+		Exchange                  int32   `json:"exchange"`
+		ExchangeLabel             string  `json:"exchange_label"`
+		PositionSide              string  `json:"position_side"`
+		StrategyID                int64   `json:"strategy_id"`
+		ErrorMessage              string  `json:"error_message,omitempty"`
 	}
 
 	orders := resp.GetOrders()
 	out := make([]orderJSON, 0, len(orders))
 	for _, o := range orders {
 		out = append(out, orderJSON{
-			Time:            protoTime(o.GetTime()),
-			OrderID:         o.GetOrderId(),
-			ExchangeOrderID: o.GetExchangeOrderId(),
-			ClientOrderID:   o.GetClientOrderId(),
-			AttemptID:       o.GetAttemptId(),
-			IntentID:        o.GetIntentId(),
-			Symbol:          o.GetSymbol(),
-			Side:            o.GetSide(),
-			OrigQty:         o.GetOrigQty(),
-			ExecutedQty:     o.GetExecutedQty(),
-			RemainingQty:    o.GetRemainingQty(),
-			AvgPrice:        o.GetAvgPrice(),
-			Price:           o.GetPrice(),
-			Status:          o.GetStatus(),
-			Market:          orderMarketLabel(o.GetMarket()),
-			MarketLabel:     orderMarketLabel(o.GetMarket()),
-			VenueID:         o.GetVenueId(),
-			Exchange:        o.GetExchange(),
-			ExchangeLabel:   orderExchangeLabel(o.GetExchange()),
-			PositionSide:    orderPositionSideLabel(o.GetPositionSide()),
-			StrategyID:      o.GetStrategyId(),
-			ErrorMessage:    o.GetErrorMessage(),
+			Time:                      protoTime(o.GetTime()),
+			OrderID:                   o.GetOrderId(),
+			ExchangeOrderID:           o.GetExchangeOrderId(),
+			ClientOrderID:             o.GetClientOrderId(),
+			AttemptID:                 o.GetAttemptId(),
+			IntentID:                  o.GetIntentId(),
+			Symbol:                    o.GetSymbol(),
+			Side:                      o.GetSide(),
+			OrigQty:                   o.GetOrigQty(),
+			ExecutedQty:               o.GetExecutedQty(),
+			RemainingQty:              o.GetRemainingQty(),
+			AvgPrice:                  o.GetAvgPrice(),
+			Price:                     o.GetPrice(),
+			OrigQtyDecimal:            exactDecimalOrLegacy(o.GetOrigQtyDecimal(), o.GetOrigQty()),
+			ExecutedQtyDecimal:        exactDecimalOrLegacy(o.GetExecutedQtyDecimal(), o.GetExecutedQty()),
+			RemainingQtyDecimal:       exactDecimalOrLegacy(o.GetRemainingQtyDecimal(), o.GetRemainingQty()),
+			AvgPriceDecimal:           exactDecimalOrLegacy(o.GetAvgPriceDecimal(), o.GetAvgPrice()),
+			PriceDecimal:              optionalExactDecimalOrLegacy(o.PriceDecimal, o.GetPrice()),
+			CumulativeQuoteQtyDecimal: exactQuoteQtyOrProduct(o.GetCumulativeQuoteQtyDecimal(), o.GetExecutedQtyDecimal(), o.GetExecutedQty(), o.GetAvgPriceDecimal(), o.GetAvgPrice()),
+			Status:                    o.GetStatus(),
+			Environment:               o.GetEnvironment(),
+			EnvironmentLabel:          venueEnvironmentLabel(o.GetEnvironment()),
+			Market:                    orderMarketLabel(o.GetMarket()),
+			MarketLabel:               orderMarketLabel(o.GetMarket()),
+			VenueID:                   o.GetVenueId(),
+			Exchange:                  o.GetExchange(),
+			ExchangeLabel:             orderExchangeLabel(o.GetExchange()),
+			PositionSide:              orderPositionSideLabel(o.GetPositionSide()),
+			StrategyID:                o.GetStrategyId(),
+			ErrorMessage:              o.GetErrorMessage(),
 		})
 	}
 	// order.v1 exposes ``total`` instead of ``has_more``; derive the
@@ -501,54 +525,64 @@ func (s *server) getSessionAttempts(w http.ResponseWriter, r *http.Request, sess
 	}
 
 	type attemptJSON struct {
-		Time            string  `json:"time"`
-		AttemptID       string  `json:"attempt_id"`
-		IntentID        string  `json:"intent_id,omitempty"`
-		OrderID         string  `json:"order_id,omitempty"`
-		ExchangeOrderID string  `json:"exchange_order_id,omitempty"`
-		ClientOrderID   string  `json:"client_order_id,omitempty"`
-		Symbol          string  `json:"symbol"`
-		Side            string  `json:"side"`
-		RequestedQty    float64 `json:"requested_qty"`
-		RequestedPrice  float64 `json:"requested_price"`
-		MarkPrice       float64 `json:"mark_price"`
-		Status          string  `json:"status"`
-		Market          string  `json:"market"`
-		MarketLabel     string  `json:"market_label"`
-		VenueID         int64   `json:"venue_id,omitempty"`
-		Exchange        int32   `json:"exchange"`
-		ExchangeLabel   string  `json:"exchange_label"`
-		PositionSide    string  `json:"position_side"`
-		StrategyID      int64   `json:"strategy_id"`
-		ErrorMessage    string  `json:"error_message,omitempty"`
-		RecoveryError   string  `json:"recovery_error,omitempty"`
+		Time                  string  `json:"time"`
+		AttemptID             string  `json:"attempt_id"`
+		IntentID              string  `json:"intent_id,omitempty"`
+		OrderID               string  `json:"order_id,omitempty"`
+		ExchangeOrderID       string  `json:"exchange_order_id,omitempty"`
+		ClientOrderID         string  `json:"client_order_id,omitempty"`
+		Symbol                string  `json:"symbol"`
+		Side                  string  `json:"side"`
+		RequestedQty          float64 `json:"requested_qty"`
+		RequestedPrice        float64 `json:"requested_price"`
+		MarkPrice             float64 `json:"mark_price"`
+		RequestedQtyDecimal   string  `json:"requested_qty_decimal"`
+		RequestedPriceDecimal string  `json:"requested_price_decimal,omitempty"`
+		MarkPriceDecimal      string  `json:"mark_price_decimal"`
+		Status                string  `json:"status"`
+		Environment           int32   `json:"environment"`
+		EnvironmentLabel      string  `json:"environment_label"`
+		Market                string  `json:"market"`
+		MarketLabel           string  `json:"market_label"`
+		VenueID               int64   `json:"venue_id,omitempty"`
+		Exchange              int32   `json:"exchange"`
+		ExchangeLabel         string  `json:"exchange_label"`
+		PositionSide          string  `json:"position_side"`
+		StrategyID            int64   `json:"strategy_id"`
+		ErrorMessage          string  `json:"error_message,omitempty"`
+		RecoveryError         string  `json:"recovery_error,omitempty"`
 	}
 
 	attempts := resp.GetAttempts()
 	out := make([]attemptJSON, 0, len(attempts))
 	for _, a := range attempts {
 		out = append(out, attemptJSON{
-			Time:            protoTime(a.GetTime()),
-			AttemptID:       a.GetAttemptId(),
-			IntentID:        a.GetIntentId(),
-			OrderID:         a.GetOrderId(),
-			ExchangeOrderID: a.GetExchangeOrderId(),
-			ClientOrderID:   a.GetClientOrderId(),
-			Symbol:          a.GetSymbol(),
-			Side:            a.GetSide(),
-			RequestedQty:    a.GetRequestedQty(),
-			RequestedPrice:  a.GetRequestedPrice(),
-			MarkPrice:       a.GetMarkPrice(),
-			Status:          a.GetStatus(),
-			Market:          orderMarketLabel(a.GetMarket()),
-			MarketLabel:     orderMarketLabel(a.GetMarket()),
-			VenueID:         a.GetVenueId(),
-			Exchange:        a.GetExchange(),
-			ExchangeLabel:   orderExchangeLabel(a.GetExchange()),
-			PositionSide:    orderPositionSideLabel(a.GetPositionSide()),
-			StrategyID:      a.GetStrategyId(),
-			ErrorMessage:    a.GetErrorMessage(),
-			RecoveryError:   a.GetRecoveryError(),
+			Time:                  protoTime(a.GetTime()),
+			AttemptID:             a.GetAttemptId(),
+			IntentID:              a.GetIntentId(),
+			OrderID:               a.GetOrderId(),
+			ExchangeOrderID:       a.GetExchangeOrderId(),
+			ClientOrderID:         a.GetClientOrderId(),
+			Symbol:                a.GetSymbol(),
+			Side:                  a.GetSide(),
+			RequestedQty:          a.GetRequestedQty(),
+			RequestedPrice:        a.GetRequestedPrice(),
+			MarkPrice:             a.GetMarkPrice(),
+			RequestedQtyDecimal:   exactDecimalOrLegacy(a.GetRequestedQtyDecimal(), a.GetRequestedQty()),
+			RequestedPriceDecimal: optionalExactDecimalOrLegacy(a.RequestedPriceDecimal, a.GetRequestedPrice()),
+			MarkPriceDecimal:      exactDecimalOrLegacy(a.GetMarkPriceDecimal(), a.GetMarkPrice()),
+			Status:                a.GetStatus(),
+			Environment:           a.GetEnvironment(),
+			EnvironmentLabel:      venueEnvironmentLabel(a.GetEnvironment()),
+			Market:                orderMarketLabel(a.GetMarket()),
+			MarketLabel:           orderMarketLabel(a.GetMarket()),
+			VenueID:               a.GetVenueId(),
+			Exchange:              a.GetExchange(),
+			ExchangeLabel:         orderExchangeLabel(a.GetExchange()),
+			PositionSide:          orderPositionSideLabel(a.GetPositionSide()),
+			StrategyID:            a.GetStrategyId(),
+			ErrorMessage:          a.GetErrorMessage(),
+			RecoveryError:         a.GetRecoveryError(),
 		})
 	}
 	nextOffset := int32(int(offset) + len(attempts))
@@ -590,52 +624,66 @@ func (s *server) getSessionFills(w http.ResponseWriter, r *http.Request, session
 	}
 
 	type fillJSON struct {
-		Time            string  `json:"time"`
-		FillID          string  `json:"fill_id"`
-		ExchangeTradeID string  `json:"exchange_trade_id,omitempty"`
-		OrderID         string  `json:"order_id"`
-		ExchangeOrderID string  `json:"exchange_order_id,omitempty"`
-		AttemptID       string  `json:"attempt_id,omitempty"`
-		IntentID        string  `json:"intent_id,omitempty"`
-		Symbol          string  `json:"symbol"`
-		Side            string  `json:"side"`
-		Qty             float64 `json:"qty"`
-		FillPrice       float64 `json:"fill_price"`
-		Fee             float64 `json:"fee"`
-		Status          string  `json:"status"`
-		Market          string  `json:"market"`
-		MarketLabel     string  `json:"market_label"`
-		VenueID         int64   `json:"venue_id,omitempty"`
-		Exchange        int32   `json:"exchange"`
-		ExchangeLabel   string  `json:"exchange_label"`
-		PositionSide    string  `json:"position_side"`
-		StrategyID      int64   `json:"strategy_id"`
+		Time             string  `json:"time"`
+		FillID           string  `json:"fill_id"`
+		ExchangeTradeID  string  `json:"exchange_trade_id,omitempty"`
+		OrderID          string  `json:"order_id"`
+		ExchangeOrderID  string  `json:"exchange_order_id,omitempty"`
+		AttemptID        string  `json:"attempt_id,omitempty"`
+		IntentID         string  `json:"intent_id,omitempty"`
+		Symbol           string  `json:"symbol"`
+		Side             string  `json:"side"`
+		Qty              float64 `json:"qty"`
+		FillPrice        float64 `json:"fill_price"`
+		Fee              float64 `json:"fee"`
+		FeeAsset         string  `json:"fee_asset"`
+		QtyDecimal       string  `json:"qty_decimal"`
+		FillPriceDecimal string  `json:"fill_price_decimal"`
+		FeeDecimal       string  `json:"fee_decimal"`
+		QuoteQtyDecimal  string  `json:"quote_qty_decimal"`
+		Status           string  `json:"status"`
+		Environment      int32   `json:"environment"`
+		EnvironmentLabel string  `json:"environment_label"`
+		Market           string  `json:"market"`
+		MarketLabel      string  `json:"market_label"`
+		VenueID          int64   `json:"venue_id,omitempty"`
+		Exchange         int32   `json:"exchange"`
+		ExchangeLabel    string  `json:"exchange_label"`
+		PositionSide     string  `json:"position_side"`
+		StrategyID       int64   `json:"strategy_id"`
 	}
 
 	fills := resp.GetFills()
 	out := make([]fillJSON, 0, len(fills))
 	for _, f := range fills {
 		out = append(out, fillJSON{
-			Time:            protoTime(f.GetTime()),
-			FillID:          f.GetFillId(),
-			ExchangeTradeID: f.GetExchangeTradeId(),
-			OrderID:         f.GetOrderId(),
-			ExchangeOrderID: f.GetExchangeOrderId(),
-			AttemptID:       f.GetAttemptId(),
-			IntentID:        f.GetIntentId(),
-			Symbol:          f.GetSymbol(),
-			Side:            f.GetSide(),
-			Qty:             f.GetQty(),
-			FillPrice:       f.GetFillPrice(),
-			Fee:             f.GetFee(),
-			Status:          f.GetStatus(),
-			Market:          orderMarketLabel(f.GetMarket()),
-			MarketLabel:     orderMarketLabel(f.GetMarket()),
-			VenueID:         f.GetVenueId(),
-			Exchange:        f.GetExchange(),
-			ExchangeLabel:   orderExchangeLabel(f.GetExchange()),
-			PositionSide:    orderPositionSideLabel(f.GetPositionSide()),
-			StrategyID:      f.GetStrategyId(),
+			Time:             protoTime(f.GetTime()),
+			FillID:           f.GetFillId(),
+			ExchangeTradeID:  f.GetExchangeTradeId(),
+			OrderID:          f.GetOrderId(),
+			ExchangeOrderID:  f.GetExchangeOrderId(),
+			AttemptID:        f.GetAttemptId(),
+			IntentID:         f.GetIntentId(),
+			Symbol:           f.GetSymbol(),
+			Side:             f.GetSide(),
+			Qty:              f.GetQty(),
+			FillPrice:        f.GetFillPrice(),
+			Fee:              f.GetFee(),
+			FeeAsset:         f.GetFeeAsset(),
+			QtyDecimal:       exactDecimalOrLegacy(f.GetQtyDecimal(), f.GetQty()),
+			FillPriceDecimal: exactDecimalOrLegacy(f.GetFillPriceDecimal(), f.GetFillPrice()),
+			FeeDecimal:       exactDecimalOrLegacy(f.GetFeeDecimal(), f.GetFee()),
+			QuoteQtyDecimal:  exactQuoteQtyOrProduct(f.GetQuoteQtyDecimal(), f.GetQtyDecimal(), f.GetQty(), f.GetFillPriceDecimal(), f.GetFillPrice()),
+			Status:           f.GetStatus(),
+			Environment:      f.GetEnvironment(),
+			EnvironmentLabel: venueEnvironmentLabel(f.GetEnvironment()),
+			Market:           orderMarketLabel(f.GetMarket()),
+			MarketLabel:      orderMarketLabel(f.GetMarket()),
+			VenueID:          f.GetVenueId(),
+			Exchange:         f.GetExchange(),
+			ExchangeLabel:    orderExchangeLabel(f.GetExchange()),
+			PositionSide:     orderPositionSideLabel(f.GetPositionSide()),
+			StrategyID:       f.GetStrategyId(),
 		})
 	}
 	nextOffset := int32(int(offset) + len(fills))
@@ -730,7 +778,7 @@ func parseLifecycleEventPaging(r *http.Request) (limit int32, afterEventID int64
 type orderLifecycleEventJSON struct {
 	EventID          int64          `json:"event_id"`
 	SessionID        string         `json:"session_id"`
-	PortfolioID        int64          `json:"portfolio_id"`
+	PortfolioID      int64          `json:"portfolio_id"`
 	VenueID          int64          `json:"venue_id,omitempty"`
 	IntentID         string         `json:"intent_id,omitempty"`
 	AttemptID        string         `json:"attempt_id,omitempty"`
@@ -757,7 +805,7 @@ func orderLifecycleEventToJSON(event *orderv1.OrderLifecycleEventEntry) orderLif
 	return orderLifecycleEventJSON{
 		EventID:          event.GetEventId(),
 		SessionID:        event.GetSessionId(),
-		PortfolioID:        event.GetPortfolioId(),
+		PortfolioID:      event.GetPortfolioId(),
 		VenueID:          event.GetVenueId(),
 		IntentID:         event.GetIntentId(),
 		AttemptID:        event.GetAttemptId(),
@@ -786,15 +834,19 @@ func fillDeltaToJSON(delta *orderv1.FillDeltaEntry) map[string]any {
 		return nil
 	}
 	return map[string]any{
-		"exchange_trade_id": delta.GetExchangeTradeId(),
-		"exchange_order_id": delta.GetExchangeOrderId(),
-		"symbol":            delta.GetSymbol(),
-		"qty":               delta.GetQty(),
-		"fill_price":        delta.GetFillPrice(),
-		"fee":               delta.GetFee(),
-		"fee_asset":         delta.GetFeeAsset(),
-		"fee_missing":       delta.GetFeeMissing(),
-		"trade_time":        protoTime(delta.GetTradeTime()),
+		"exchange_trade_id":  delta.GetExchangeTradeId(),
+		"exchange_order_id":  delta.GetExchangeOrderId(),
+		"symbol":             delta.GetSymbol(),
+		"qty":                delta.GetQty(),
+		"fill_price":         delta.GetFillPrice(),
+		"fee":                delta.GetFee(),
+		"fee_asset":          delta.GetFeeAsset(),
+		"qty_decimal":        exactDecimalOrLegacy(delta.GetQtyDecimal(), delta.GetQty()),
+		"fill_price_decimal": exactDecimalOrLegacy(delta.GetFillPriceDecimal(), delta.GetFillPrice()),
+		"fee_decimal":        exactDecimalOrLegacy(delta.GetFeeDecimal(), delta.GetFee()),
+		"quote_qty_decimal":  exactQuoteQtyOrProduct(delta.GetQuoteQtyDecimal(), delta.GetQtyDecimal(), delta.GetQty(), delta.GetFillPriceDecimal(), delta.GetFillPrice()),
+		"fee_missing":        delta.GetFeeMissing(),
+		"trade_time":         protoTime(delta.GetTradeTime()),
 	}
 }
 
@@ -802,17 +854,26 @@ func orderStateToJSON(state *orderv1.OrderStateEntry) map[string]any {
 	if state == nil {
 		return nil
 	}
-	return map[string]any{
-		"exchange_order_id": state.GetExchangeOrderId(),
-		"client_order_id":   state.GetClientOrderId(),
-		"symbol":            state.GetSymbol(),
-		"status":            state.GetStatus(),
-		"orig_qty":          state.GetOrigQty(),
-		"executed_qty":      state.GetExecutedQty(),
-		"remaining_qty":     state.GetRemainingQty(),
-		"avg_price":         state.GetAvgPrice(),
-		"updated_at":        protoTime(state.GetUpdatedAt()),
+	out := map[string]any{
+		"exchange_order_id":            state.GetExchangeOrderId(),
+		"client_order_id":              state.GetClientOrderId(),
+		"symbol":                       state.GetSymbol(),
+		"status":                       state.GetStatus(),
+		"orig_qty":                     state.GetOrigQty(),
+		"executed_qty":                 state.GetExecutedQty(),
+		"remaining_qty":                state.GetRemainingQty(),
+		"avg_price":                    state.GetAvgPrice(),
+		"orig_qty_decimal":             exactDecimalOrLegacy(state.GetOrigQtyDecimal(), state.GetOrigQty()),
+		"executed_qty_decimal":         exactDecimalOrLegacy(state.GetExecutedQtyDecimal(), state.GetExecutedQty()),
+		"remaining_qty_decimal":        exactDecimalOrLegacy(state.GetRemainingQtyDecimal(), state.GetRemainingQty()),
+		"avg_price_decimal":            exactDecimalOrLegacy(state.GetAvgPriceDecimal(), state.GetAvgPrice()),
+		"cumulative_quote_qty_decimal": exactQuoteQtyOrProduct(state.GetCumulativeQuoteQtyDecimal(), state.GetExecutedQtyDecimal(), state.GetExecutedQty(), state.GetAvgPriceDecimal(), state.GetAvgPrice()),
+		"updated_at":                   protoTime(state.GetUpdatedAt()),
 	}
+	if price := optionalExactDecimalOrLegacy(state.PriceDecimal, 0); price != "" {
+		out["price_decimal"] = price
+	}
+	return out
 }
 
 func (s *server) getSessionReconciliation(w http.ResponseWriter, r *http.Request, sessionID string) {
@@ -849,7 +910,7 @@ func (s *server) getSessionReconciliation(w http.ResponseWriter, r *http.Request
 	type runJSON struct {
 		Time                 string          `json:"time"`
 		RunID                string          `json:"run_id"`
-		PortfolioID            int64           `json:"portfolio_id"`
+		PortfolioID          int64           `json:"portfolio_id"`
 		StrategyID           int64           `json:"strategy_id"`
 		SessionID            string          `json:"session_id"`
 		SnapshotReason       int32           `json:"snapshot_reason"`
@@ -918,7 +979,7 @@ func (s *server) getSessionReconciliation(w http.ResponseWriter, r *http.Request
 		out = append(out, runJSON{
 			Time:                 t,
 			RunID:                run.GetRunId(),
-			PortfolioID:            run.GetPortfolioId(),
+			PortfolioID:          run.GetPortfolioId(),
 			StrategyID:           run.GetStrategyId(),
 			SessionID:            run.GetSessionId(),
 			SnapshotReason:       run.GetSnapshotReason(),
@@ -974,24 +1035,28 @@ func (s *server) getSessionReconciliationSummary(w http.ResponseWriter, r *http.
 }
 
 type sessionJSON struct {
-	SessionID      string `json:"session_id"`
-	PortfolioID      int64  `json:"portfolio_id"`
-	StrategyID     int64  `json:"strategy_id"`
-	Environment    int32  `json:"environment"`
-	Status         string `json:"status"`
-	Interval       string `json:"interval"`
-	StartTimeMs    int64  `json:"start_time_ms,omitempty"`
-	EndTimeMs      int64  `json:"end_time_ms,omitempty"`
-	BarsProcessed  int32  `json:"bars_processed"`
-	Error          string `json:"error,omitempty"`
-	RuntimeID      string `json:"runtime_id,omitempty"`
-	RuntimeSource  string `json:"runtime_source,omitempty"`
-	RuntimeName    string `json:"runtime_name,omitempty"`
-	SessionType    string `json:"session_type,omitempty"`
-	RuntimeVersion string `json:"runtime_version,omitempty"`
-	SessionName    string `json:"session_name,omitempty"`
-	StartedAt      string `json:"started_at"`
-	CompletedAt    string `json:"completed_at,omitempty"`
+	SessionID       string          `json:"session_id"`
+	PortfolioID     int64           `json:"portfolio_id"`
+	StrategyID      int64           `json:"strategy_id"`
+	Environment     int32           `json:"environment"`
+	Status          string          `json:"status"`
+	Interval        string          `json:"interval"`
+	StartTimeMs     int64           `json:"start_time_ms,omitempty"`
+	EndTimeMs       int64           `json:"end_time_ms,omitempty"`
+	BarsProcessed   int32           `json:"bars_processed"`
+	Error           string          `json:"error,omitempty"`
+	ErrorCode       string          `json:"error_code,omitempty"`
+	ErrorMessage    string          `json:"error_message,omitempty"`
+	ErrorDetail     json.RawMessage `json:"error_detail,omitempty"`
+	ErrorDetailJSON string          `json:"error_detail_json,omitempty"`
+	RuntimeID       string          `json:"runtime_id,omitempty"`
+	RuntimeSource   string          `json:"runtime_source,omitempty"`
+	RuntimeName     string          `json:"runtime_name,omitempty"`
+	SessionType     string          `json:"session_type,omitempty"`
+	RuntimeVersion  string          `json:"runtime_version,omitempty"`
+	SessionName     string          `json:"session_name,omitempty"`
+	StartedAt       string          `json:"started_at"`
+	CompletedAt     string          `json:"completed_at,omitempty"`
 }
 
 func protoSessionToJSON(se *portfoliov1.StrategySessionEntry) sessionJSON {
@@ -999,22 +1064,28 @@ func protoSessionToJSON(se *portfoliov1.StrategySessionEntry) sessionJSON {
 		return sessionJSON{}
 	}
 	j := sessionJSON{
-		SessionID:      se.GetSessionId(),
-		PortfolioID:      se.GetPortfolioId(),
-		StrategyID:     se.GetStrategyId(),
-		Environment:    se.GetEnvironment(),
-		Status:         se.GetStatus(),
-		Interval:       se.GetInterval(),
-		StartTimeMs:    se.GetStartTimeMs(),
-		EndTimeMs:      se.GetEndTimeMs(),
-		BarsProcessed:  se.GetBarsProcessed(),
-		Error:          se.GetError(),
-		RuntimeID:      se.GetRuntimeId(),
-		RuntimeSource:  se.GetRuntimeSource(),
-		RuntimeName:    se.GetRuntimeName(),
-		SessionType:    se.GetSessionType(),
-		RuntimeVersion: se.GetRuntimeVersion(),
-		SessionName:    se.GetSessionName(),
+		SessionID:       se.GetSessionId(),
+		PortfolioID:     se.GetPortfolioId(),
+		StrategyID:      se.GetStrategyId(),
+		Environment:     se.GetEnvironment(),
+		Status:          se.GetStatus(),
+		Interval:        se.GetInterval(),
+		StartTimeMs:     se.GetStartTimeMs(),
+		EndTimeMs:       se.GetEndTimeMs(),
+		BarsProcessed:   se.GetBarsProcessed(),
+		Error:           se.GetError(),
+		ErrorCode:       se.GetErrorCode(),
+		ErrorMessage:    se.GetErrorMessage(),
+		ErrorDetailJSON: se.GetErrorDetailJson(),
+		RuntimeID:       se.GetRuntimeId(),
+		RuntimeSource:   se.GetRuntimeSource(),
+		RuntimeName:     se.GetRuntimeName(),
+		SessionType:     se.GetSessionType(),
+		RuntimeVersion:  se.GetRuntimeVersion(),
+		SessionName:     se.GetSessionName(),
+	}
+	if raw := []byte(se.GetErrorDetailJson()); json.Valid(raw) {
+		j.ErrorDetail = append(json.RawMessage(nil), raw...)
 	}
 	if ts := se.GetStartedAt(); ts != nil && ts.IsValid() {
 		j.StartedAt = ts.AsTime().UTC().Format(time.RFC3339Nano)
