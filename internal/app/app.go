@@ -5,9 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
+	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -28,7 +32,9 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// Run starts the HTTP server and blocks until SIGINT/SIGTERM (handled by process default).
+const httpShutdownTimeout = 10 * time.Second
+
+// Run starts the HTTP server and drains it on SIGINT/SIGTERM before returning.
 func Run(cfg *config.Config) error {
 	httpAddr := cfg.Server.HTTPAddr
 	if httpAddr == "" {
@@ -68,6 +74,7 @@ func Run(cfg *config.Config) error {
 		if err != nil {
 			logger.Info(ctx, "system", fmt.Sprintf("order API dial failed: %v (order API endpoints disabled)", err))
 		} else {
+			defer orderConn.Close()
 			orderCli = orderv1.NewOrderServiceClient(orderConn)
 			logger.Info(ctx, "system", fmt.Sprintf("order.v1 API → %s", orderAddr))
 		}
@@ -86,6 +93,7 @@ func Run(cfg *config.Config) error {
 	if err != nil {
 		return fmt.Errorf("control-panel-service grpc dial %q: %w", cpAddr, err)
 	}
+	defer cpConn.Close()
 	controlPanel = controlpanel.NewClient(controlpanelv1.NewControlPanelServiceClient(cpConn))
 	marketDataCli = mdv1.NewMarketDataControlPlaneServiceClient(cpConn)
 	cpRuntimeCli = controlpanelv1.NewControlPanelServiceClient(cpConn)
@@ -93,7 +101,10 @@ func Run(cfg *config.Config) error {
 
 	corsOrigins := cfg.Auth.CORSOrigins
 	if len(corsOrigins) == 0 {
-		corsOrigins = []string{"http://localhost:5173"}
+		corsOrigins = []string{
+			"http://localhost:5173",
+			"http://127.0.0.1:5173",
+		}
 	}
 
 	s := &server{
@@ -147,8 +158,54 @@ func Run(cfg *config.Config) error {
 	// Provides: access log, session_id generation, panic recovery
 	handler := httpmw.Middleware(logInstance)(mux)
 
+	listener, err := net.Listen("tcp", httpAddr)
+	if err != nil {
+		return fmt.Errorf("listen on %s: %w", httpAddr, err)
+	}
+	shutdownContext, stop := signal.NotifyContext(
+		context.Background(),
+		os.Interrupt,
+		syscall.SIGTERM,
+	)
+	defer stop()
 	logger.Info(ctx, "system", fmt.Sprintf("quant-handler http server listening on %s", httpAddr))
-	return http.ListenAndServe(httpAddr, handler)
+	return serveHTTP(
+		shutdownContext,
+		&http.Server{Addr: httpAddr, Handler: handler},
+		listener,
+		httpShutdownTimeout,
+	)
+}
+
+func serveHTTP(ctx context.Context, server *http.Server, listener net.Listener, shutdownTimeout time.Duration) error {
+	serveResult := make(chan error, 1)
+	go func() {
+		serveResult <- server.Serve(listener)
+	}()
+
+	select {
+	case err := <-serveResult:
+		if errors.Is(err, http.ErrServerClosed) {
+			return nil
+		}
+		return err
+	case <-ctx.Done():
+	}
+
+	shutdownContext, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer cancel()
+	shutdownErr := server.Shutdown(shutdownContext)
+	if shutdownErr != nil {
+		_ = server.Close()
+	}
+	serveErr := <-serveResult
+	if shutdownErr != nil {
+		return fmt.Errorf("graceful HTTP shutdown: %w", shutdownErr)
+	}
+	if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+		return serveErr
+	}
+	return nil
 }
 
 type server struct {

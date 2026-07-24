@@ -9,7 +9,7 @@ HTTP BFF for the quant portal: JWT login, CORS for the React app, and gRPC fan-o
 | `CORE_SERVICE_GRPC_ADDR` | yes | gRPC address for core-service (e.g. `127.0.0.1:50051`) |
 | `QUANT_HANDLER_JWT_SECRET` | yes | HMAC secret for signing portal JWTs |
 | `HTTP_ADDR` | no | Listen address (default `:8090`) |
-| `HANDLER_CORS_ORIGINS` | no | Comma-separated allowed `Origin` values (default `http://localhost:5173`) |
+| `HANDLER_CORS_ORIGINS` | no | Comma-separated allowed `Origin` values (defaults to the local frontend at both `localhost:5173` and `127.0.0.1:5173`) |
 | `ORDER_SERVICE_GRPC_ADDR` | no | Compatibility env var for the order.v1 API gRPC address (default `127.0.0.1:50051`; currently served by core-service). |
 | `CONTROL_PANEL_SERVICE_GRPC_ADDR` | yes | gRPC address for control-panel-service (default `127.0.0.1:50054`). Required for runtime, credential, strategy proxy, and market-data control-plane paths. |
 

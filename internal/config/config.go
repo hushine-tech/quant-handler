@@ -21,7 +21,7 @@ type ServerConfig struct {
 }
 
 type DependenciesConfig struct {
-	PortfolioServiceGRPC      string `yaml:"portfolio_service_grpc"`
+	PortfolioServiceGRPC    string `yaml:"portfolio_service_grpc"`
 	OrderServiceGRPC        string `yaml:"order_service_grpc"`
 	ControlPanelServiceGRPC string `yaml:"control_panel_service_grpc"`
 }
@@ -49,10 +49,13 @@ func Default() *Config {
 		},
 		Dependencies: DependenciesConfig{
 			PortfolioServiceGRPC: "127.0.0.1:50051",
-			OrderServiceGRPC:   "127.0.0.1:50051",
+			OrderServiceGRPC:     "127.0.0.1:50051",
 		},
 		Auth: AuthConfig{
-			CORSOrigins: []string{"http://localhost:5173"},
+			CORSOrigins: []string{
+				"http://localhost:5173",
+				"http://127.0.0.1:5173",
+			},
 		},
 		Log: *logCfg,
 	}

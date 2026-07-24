@@ -1,15 +1,54 @@
 package app
 
 import (
+	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	cerrors "github.com/hushine-tech/golang-lib/pkg/errors"
 	errorcodes "github.com/hushine-tech/golang-lib/pkg/errors/codes"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
+
+func TestServeHTTPStopsGracefullyWhenContextIsCancelled(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})}
+	result := make(chan error, 1)
+	go func() {
+		result <- serveHTTP(ctx, server, listener, time.Second)
+	}()
+
+	response, err := http.Get("http://" + listener.Addr().String())
+	if err != nil {
+		cancel()
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	cancel()
+
+	select {
+	case err := <-result:
+		if err != nil {
+			t.Fatalf("serveHTTP returned error: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("serveHTTP did not return after cancellation")
+	}
+	if connection, err := net.DialTimeout("tcp", listener.Addr().String(), 100*time.Millisecond); err == nil {
+		_ = connection.Close()
+		t.Fatal("listener still accepts connections after graceful shutdown")
+	}
+}
 
 func TestCORSPreflightBypassesAuth(t *testing.T) {
 	s := &server{
