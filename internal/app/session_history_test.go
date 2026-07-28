@@ -19,33 +19,39 @@ type fakeSessionPortfoliosClient struct {
 	portfoliov1.PortfolioServiceClient // unused methods panic on nil-interface call
 
 	// Capture last request.
-	lastSnapshotsReq             *portfoliov1.ListSessionSnapshotsRequest
-	lastReconciliationReq        *portfoliov1.ListReconciliationRunsRequest
-	lastReconciliationSummaryReq *portfoliov1.GetSessionReconciliationSummaryRequest
-	lastGetSessionReq            *portfoliov1.GetSessionRequest
-	lastGetPortfolioReq          *portfoliov1.GetPortfolioRequest
-	lastListSessionsReq          *portfoliov1.ListSessionsRequest
-	lastUpdateSessionReq         *portfoliov1.UpdateSessionRequest
-	lastIndicatorDefinitionsReq  *portfoliov1.ListStrategyIndicatorsRequest
-	lastIndicatorChunksReq       *portfoliov1.ListStrategyIndicatorChunksRequest
+	lastSnapshotsReq              *portfoliov1.ListSessionSnapshotsRequest
+	lastReconciliationReq         *portfoliov1.ListReconciliationRunsRequest
+	lastReconciliationSummaryReq  *portfoliov1.GetSessionReconciliationSummaryRequest
+	lastGetSessionReq             *portfoliov1.GetSessionRequest
+	lastGetPortfolioReq           *portfoliov1.GetPortfolioRequest
+	lastListSessionsReq           *portfoliov1.ListSessionsRequest
+	lastUpdateSessionReq          *portfoliov1.UpdateSessionRequest
+	lastIndicatorDefinitionsReq   *portfoliov1.ListStrategyIndicatorsRequest
+	lastIndicatorChunksReq        *portfoliov1.ListStrategyIndicatorChunksRequest
+	lastIndicatorDefinitionsV2Req *portfoliov1.ListStrategyIndicatorsV2Request
+	lastIndicatorChunksV2Req      *portfoliov1.ListStrategyIndicatorChunksV2Request
 
 	// Canned responses.
-	snapshotsResp             *portfoliov1.ListSessionSnapshotsResponse
-	reconciliationResp        *portfoliov1.ListReconciliationRunsResponse
-	reconciliationSummaryResp *portfoliov1.GetSessionReconciliationSummaryResponse
-	getSessionResp            *portfoliov1.GetSessionResponse
-	getSessionErr             error
-	getPortfolioResp          *portfoliov1.GetPortfolioResponse
-	getPortfolioErr           error
-	listSessionsResp          *portfoliov1.ListSessionsResponse
-	listSessionsErr           error
-	updateSessionErr          error
-	indicatorDefinitionsResp  *portfoliov1.ListStrategyIndicatorsResponse
-	indicatorDefinitionsErr   error
-	indicatorChunksResp       *portfoliov1.ListStrategyIndicatorChunksResponse
-	indicatorChunksErr        error
-	portfolioEnvironment      int32
-	reconciliationSummaryErr  error
+	snapshotsResp              *portfoliov1.ListSessionSnapshotsResponse
+	reconciliationResp         *portfoliov1.ListReconciliationRunsResponse
+	reconciliationSummaryResp  *portfoliov1.GetSessionReconciliationSummaryResponse
+	getSessionResp             *portfoliov1.GetSessionResponse
+	getSessionErr              error
+	getPortfolioResp           *portfoliov1.GetPortfolioResponse
+	getPortfolioErr            error
+	listSessionsResp           *portfoliov1.ListSessionsResponse
+	listSessionsErr            error
+	updateSessionErr           error
+	indicatorDefinitionsResp   *portfoliov1.ListStrategyIndicatorsResponse
+	indicatorDefinitionsErr    error
+	indicatorChunksResp        *portfoliov1.ListStrategyIndicatorChunksResponse
+	indicatorChunksErr         error
+	indicatorDefinitionsV2Resp *portfoliov1.ListStrategyIndicatorsV2Response
+	indicatorDefinitionsV2Err  error
+	indicatorChunksV2Resp      *portfoliov1.ListStrategyIndicatorChunksV2Response
+	indicatorChunksV2Err       error
+	portfolioEnvironment       int32
+	reconciliationSummaryErr   error
 }
 
 func (f *fakeSessionPortfoliosClient) GetPortfolio(_ context.Context, in *portfoliov1.GetPortfolioRequest, _ ...grpc.CallOption) (*portfoliov1.GetPortfolioResponse, error) {
@@ -137,6 +143,28 @@ func (f *fakeSessionPortfoliosClient) ListStrategyIndicatorChunks(_ context.Cont
 	return &portfoliov1.ListStrategyIndicatorChunksResponse{}, nil
 }
 
+func (f *fakeSessionPortfoliosClient) ListStrategyIndicatorsV2(_ context.Context, in *portfoliov1.ListStrategyIndicatorsV2Request, _ ...grpc.CallOption) (*portfoliov1.ListStrategyIndicatorsV2Response, error) {
+	f.lastIndicatorDefinitionsV2Req = in
+	if f.indicatorDefinitionsV2Err != nil {
+		return nil, f.indicatorDefinitionsV2Err
+	}
+	if f.indicatorDefinitionsV2Resp != nil {
+		return f.indicatorDefinitionsV2Resp, nil
+	}
+	return &portfoliov1.ListStrategyIndicatorsV2Response{}, nil
+}
+
+func (f *fakeSessionPortfoliosClient) ListStrategyIndicatorChunksV2(_ context.Context, in *portfoliov1.ListStrategyIndicatorChunksV2Request, _ ...grpc.CallOption) (*portfoliov1.ListStrategyIndicatorChunksV2Response, error) {
+	f.lastIndicatorChunksV2Req = in
+	if f.indicatorChunksV2Err != nil {
+		return nil, f.indicatorChunksV2Err
+	}
+	if f.indicatorChunksV2Resp != nil {
+		return f.indicatorChunksV2Resp, nil
+	}
+	return &portfoliov1.ListStrategyIndicatorChunksV2Response{}, nil
+}
+
 // Reuse ``fakeOrdersClient`` defined in order_history_test.go — it already
 // captures ``lastReq`` + returns a canned ``resp``.
 
@@ -197,28 +225,33 @@ func TestListSessions_IncludesRuntimeAndDebugMetadata(t *testing.T) {
 func TestProtoSessionToJSONPreservesStructuredErrorFacts(t *testing.T) {
 	detail := `{"code":"SPOT_MIN_NOTIONAL","route":"binance/spot","symbol":"BTCUSDT","filter_type":"MIN_NOTIONAL","environment":1,"retryable":false,"source":"risk","message":"notional below minimum"}`
 	encoded, err := json.Marshal(protoSessionToJSON(&portfoliov1.StrategySessionEntry{
-		SessionId:       "spot-preflight",
-		Environment:     1,
-		Status:          "preflight_failed",
-		ErrorCode:       "SPOT_MIN_NOTIONAL",
-		ErrorMessage:    "notional below minimum",
-		ErrorDetailJson: detail,
+		SessionId:                    "spot-preflight",
+		Environment:                  1,
+		Status:                       "preflight_failed",
+		ErrorCode:                    "SPOT_MIN_NOTIONAL",
+		ErrorMessage:                 "notional below minimum",
+		ErrorDetailJson:              detail,
+		IndicatorFinalizationPending: true,
 	}))
 	if err != nil {
 		t.Fatal(err)
 	}
 	var body struct {
-		Environment     int32           `json:"environment"`
-		ErrorCode       string          `json:"error_code"`
-		ErrorMessage    string          `json:"error_message"`
-		ErrorDetail     json.RawMessage `json:"error_detail"`
-		ErrorDetailJSON string          `json:"error_detail_json"`
+		Environment                  int32           `json:"environment"`
+		ErrorCode                    string          `json:"error_code"`
+		ErrorMessage                 string          `json:"error_message"`
+		ErrorDetail                  json.RawMessage `json:"error_detail"`
+		ErrorDetailJSON              string          `json:"error_detail_json"`
+		IndicatorFinalizationPending bool            `json:"indicator_finalization_pending"`
 	}
 	if err := json.Unmarshal(encoded, &body); err != nil {
 		t.Fatal(err)
 	}
 	if body.Environment != 1 || body.ErrorCode != "SPOT_MIN_NOTIONAL" || body.ErrorMessage != "notional below minimum" || body.ErrorDetailJSON != detail {
 		t.Fatalf("session error=%#v JSON=%s", body, encoded)
+	}
+	if !body.IndicatorFinalizationPending {
+		t.Fatalf("indicator_finalization_pending lost: %s", encoded)
 	}
 	var facts struct {
 		Code        string `json:"code"`
@@ -236,6 +269,33 @@ func TestProtoSessionToJSONPreservesStructuredErrorFacts(t *testing.T) {
 	if facts.Code != "SPOT_MIN_NOTIONAL" || facts.Route != "binance/spot" || facts.Symbol != "BTCUSDT" || facts.FilterType != "MIN_NOTIONAL" ||
 		facts.Environment != 1 || facts.Retryable || facts.Source != "risk" || facts.Message != "notional below minimum" {
 		t.Fatalf("structured facts=%#v", facts)
+	}
+}
+
+func TestProtoSessionToJSONEmitsExplicitFalseIndicatorFinalizationPending(
+	t *testing.T,
+) {
+	encoded, err := json.Marshal(protoSessionToJSON(
+		&portfoliov1.StrategySessionEntry{
+			SessionId: "finished-session",
+			Status:    "finished",
+		},
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(encoded, &body); err != nil {
+		t.Fatal(err)
+	}
+	value, exists := body["indicator_finalization_pending"]
+	if !exists || value != false {
+		t.Fatalf(
+			"indicator_finalization_pending = %#v (exists=%t), JSON=%s",
+			value,
+			exists,
+			encoded,
+		)
 	}
 }
 

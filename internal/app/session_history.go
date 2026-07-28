@@ -1035,28 +1035,29 @@ func (s *server) getSessionReconciliationSummary(w http.ResponseWriter, r *http.
 }
 
 type sessionJSON struct {
-	SessionID       string          `json:"session_id"`
-	PortfolioID     int64           `json:"portfolio_id"`
-	StrategyID      int64           `json:"strategy_id"`
-	Environment     int32           `json:"environment"`
-	Status          string          `json:"status"`
-	Interval        string          `json:"interval"`
-	StartTimeMs     int64           `json:"start_time_ms,omitempty"`
-	EndTimeMs       int64           `json:"end_time_ms,omitempty"`
-	BarsProcessed   int32           `json:"bars_processed"`
-	Error           string          `json:"error,omitempty"`
-	ErrorCode       string          `json:"error_code,omitempty"`
-	ErrorMessage    string          `json:"error_message,omitempty"`
-	ErrorDetail     json.RawMessage `json:"error_detail,omitempty"`
-	ErrorDetailJSON string          `json:"error_detail_json,omitempty"`
-	RuntimeID       string          `json:"runtime_id,omitempty"`
-	RuntimeSource   string          `json:"runtime_source,omitempty"`
-	RuntimeName     string          `json:"runtime_name,omitempty"`
-	SessionType     string          `json:"session_type,omitempty"`
-	RuntimeVersion  string          `json:"runtime_version,omitempty"`
-	SessionName     string          `json:"session_name,omitempty"`
-	StartedAt       string          `json:"started_at"`
-	CompletedAt     string          `json:"completed_at,omitempty"`
+	SessionID                    string          `json:"session_id"`
+	PortfolioID                  int64           `json:"portfolio_id"`
+	StrategyID                   int64           `json:"strategy_id"`
+	Environment                  int32           `json:"environment"`
+	Status                       string          `json:"status"`
+	Interval                     string          `json:"interval"`
+	StartTimeMs                  int64           `json:"start_time_ms,omitempty"`
+	EndTimeMs                    int64           `json:"end_time_ms,omitempty"`
+	BarsProcessed                int32           `json:"bars_processed"`
+	Error                        string          `json:"error,omitempty"`
+	ErrorCode                    string          `json:"error_code,omitempty"`
+	ErrorMessage                 string          `json:"error_message,omitempty"`
+	ErrorDetail                  json.RawMessage `json:"error_detail,omitempty"`
+	ErrorDetailJSON              string          `json:"error_detail_json,omitempty"`
+	RuntimeID                    string          `json:"runtime_id,omitempty"`
+	RuntimeSource                string          `json:"runtime_source,omitempty"`
+	RuntimeName                  string          `json:"runtime_name,omitempty"`
+	SessionType                  string          `json:"session_type,omitempty"`
+	RuntimeVersion               string          `json:"runtime_version,omitempty"`
+	SessionName                  string          `json:"session_name,omitempty"`
+	IndicatorFinalizationPending bool            `json:"indicator_finalization_pending"`
+	StartedAt                    string          `json:"started_at"`
+	CompletedAt                  string          `json:"completed_at,omitempty"`
 }
 
 func protoSessionToJSON(se *portfoliov1.StrategySessionEntry) sessionJSON {
@@ -1064,25 +1065,26 @@ func protoSessionToJSON(se *portfoliov1.StrategySessionEntry) sessionJSON {
 		return sessionJSON{}
 	}
 	j := sessionJSON{
-		SessionID:       se.GetSessionId(),
-		PortfolioID:     se.GetPortfolioId(),
-		StrategyID:      se.GetStrategyId(),
-		Environment:     se.GetEnvironment(),
-		Status:          se.GetStatus(),
-		Interval:        se.GetInterval(),
-		StartTimeMs:     se.GetStartTimeMs(),
-		EndTimeMs:       se.GetEndTimeMs(),
-		BarsProcessed:   se.GetBarsProcessed(),
-		Error:           se.GetError(),
-		ErrorCode:       se.GetErrorCode(),
-		ErrorMessage:    se.GetErrorMessage(),
-		ErrorDetailJSON: se.GetErrorDetailJson(),
-		RuntimeID:       se.GetRuntimeId(),
-		RuntimeSource:   se.GetRuntimeSource(),
-		RuntimeName:     se.GetRuntimeName(),
-		SessionType:     se.GetSessionType(),
-		RuntimeVersion:  se.GetRuntimeVersion(),
-		SessionName:     se.GetSessionName(),
+		SessionID:                    se.GetSessionId(),
+		PortfolioID:                  se.GetPortfolioId(),
+		StrategyID:                   se.GetStrategyId(),
+		Environment:                  se.GetEnvironment(),
+		Status:                       se.GetStatus(),
+		Interval:                     se.GetInterval(),
+		StartTimeMs:                  se.GetStartTimeMs(),
+		EndTimeMs:                    se.GetEndTimeMs(),
+		BarsProcessed:                se.GetBarsProcessed(),
+		Error:                        se.GetError(),
+		ErrorCode:                    se.GetErrorCode(),
+		ErrorMessage:                 se.GetErrorMessage(),
+		ErrorDetailJSON:              se.GetErrorDetailJson(),
+		RuntimeID:                    se.GetRuntimeId(),
+		RuntimeSource:                se.GetRuntimeSource(),
+		RuntimeName:                  se.GetRuntimeName(),
+		SessionType:                  se.GetSessionType(),
+		RuntimeVersion:               se.GetRuntimeVersion(),
+		SessionName:                  se.GetSessionName(),
+		IndicatorFinalizationPending: se.GetIndicatorFinalizationPending(),
 	}
 	if raw := []byte(se.GetErrorDetailJson()); json.Valid(raw) {
 		j.ErrorDetail = append(json.RawMessage(nil), raw...)

@@ -9,29 +9,48 @@ import (
 )
 
 type strategyIndicatorDefinitionJSON struct {
-	SessionID    string `json:"session_id"`
-	StrategyID   int64  `json:"strategy_id"`
-	StreamKey    string `json:"stream_key"`
-	IndicatorKey string `json:"indicator_key"`
-	Name         string `json:"name"`
-	Type         string `json:"type"`
-	Pane         string `json:"pane"`
-	Color        string `json:"color"`
-	Unit         string `json:"unit"`
-	Description  string `json:"description"`
-	ConfigJSON   string `json:"config_json"`
+	SessionID       string `json:"session_id"`
+	StrategyID      int64  `json:"strategy_id"`
+	StreamKey       string `json:"stream_key"`
+	IndicatorKey    string `json:"indicator_key"`
+	Name            string `json:"name"`
+	Type            string `json:"type"`
+	Pane            string `json:"pane"`
+	Color           string `json:"color"`
+	Unit            string `json:"unit"`
+	Description     string `json:"description"`
+	ConfigJSON      string `json:"config_json"`
+	ProtocolVersion uint32 `json:"protocol_version"`
+}
+
+type strategyIndicatorMarkerJSON struct {
+	Sequence uint64   `json:"sequence"`
+	Offset   uint32   `json:"offset"`
+	TimeMS   int64    `json:"time_ms"`
+	Text     string   `json:"text"`
+	Price    *float64 `json:"price,omitempty"`
+	Color    string   `json:"color"`
+	Position string   `json:"position"`
+	Shape    string   `json:"shape"`
 }
 
 type strategyIndicatorChunkJSON struct {
-	SessionID    string `json:"session_id"`
-	StreamKey    string `json:"stream_key"`
-	IndicatorKey string `json:"indicator_key"`
-	ChunkIndex   int32  `json:"chunk_index"`
-	StartTimeMS  int64  `json:"start_time_ms"`
-	EndTimeMS    int64  `json:"end_time_ms"`
-	IntervalMS   int64  `json:"interval_ms"`
-	Count        int32  `json:"count"`
-	ValuesJSON   string `json:"values_json"`
+	SessionID       string                        `json:"session_id"`
+	StreamKey       string                        `json:"stream_key"`
+	IndicatorKey    string                        `json:"indicator_key"`
+	ChunkIndex      uint32                        `json:"chunk_index"`
+	StartSequence   uint64                        `json:"start_sequence"`
+	EndSequence     uint64                        `json:"end_sequence"`
+	StartTimeMS     int64                         `json:"start_time_ms"`
+	EndTimeMS       int64                         `json:"end_time_ms"`
+	IntervalMS      int64                         `json:"interval_ms"`
+	Count           uint32                        `json:"count"`
+	TimesMS         []int64                       `json:"times_ms"`
+	ScalarValues    []*float64                    `json:"scalar_values"`
+	Markers         []strategyIndicatorMarkerJSON `json:"markers"`
+	Revision        uint64                        `json:"revision"`
+	Finalized       bool                          `json:"finalized"`
+	ProtocolVersion uint32                        `json:"protocol_version"`
 }
 
 func (s *server) getSessionIndicators(w http.ResponseWriter, r *http.Request, sessionID string) {
@@ -45,7 +64,7 @@ func (s *server) getSessionIndicators(w http.ResponseWriter, r *http.Request, se
 		return
 	}
 
-	resp, err := s.portfolios.ListStrategyIndicators(r.Context(), &portfoliov1.ListStrategyIndicatorsRequest{
+	resp, err := s.portfolios.ListStrategyIndicatorsV2(r.Context(), &portfoliov1.ListStrategyIndicatorsV2Request{
 		SessionId: strings.TrimSpace(sessionID),
 		StreamKey: strings.TrimSpace(r.URL.Query().Get("stream_key")),
 		UserId:    uid,
@@ -95,7 +114,7 @@ func (s *server) getSessionIndicatorChunks(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	resp, err := s.portfolios.ListStrategyIndicatorChunks(r.Context(), &portfoliov1.ListStrategyIndicatorChunksRequest{
+	resp, err := s.portfolios.ListStrategyIndicatorChunksV2(r.Context(), &portfoliov1.ListStrategyIndicatorChunksV2Request{
 		SessionId:     strings.TrimSpace(sessionID),
 		StreamKey:     streamKey,
 		IndicatorKeys: parseCommaSeparated(q.Get("keys")),
@@ -137,38 +156,74 @@ func parseCommaSeparated(raw string) []string {
 	return out
 }
 
-func strategyIndicatorDefinitionToJSON(def *portfoliov1.StrategyIndicatorDefinition) strategyIndicatorDefinitionJSON {
+func strategyIndicatorDefinitionToJSON(def *portfoliov1.StrategyIndicatorDefinitionV2) strategyIndicatorDefinitionJSON {
 	if def == nil {
 		return strategyIndicatorDefinitionJSON{}
 	}
 	return strategyIndicatorDefinitionJSON{
-		SessionID:    def.GetSessionId(),
-		StrategyID:   def.GetStrategyId(),
-		StreamKey:    def.GetStreamKey(),
-		IndicatorKey: def.GetIndicatorKey(),
-		Name:         def.GetName(),
-		Type:         def.GetType(),
-		Pane:         def.GetPane(),
-		Color:        def.GetColor(),
-		Unit:         def.GetUnit(),
-		Description:  def.GetDescription(),
-		ConfigJSON:   def.GetConfigJson(),
+		SessionID:       def.GetSessionId(),
+		StrategyID:      def.GetStrategyId(),
+		StreamKey:       def.GetStreamKey(),
+		IndicatorKey:    def.GetIndicatorKey(),
+		Name:            def.GetName(),
+		Type:            def.GetType(),
+		Pane:            def.GetPane(),
+		Color:           def.GetColor(),
+		Unit:            def.GetUnit(),
+		Description:     def.GetDescription(),
+		ConfigJSON:      def.GetConfigJson(),
+		ProtocolVersion: def.GetProtocolVersion(),
 	}
 }
 
-func strategyIndicatorChunkToJSON(chunk *portfoliov1.StrategyIndicatorChunk) strategyIndicatorChunkJSON {
+func strategyIndicatorChunkToJSON(chunk *portfoliov1.StrategyIndicatorChunkV2) strategyIndicatorChunkJSON {
 	if chunk == nil {
 		return strategyIndicatorChunkJSON{}
 	}
+	values := make([]*float64, len(chunk.GetScalarValues()))
+	for i, value := range chunk.GetScalarValues() {
+		if value != nil && value.Value != nil {
+			v := value.GetValue()
+			values[i] = &v
+		}
+	}
+	markers := make([]strategyIndicatorMarkerJSON, 0, len(chunk.GetMarkers()))
+	for _, marker := range chunk.GetMarkers() {
+		if marker == nil {
+			continue
+		}
+		var price *float64
+		if marker.Price != nil {
+			v := marker.GetPrice()
+			price = &v
+		}
+		markers = append(markers, strategyIndicatorMarkerJSON{
+			Sequence: marker.GetSequence(),
+			Offset:   marker.GetOffset(),
+			TimeMS:   marker.GetTimeMs(),
+			Text:     marker.GetText(),
+			Price:    price,
+			Color:    marker.GetColor(),
+			Position: marker.GetPosition(),
+			Shape:    marker.GetShape(),
+		})
+	}
 	return strategyIndicatorChunkJSON{
-		SessionID:    chunk.GetSessionId(),
-		StreamKey:    chunk.GetStreamKey(),
-		IndicatorKey: chunk.GetIndicatorKey(),
-		ChunkIndex:   chunk.GetChunkIndex(),
-		StartTimeMS:  chunk.GetStartTimeMs(),
-		EndTimeMS:    chunk.GetEndTimeMs(),
-		IntervalMS:   chunk.GetIntervalMs(),
-		Count:        chunk.GetCount(),
-		ValuesJSON:   chunk.GetValuesJson(),
+		SessionID:       chunk.GetSessionId(),
+		StreamKey:       chunk.GetStreamKey(),
+		IndicatorKey:    chunk.GetIndicatorKey(),
+		ChunkIndex:      chunk.GetChunkIndex(),
+		StartSequence:   chunk.GetStartSequence(),
+		EndSequence:     chunk.GetEndSequence(),
+		StartTimeMS:     chunk.GetStartTimeMs(),
+		EndTimeMS:       chunk.GetEndTimeMs(),
+		IntervalMS:      chunk.GetIntervalMs(),
+		Count:           chunk.GetCount(),
+		TimesMS:         append([]int64(nil), chunk.GetTimesMs()...),
+		ScalarValues:    values,
+		Markers:         markers,
+		Revision:        chunk.GetRevision(),
+		Finalized:       chunk.GetFinalized(),
+		ProtocolVersion: chunk.GetProtocolVersion(),
 	}
 }

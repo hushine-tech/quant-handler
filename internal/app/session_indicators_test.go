@@ -7,24 +7,26 @@ import (
 	"testing"
 
 	"github.com/hushine-tech/core-service/gen/portfoliov1"
+	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
 func TestHandleSessions_RoutesStrategyIndicatorDefinitions(t *testing.T) {
 	acct := &fakeSessionPortfoliosClient{
-		indicatorDefinitionsResp: &portfoliov1.ListStrategyIndicatorsResponse{
-			Definitions: []*portfoliov1.StrategyIndicatorDefinition{
+		indicatorDefinitionsV2Resp: &portfoliov1.ListStrategyIndicatorsV2Response{
+			Definitions: []*portfoliov1.StrategyIndicatorDefinitionV2{
 				{
-					SessionId:    "sess-1",
-					StrategyId:   19,
-					StreamKey:    "binance:perpetual_futures:ETHUSDT:1m",
-					IndicatorKey: "alpha_score",
-					Name:         "Alpha Score",
-					Type:         "line",
-					Pane:         "strategy",
-					Color:        "#2563eb",
-					Unit:         "score",
-					Description:  "debug score",
-					ConfigJson:   `{"width":2}`,
+					SessionId:       "sess-1",
+					StrategyId:      19,
+					StreamKey:       "binance:perpetual_futures:ETHUSDT:1m",
+					IndicatorKey:    "alpha_score",
+					Name:            "Alpha Score",
+					Type:            "line",
+					Pane:            "strategy",
+					Color:           "#2563eb",
+					Unit:            "score",
+					Description:     "debug score",
+					ConfigJson:      `{"width":2}`,
+					ProtocolVersion: 2,
 				},
 			},
 		},
@@ -38,16 +40,19 @@ func TestHandleSessions_RoutesStrategyIndicatorDefinitions(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
 	}
-	if acct.lastIndicatorDefinitionsReq == nil {
-		t.Fatalf("expected ListStrategyIndicators RPC to be called")
+	if acct.lastIndicatorDefinitionsV2Req == nil {
+		t.Fatalf("expected ListStrategyIndicatorsV2 RPC to be called")
 	}
-	if got := acct.lastIndicatorDefinitionsReq.GetSessionId(); got != "sess-1" {
+	if acct.lastIndicatorDefinitionsReq != nil {
+		t.Fatalf("legacy ListStrategyIndicators RPC must not be called")
+	}
+	if got := acct.lastIndicatorDefinitionsV2Req.GetSessionId(); got != "sess-1" {
 		t.Errorf("grpc session_id = %q, want sess-1", got)
 	}
-	if got := acct.lastIndicatorDefinitionsReq.GetStreamKey(); got != "binance:perpetual_futures:ETHUSDT:1m" {
+	if got := acct.lastIndicatorDefinitionsV2Req.GetStreamKey(); got != "binance:perpetual_futures:ETHUSDT:1m" {
 		t.Errorf("grpc stream_key = %q", got)
 	}
-	if got := acct.lastIndicatorDefinitionsReq.GetUserId(); got != 6 {
+	if got := acct.lastIndicatorDefinitionsV2Req.GetUserId(); got != 6 {
 		t.Errorf("grpc user_id = %d, want 6", got)
 	}
 
@@ -66,22 +71,91 @@ func TestHandleSessions_RoutesStrategyIndicatorDefinitions(t *testing.T) {
 	if got := body.Items[0]["config_json"]; got != `{"width":2}` {
 		t.Errorf("config_json = %v", got)
 	}
+	if got := body.Items[0]["protocol_version"]; got != float64(2) {
+		t.Errorf("protocol_version = %v, want 2", got)
+	}
+}
+
+func TestStrategyIndicatorV1CoexistsWithV2(t *testing.T) {
+	service := portfoliov1.File_portfolio_service_proto.Services().
+		ByName("PortfolioService")
+	if service == nil {
+		t.Fatal("PortfolioService descriptor is missing")
+	}
+	for _, method := range []string{
+		"ListStrategyIndicators",
+		"ListStrategyIndicatorChunks",
+		"ListStrategyIndicatorsV2",
+		"ListStrategyIndicatorChunksV2",
+	} {
+		if service.Methods().ByName(protoreflect.Name(method)) == nil {
+			t.Fatalf("indicator coexistence method is missing: %s", method)
+		}
+	}
+
+	legacy := &portfoliov1.StrategyIndicatorChunk{
+		SessionId:    "sess-1",
+		StreamKey:    "binance:spot:BTCUSDT:1m",
+		IndicatorKey: "alpha",
+		ValuesJson:   `{"values":[1]}`,
+	}
+	if legacy.GetValuesJson() == "" {
+		t.Fatal("deprecated V1 chunk no longer preserves values_json")
+	}
+	current := strategyIndicatorChunkToJSON(
+		&portfoliov1.StrategyIndicatorChunkV2{
+			SessionId:       "sess-1",
+			StreamKey:       "binance:spot:BTCUSDT:1m",
+			IndicatorKey:    "alpha",
+			Count:           1,
+			TimesMs:         []int64{60_000},
+			ScalarValues:    []*portfoliov1.NullableDoubleV2{{}},
+			Revision:        1,
+			ProtocolVersion: 2,
+		},
+	)
+	if current.ProtocolVersion != 2 || len(current.ScalarValues) != 1 {
+		t.Fatalf("V2 mapper lost typed fields: %+v", current)
+	}
 }
 
 func TestHandleSessions_RoutesStrategyIndicatorChunks(t *testing.T) {
+	zero := 0.0
+	value := 1.25
 	acct := &fakeSessionPortfoliosClient{
-		indicatorChunksResp: &portfoliov1.ListStrategyIndicatorChunksResponse{
-			Chunks: []*portfoliov1.StrategyIndicatorChunk{
+		indicatorChunksV2Resp: &portfoliov1.ListStrategyIndicatorChunksV2Response{
+			Chunks: []*portfoliov1.StrategyIndicatorChunkV2{
 				{
-					SessionId:    "sess-1",
-					StreamKey:    "binance:perpetual_futures:ETHUSDT:1m",
-					IndicatorKey: "alpha_score",
-					ChunkIndex:   3,
-					StartTimeMs:  1710000000000,
-					EndTimeMs:    1710000060000,
-					IntervalMs:   60000,
-					Count:        2,
-					ValuesJson:   `[1.25,null]`,
+					SessionId:     "sess-1",
+					StreamKey:     "binance:perpetual_futures:ETHUSDT:1m",
+					IndicatorKey:  "alpha_score",
+					ChunkIndex:    3,
+					StartSequence: 3072,
+					EndSequence:   3073,
+					StartTimeMs:   1710000000000,
+					EndTimeMs:     1710000120000,
+					IntervalMs:    60000,
+					Count:         2,
+					TimesMs:       []int64{1710000000000, 1710000120000},
+					ScalarValues: []*portfoliov1.NullableDoubleV2{
+						{Value: &value},
+						{},
+					},
+					Markers: []*portfoliov1.StrategyIndicatorMarkerV2{
+						{
+							Sequence: 3073,
+							Offset:   1,
+							TimeMs:   1710000120000,
+							Text:     "BUY",
+							Price:    &zero,
+							Color:    "#00ff00",
+							Position: "belowBar",
+							Shape:    "arrowUp",
+						},
+					},
+					Revision:        2,
+					Finalized:       true,
+					ProtocolVersion: 2,
 				},
 			},
 		},
@@ -95,25 +169,28 @@ func TestHandleSessions_RoutesStrategyIndicatorChunks(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
 	}
-	if acct.lastIndicatorChunksReq == nil {
-		t.Fatalf("expected ListStrategyIndicatorChunks RPC to be called")
+	if acct.lastIndicatorChunksV2Req == nil {
+		t.Fatalf("expected ListStrategyIndicatorChunksV2 RPC to be called")
 	}
-	if got := acct.lastIndicatorChunksReq.GetSessionId(); got != "sess-1" {
+	if acct.lastIndicatorChunksReq != nil {
+		t.Fatalf("legacy ListStrategyIndicatorChunks RPC must not be called")
+	}
+	if got := acct.lastIndicatorChunksV2Req.GetSessionId(); got != "sess-1" {
 		t.Errorf("grpc session_id = %q, want sess-1", got)
 	}
-	if got := acct.lastIndicatorChunksReq.GetStreamKey(); got != "binance:perpetual_futures:ETHUSDT:1m" {
+	if got := acct.lastIndicatorChunksV2Req.GetStreamKey(); got != "binance:perpetual_futures:ETHUSDT:1m" {
 		t.Errorf("grpc stream_key = %q", got)
 	}
-	if got := acct.lastIndicatorChunksReq.GetIndicatorKeys(); len(got) != 2 || got[0] != "alpha_score" || got[1] != "signal" {
+	if got := acct.lastIndicatorChunksV2Req.GetIndicatorKeys(); len(got) != 2 || got[0] != "alpha_score" || got[1] != "signal" {
 		t.Errorf("grpc indicator_keys = %#v", got)
 	}
-	if got := acct.lastIndicatorChunksReq.GetStartTimeMs(); got != 1710000000000 {
+	if got := acct.lastIndicatorChunksV2Req.GetStartTimeMs(); got != 1710000000000 {
 		t.Errorf("grpc start_time_ms = %d", got)
 	}
-	if got := acct.lastIndicatorChunksReq.GetEndTimeMs(); got != 1710000600000 {
+	if got := acct.lastIndicatorChunksV2Req.GetEndTimeMs(); got != 1710000600000 {
 		t.Errorf("grpc end_time_ms = %d", got)
 	}
-	if got := acct.lastIndicatorChunksReq.GetUserId(); got != 6 {
+	if got := acct.lastIndicatorChunksV2Req.GetUserId(); got != 6 {
 		t.Errorf("grpc user_id = %d, want 6", got)
 	}
 
@@ -126,8 +203,29 @@ func TestHandleSessions_RoutesStrategyIndicatorChunks(t *testing.T) {
 	if len(body.Items) != 1 {
 		t.Fatalf("items len = %d, want 1", len(body.Items))
 	}
-	if got := body.Items[0]["values_json"]; got != `[1.25,null]` {
-		t.Errorf("values_json = %v", got)
+	if _, ok := body.Items[0]["values_json"]; ok {
+		t.Fatalf("legacy values_json must not be exposed: %#v", body.Items[0])
+	}
+	times, ok := body.Items[0]["times_ms"].([]any)
+	if !ok || len(times) != 2 || times[1] != float64(1710000120000) {
+		t.Fatalf("times_ms = %#v", body.Items[0]["times_ms"])
+	}
+	values, ok := body.Items[0]["scalar_values"].([]any)
+	if !ok || len(values) != 2 || values[0] != 1.25 || values[1] != nil {
+		t.Fatalf("scalar_values = %#v", body.Items[0]["scalar_values"])
+	}
+	markers, ok := body.Items[0]["markers"].([]any)
+	if !ok || len(markers) != 1 {
+		t.Fatalf("markers = %#v", body.Items[0]["markers"])
+	}
+	marker := markers[0].(map[string]any)
+	if marker["time_ms"] != float64(1710000120000) || marker["price"] != 0.0 ||
+		marker["position"] != "belowBar" || marker["shape"] != "arrowUp" {
+		t.Fatalf("marker = %#v", marker)
+	}
+	if body.Items[0]["revision"] != float64(2) || body.Items[0]["finalized"] != true ||
+		body.Items[0]["protocol_version"] != float64(2) {
+		t.Fatalf("chunk metadata = %#v", body.Items[0])
 	}
 }
 
@@ -142,7 +240,7 @@ func TestHandleSessions_StrategyIndicatorChunksRequiresRange(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
 	}
-	if acct.lastIndicatorChunksReq != nil {
-		t.Fatalf("ListStrategyIndicatorChunks should not be called on invalid range")
+	if acct.lastIndicatorChunksV2Req != nil {
+		t.Fatalf("ListStrategyIndicatorChunksV2 should not be called on invalid range")
 	}
 }
