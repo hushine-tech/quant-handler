@@ -307,6 +307,98 @@ func TestDownloadAndRunJobPreservesPreviewAndRunDependencyErrors(t *testing.T) {
 	}
 }
 
+func TestDownloadAndRunJobStopsOnStructuredPreviewFailure(t *testing.T) {
+	proxy := &fakeControlPanelStrategyProxy{previewResp: &strategyv1.PreviewRunStrategyResponse{
+		Profile: "backtest", Supported: true, Ok: false,
+		Failures: []*strategyv1.PreflightFailureProto{{
+			Kind: "leverage", Reason: "ETHUSDT leverage read failed", Code: "LEVERAGE_READ_FAILED",
+			Exchange: 1, Market: 2, Symbol: "ETHUSDT", VenueId: 8, Environment: 1,
+			Retryable: true, Source: "core-service",
+		}},
+	}}
+	store := newDownloadRunJobStore()
+	s := &server{marketData: &fakeMarketDataClient{coverageResp: &mdv1CoverageComplete}, downloadRunJobs: store}
+	job := store.create()
+
+	s.runDownloadAndRunJob(context.Background(), job.JobID, proxy, 6, 7, "rt-download", downloadAndRunRequest{
+		RuntimeID: "rt-download", StartTimeMS: 1779033600000, EndTimeMS: 1779037200000, Interval: "1m",
+	})
+
+	got, _ := store.get(job.JobID)
+	if proxy.runRequest() != nil {
+		t.Fatal("structured preview failure reached RunStrategy")
+	}
+	if got.Status != downloadRunError || got.Code != "LEVERAGE_READ_FAILED" || len(got.Failures) != 1 {
+		t.Fatalf("structured preview failure lost: %+v", got)
+	}
+	if failure := got.Failures[0]; failure.Symbol != "ETHUSDT" || failure.VenueID != 8 || !failure.Retryable || failure.Source != "core-service" {
+		t.Fatalf("preview failure fields lost: %+v", failure)
+	}
+}
+
+func TestDownloadAndRunJobPreservesStructuredRunFailure(t *testing.T) {
+	proxy := &fakeControlPanelStrategyProxy{
+		previewResp: &strategyv1.PreviewRunStrategyResponse{
+			Profile: "backtest", Supported: true, Ok: true,
+			DeclaredInputs: []*strategyv1.LiveStreamBinding{{
+				Exchange: "binance", Market: "perpetual_futures", Kind: "kline", Symbol: "ETHUSDT", Interval: "1m",
+			}},
+		},
+		runResp: &strategyv1.RunStrategyResponse{
+			Ok: false, Code: "LEVERAGE_ROLLBACK_FAILED", RollbackFailed: true,
+			Failures: []*strategyv1.PreflightFailureProto{{
+				Kind: "leverage", Reason: "rollback readback mismatch", Code: "LEVERAGE_ROLLBACK_FAILED",
+				Exchange: 1, Market: 2, Symbol: "ETHUSDT", VenueId: 8, Environment: 1, Retryable: true, Source: "core-service",
+			}},
+			TargetResults: []*strategyv1.StrategyLeverageTargetResult{{
+				VenueId: 8, Exchange: 1, Market: 2, Symbol: "ETHUSDT", EffectiveLeverage: 10,
+				LeverageSource: "order_target", PreviousLeverage: uint32Ptr(2), CurrentLeverage: uint32Ptr(10),
+				ChangeRequired: true, Status: "rollback_failed", ErrorCode: "LEVERAGE_ROLLBACK_FAILED",
+				ErrorMessage: "rollback readback mismatch", Retryable: true,
+			}},
+		},
+	}
+	store := newDownloadRunJobStore()
+	s := &server{marketData: &fakeMarketDataClient{coverageResp: &mdv1CoverageComplete}, downloadRunJobs: store}
+	job := store.create()
+
+	s.runDownloadAndRunJob(context.Background(), job.JobID, proxy, 6, 7, "rt-download", downloadAndRunRequest{
+		RuntimeID: "rt-download", StartTimeMS: 1779033600000, EndTimeMS: 1779037200000, Interval: "1m",
+	})
+
+	got, _ := store.get(job.JobID)
+	if got.Status != downloadRunError || got.Code != "LEVERAGE_ROLLBACK_FAILED" || !got.RollbackFailed || got.SessionID != "" {
+		t.Fatalf("structured run failure terminal state lost: %+v", got)
+	}
+	if len(got.Failures) != 1 || len(got.TargetResults) != 1 || got.TargetResults[0].Status != "rollback_failed" || got.TargetResults[0].ErrorCode != got.Code {
+		t.Fatalf("structured run target results lost: %+v", got)
+	}
+}
+
+func TestDownloadAndRunJobRejectsSuccessfulRunWithoutSessionID(t *testing.T) {
+	proxy := &fakeControlPanelStrategyProxy{
+		previewResp: &strategyv1.PreviewRunStrategyResponse{
+			Profile: "backtest", Supported: true, Ok: true,
+			DeclaredInputs: []*strategyv1.LiveStreamBinding{{
+				Exchange: "binance", Market: "perpetual_futures", Kind: "kline", Symbol: "ETHUSDT", Interval: "1m",
+			}},
+		},
+		runResp: &strategyv1.RunStrategyResponse{Ok: true},
+	}
+	store := newDownloadRunJobStore()
+	s := &server{marketData: &fakeMarketDataClient{coverageResp: &mdv1CoverageComplete}, downloadRunJobs: store}
+	job := store.create()
+
+	s.runDownloadAndRunJob(context.Background(), job.JobID, proxy, 6, 7, "rt-download", downloadAndRunRequest{
+		RuntimeID: "rt-download", StartTimeMS: 1779033600000, EndTimeMS: 1779037200000, Interval: "1m",
+	})
+
+	got, _ := store.get(job.JobID)
+	if got.Status != downloadRunError || got.Code != "STRATEGY_SESSION_ID_MISSING" || got.SessionID != "" {
+		t.Fatalf("empty successful Session ID must be terminal error: %+v", got)
+	}
+}
+
 func TestDownloadAndRunJobStatusSurfacesHistoricalRequestState(t *testing.T) {
 	start := time.UnixMilli(1779033600000).UTC()
 	end := time.UnixMilli(1779037200000).UTC()

@@ -35,16 +35,20 @@ type downloadAndRunRequest struct {
 }
 
 type downloadRunJob struct {
-	JobID        string                      `json:"job_id"`
-	Status       downloadRunJobStatus        `json:"status"`
-	Progress     float64                     `json:"progress"`
-	Message      string                      `json:"message,omitempty"`
-	Requests     []marketDataRequestJSON     `json:"requests,omitempty"`
-	SessionID    string                      `json:"session_id,omitempty"`
-	Error        string                      `json:"error,omitempty"`
-	RuntimeError *runtimeDependencyHTTPError `json:"runtime_error,omitempty"`
-	CreatedAt    time.Time                   `json:"created_at"`
-	UpdatedAt    time.Time                   `json:"updated_at"`
+	JobID          string                             `json:"job_id"`
+	Status         downloadRunJobStatus               `json:"status"`
+	Progress       float64                            `json:"progress"`
+	Message        string                             `json:"message,omitempty"`
+	Requests       []marketDataRequestJSON            `json:"requests,omitempty"`
+	SessionID      string                             `json:"session_id,omitempty"`
+	Error          string                             `json:"error,omitempty"`
+	RuntimeError   *runtimeDependencyHTTPError        `json:"runtime_error,omitempty"`
+	Failures       []preflightFailureJSON             `json:"failures,omitempty"`
+	TargetResults  []strategyLeverageTargetResultJSON `json:"target_results,omitempty"`
+	Code           string                             `json:"code,omitempty"`
+	RollbackFailed bool                               `json:"rollback_failed"`
+	CreatedAt      time.Time                          `json:"created_at"`
+	UpdatedAt      time.Time                          `json:"updated_at"`
 }
 
 type downloadRunJobStore struct {
@@ -175,6 +179,11 @@ func (s *server) runDownloadAndRunJob(ctx context.Context, jobID string, cli str
 	fail := func(err error) {
 		store.update(jobID, func(job *downloadRunJob) {
 			job.Status = downloadRunError
+			job.SessionID = ""
+			job.Failures = nil
+			job.TargetResults = nil
+			job.Code = ""
+			job.RollbackFailed = false
 			if runtimeErr, ok := runtimeDependencyErrorFromGRPC(err); ok {
 				job.Error = runtimeErr.Message
 				job.RuntimeError = cloneRuntimeDependencyHTTPError(runtimeErr)
@@ -182,6 +191,18 @@ func (s *server) runDownloadAndRunJob(ctx context.Context, jobID string, cli str
 			}
 			job.Error = err.Error()
 			job.RuntimeError = nil
+		})
+	}
+	failStructured := func(message, code string, failures []preflightFailureJSON, results []strategyLeverageTargetResultJSON, rollbackFailed bool) {
+		store.update(jobID, func(job *downloadRunJob) {
+			job.Status = downloadRunError
+			job.SessionID = ""
+			job.Error = strings.TrimSpace(message)
+			job.RuntimeError = nil
+			job.Failures = failures
+			job.TargetResults = results
+			job.Code = strings.TrimSpace(code)
+			job.RollbackFailed = rollbackFailed
 		})
 	}
 	store.update(jobID, func(job *downloadRunJob) {
@@ -203,6 +224,25 @@ func (s *server) runDownloadAndRunJob(ctx context.Context, jobID string, cli str
 	})
 	if err != nil {
 		fail(err)
+		return
+	}
+	if preview == nil {
+		failStructured("runtime returned an empty strategy preview", "STRATEGY_PREVIEW_EMPTY", nil, nil, false)
+		return
+	}
+	if !preview.GetOk() {
+		failures := preflightFailuresToJSON(preview.GetFailures())
+		message := "strategy preflight failed"
+		code := "STRATEGY_PREFLIGHT_FAILED"
+		if len(failures) > 0 {
+			if strings.TrimSpace(failures[0].Reason) != "" {
+				message = failures[0].Reason
+			}
+			if strings.TrimSpace(failures[0].Code) != "" {
+				code = failures[0].Code
+			}
+		}
+		failStructured(message, code, failures, nil, false)
 		return
 	}
 	if strings.ToLower(strings.TrimSpace(preview.GetProfile())) != "backtest" {
@@ -246,6 +286,28 @@ func (s *server) runDownloadAndRunJob(ctx context.Context, jobID string, cli str
 		fail(err)
 		return
 	}
+	if run == nil {
+		failStructured("runtime returned an empty strategy start result", "STRATEGY_START_RESULT_EMPTY", nil, nil, false)
+		return
+	}
+	failures := preflightFailuresToJSON(run.GetFailures())
+	targetResults := strategyLeverageTargetResultsToJSON(run.GetTargetResults())
+	if !run.GetOk() {
+		message := "strategy start failed"
+		if len(failures) > 0 && strings.TrimSpace(failures[0].Reason) != "" {
+			message = failures[0].Reason
+		}
+		code := strings.TrimSpace(run.GetCode())
+		if code == "" {
+			code = "STRATEGY_START_FAILED"
+		}
+		failStructured(message, code, failures, targetResults, run.GetRollbackFailed())
+		return
+	}
+	if strings.TrimSpace(run.GetSessionId()) == "" {
+		failStructured("strategy start returned no Session ID", "STRATEGY_SESSION_ID_MISSING", failures, targetResults, run.GetRollbackFailed())
+		return
+	}
 	store.update(jobID, func(job *downloadRunJob) {
 		job.Status = downloadRunReady
 		job.Progress = 1
@@ -253,7 +315,21 @@ func (s *server) runDownloadAndRunJob(ctx context.Context, jobID string, cli str
 		job.SessionID = run.GetSessionId()
 		job.Error = ""
 		job.RuntimeError = nil
+		job.Failures = failures
+		job.TargetResults = targetResults
+		job.Code = strings.TrimSpace(run.GetCode())
+		job.RollbackFailed = run.GetRollbackFailed()
 	})
+}
+
+func preflightFailuresToJSON(failures []*strategyv1.PreflightFailureProto) []preflightFailureJSON {
+	result := make([]preflightFailureJSON, 0, len(failures))
+	for _, failure := range failures {
+		if failure != nil {
+			result = append(result, preflightFailureToJSON(failure))
+		}
+	}
+	return result
 }
 
 func (s *server) createMissingCoverageRequests(ctx context.Context, uid int64, portfolioID int64, declared []*strategyv1.LiveStreamBinding, body downloadAndRunRequest) (map[int64]struct{}, error) {
