@@ -39,9 +39,15 @@ func TestPreviewRunStrategy_ForwardsBodyAndReturnsJSON(t *testing.T) {
 				Interval: "1m",
 			}},
 			DeclaredOrderTargets: []*strategyv1.StrategyOrderTargetBinding{{
-				Exchange: "binance",
-				Market:   "perpetual_futures",
-				Symbol:   "ETHUSDT",
+				Exchange:          "binance",
+				Market:            "perpetual_futures",
+				Symbol:            "ETHUSDT",
+				EffectiveLeverage: 5,
+				LeverageSource:    "strategy_default",
+				CurrentLeverage:   uint32Ptr(3),
+				ChangeRequired:    true,
+				VenueId:           19,
+				LeverageStatus:    "change_required",
 			}},
 			RequiredRoutes: []*strategyv1.StrategyRouteBinding{{
 				Exchange: "binance",
@@ -87,8 +93,8 @@ func TestPreviewRunStrategy_ForwardsBodyAndReturnsJSON(t *testing.T) {
 	if got := proxy.previewReq.GetMaxLossClosePct(); got != 0.25 {
 		t.Errorf("max_loss_close_pct forwarded = %v, want 0.25", got)
 	}
-	if got := proxy.previewReq.GetLeverage(); got != 3 {
-		t.Errorf("leverage forwarded = %v, want 3", got)
+	if got := proxy.previewReq.GetLeverage(); got != 0 {
+		t.Errorf("legacy leverage forwarded = %v, want ignored zero", got)
 	}
 
 	var resp previewRunStrategyResponse
@@ -123,6 +129,11 @@ func TestPreviewRunStrategy_ForwardsBodyAndReturnsJSON(t *testing.T) {
 	if len(resp.OrderTargets) != 1 || resp.OrderTargets[0].Market != "perpetual_futures" || resp.OrderTargets[0].Symbol != "ETHUSDT" {
 		t.Fatalf("order_targets = %+v, want ETHUSDT perpetual_futures", resp.OrderTargets)
 	}
+	target := resp.OrderTargets[0]
+	if target.EffectiveLeverage != 5 || target.LeverageSource != "strategy_default" || target.CurrentLeverage == nil || *target.CurrentLeverage != 3 ||
+		!target.ChangeRequired || target.VenueID != 19 || target.LeverageStatus != "change_required" {
+		t.Fatalf("order target leverage facts = %+v, want unchanged typed preview facts", target)
+	}
 	if len(resp.RequiredRoutes) != 1 || resp.RequiredRoutes[0].Market != "perpetual_futures" {
 		t.Fatalf("required_routes = %+v, want binance/perpetual_futures", resp.RequiredRoutes)
 	}
@@ -133,6 +144,8 @@ func TestPreviewRunStrategy_ForwardsBodyAndReturnsJSON(t *testing.T) {
 		t.Fatalf("risk_controls leverage = %+v, want request_default 3", resp.RiskControls)
 	}
 }
+
+func uint32Ptr(value uint32) *uint32 { return &value }
 
 func TestPreviewRunStrategy_UsesRuntimeProxyDeadline(t *testing.T) {
 	proxy := &fakeControlPanelStrategyProxy{}

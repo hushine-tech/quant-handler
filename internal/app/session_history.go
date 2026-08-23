@@ -1035,29 +1035,48 @@ func (s *server) getSessionReconciliationSummary(w http.ResponseWriter, r *http.
 }
 
 type sessionJSON struct {
-	SessionID                    string          `json:"session_id"`
-	PortfolioID                  int64           `json:"portfolio_id"`
-	StrategyID                   int64           `json:"strategy_id"`
-	Environment                  int32           `json:"environment"`
-	Status                       string          `json:"status"`
-	Interval                     string          `json:"interval"`
-	StartTimeMs                  int64           `json:"start_time_ms,omitempty"`
-	EndTimeMs                    int64           `json:"end_time_ms,omitempty"`
-	BarsProcessed                int32           `json:"bars_processed"`
-	Error                        string          `json:"error,omitempty"`
-	ErrorCode                    string          `json:"error_code,omitempty"`
-	ErrorMessage                 string          `json:"error_message,omitempty"`
-	ErrorDetail                  json.RawMessage `json:"error_detail,omitempty"`
-	ErrorDetailJSON              string          `json:"error_detail_json,omitempty"`
-	RuntimeID                    string          `json:"runtime_id,omitempty"`
-	RuntimeSource                string          `json:"runtime_source,omitempty"`
-	RuntimeName                  string          `json:"runtime_name,omitempty"`
-	SessionType                  string          `json:"session_type,omitempty"`
-	RuntimeVersion               string          `json:"runtime_version,omitempty"`
-	SessionName                  string          `json:"session_name,omitempty"`
-	IndicatorFinalizationPending bool            `json:"indicator_finalization_pending"`
-	StartedAt                    string          `json:"started_at"`
-	CompletedAt                  string          `json:"completed_at,omitempty"`
+	SessionID                    string                          `json:"session_id"`
+	PortfolioID                  int64                           `json:"portfolio_id"`
+	StrategyID                   int64                           `json:"strategy_id"`
+	Environment                  int32                           `json:"environment"`
+	Status                       string                          `json:"status"`
+	Interval                     string                          `json:"interval"`
+	StartTimeMs                  int64                           `json:"start_time_ms,omitempty"`
+	EndTimeMs                    int64                           `json:"end_time_ms,omitempty"`
+	BarsProcessed                int32                           `json:"bars_processed"`
+	Error                        string                          `json:"error,omitempty"`
+	ErrorCode                    string                          `json:"error_code,omitempty"`
+	ErrorMessage                 string                          `json:"error_message,omitempty"`
+	ErrorDetail                  json.RawMessage                 `json:"error_detail,omitempty"`
+	ErrorDetailJSON              string                          `json:"error_detail_json,omitempty"`
+	RuntimeID                    string                          `json:"runtime_id,omitempty"`
+	RuntimeSource                string                          `json:"runtime_source,omitempty"`
+	RuntimeName                  string                          `json:"runtime_name,omitempty"`
+	SessionType                  string                          `json:"session_type,omitempty"`
+	RuntimeVersion               string                          `json:"runtime_version,omitempty"`
+	SessionName                  string                          `json:"session_name,omitempty"`
+	Leverage                     *float64                        `json:"leverage,omitempty"`
+	TargetLeverageFacts          []sessionTargetLeverageFactJSON `json:"target_leverage_facts,omitempty"`
+	IndicatorFinalizationPending bool                            `json:"indicator_finalization_pending"`
+	StartedAt                    string                          `json:"started_at"`
+	CompletedAt                  string                          `json:"completed_at,omitempty"`
+}
+
+type sessionTargetLeverageFactJSON struct {
+	SessionID         string  `json:"session_id"`
+	VenueID           int64   `json:"venue_id"`
+	Exchange          int32   `json:"exchange"`
+	ExchangeLabel     string  `json:"exchange_label,omitempty"`
+	Environment       int32   `json:"environment"`
+	Market            int32   `json:"market"`
+	MarketLabel       string  `json:"market_label,omitempty"`
+	Symbol            string  `json:"symbol"`
+	EffectiveLeverage uint32  `json:"effective_leverage"`
+	LeverageSource    string  `json:"leverage_source"`
+	PreviousLeverage  *uint32 `json:"previous_leverage,omitempty"`
+	ConfirmedLeverage uint32  `json:"confirmed_leverage"`
+	ConfirmedAt       string  `json:"confirmed_at,omitempty"`
+	CreatedAt         string  `json:"created_at,omitempty"`
 }
 
 func protoSessionToJSON(se *portfoliov1.StrategySessionEntry) sessionJSON {
@@ -1085,6 +1104,11 @@ func protoSessionToJSON(se *portfoliov1.StrategySessionEntry) sessionJSON {
 		RuntimeVersion:               se.GetRuntimeVersion(),
 		SessionName:                  se.GetSessionName(),
 		IndicatorFinalizationPending: se.GetIndicatorFinalizationPending(),
+		TargetLeverageFacts:          sessionTargetLeverageFactsToJSON(se.GetTargetLeverageFacts()),
+	}
+	if len(j.TargetLeverageFacts) == 0 && se.GetLeverage() > 0 {
+		legacy := se.GetLeverage()
+		j.Leverage = &legacy
 	}
 	if raw := []byte(se.GetErrorDetailJson()); json.Valid(raw) {
 		j.ErrorDetail = append(json.RawMessage(nil), raw...)
@@ -1096,4 +1120,36 @@ func protoSessionToJSON(se *portfoliov1.StrategySessionEntry) sessionJSON {
 		j.CompletedAt = ts.AsTime().UTC().Format(time.RFC3339Nano)
 	}
 	return j
+}
+
+func sessionTargetLeverageFactsToJSON(facts []*portfoliov1.SessionTargetLeverageFact) []sessionTargetLeverageFactJSON {
+	out := make([]sessionTargetLeverageFactJSON, 0, len(facts))
+	for _, fact := range facts {
+		if fact == nil {
+			continue
+		}
+		exchangeLabel := orderExchangeLabel(fact.GetExchange())
+		if exchangeLabel == "unknown" {
+			exchangeLabel = ""
+		}
+		marketLabel := orderMarketLabel(fact.GetMarket())
+		if marketLabel == "unknown" {
+			marketLabel = ""
+		}
+		item := sessionTargetLeverageFactJSON{
+			SessionID: fact.GetSessionId(), VenueID: fact.GetVenueId(), Exchange: fact.GetExchange(), ExchangeLabel: exchangeLabel,
+			Environment: fact.GetEnvironment(), Market: fact.GetMarket(), MarketLabel: marketLabel,
+			Symbol: strings.ToUpper(strings.TrimSpace(fact.GetSymbol())), EffectiveLeverage: fact.GetEffectiveLeverage(),
+			LeverageSource: fact.GetLeverageSource(), PreviousLeverage: cloneUint32(fact.PreviousLeverage),
+			ConfirmedLeverage: fact.GetConfirmedLeverage(),
+		}
+		if ts := fact.GetConfirmedAt(); ts != nil && ts.IsValid() {
+			item.ConfirmedAt = ts.AsTime().UTC().Format(time.RFC3339Nano)
+		}
+		if ts := fact.GetCreatedAt(); ts != nil && ts.IsValid() {
+			item.CreatedAt = ts.AsTime().UTC().Format(time.RFC3339Nano)
+		}
+		out = append(out, item)
+	}
+	return out
 }

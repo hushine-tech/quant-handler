@@ -299,6 +299,57 @@ func TestProtoSessionToJSONEmitsExplicitFalseIndicatorFinalizationPending(
 	}
 }
 
+func TestProtoSessionToJSONPrefersDurableTargetLeverageFacts(t *testing.T) {
+	now := timestamppb.Now()
+	encoded, err := json.Marshal(protoSessionToJSON(&portfoliov1.StrategySessionEntry{
+		SessionId: "mixed-leverage", Leverage: 99,
+		TargetLeverageFacts: []*portfoliov1.SessionTargetLeverageFact{{
+			SessionId: "mixed-leverage", VenueId: 8, Exchange: 1, Environment: 1, Market: 2, Symbol: "BTCUSDT",
+			EffectiveLeverage: 5, LeverageSource: "strategy_default", PreviousLeverage: uint32Ptr(3), ConfirmedLeverage: 5,
+			ConfirmedAt: now, CreatedAt: now,
+		}, {
+			SessionId: "mixed-leverage", VenueId: 8, Exchange: 1, Environment: 1, Market: 2, Symbol: "ETHUSDT",
+			EffectiveLeverage: 10, LeverageSource: "order_target", PreviousLeverage: uint32Ptr(10), ConfirmedLeverage: 10,
+			ConfirmedAt: now, CreatedAt: now,
+		}},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body struct {
+		Leverage    *float64                        `json:"leverage"`
+		TargetFacts []sessionTargetLeverageFactJSON `json:"target_leverage_facts"`
+	}
+	if err := json.Unmarshal(encoded, &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Leverage != nil {
+		t.Fatalf("new session exposed misleading scalar leverage: %s", encoded)
+	}
+	if len(body.TargetFacts) != 2 || body.TargetFacts[0].Symbol != "BTCUSDT" || body.TargetFacts[0].EffectiveLeverage != 5 ||
+		body.TargetFacts[0].PreviousLeverage == nil || *body.TargetFacts[0].PreviousLeverage != 3 || body.TargetFacts[0].ConfirmedLeverage != 5 ||
+		body.TargetFacts[1].Symbol != "ETHUSDT" || body.TargetFacts[1].EffectiveLeverage != 10 || body.TargetFacts[1].LeverageSource != "order_target" {
+		t.Fatalf("durable leverage facts lost: %+v JSON=%s", body.TargetFacts, encoded)
+	}
+}
+
+func TestProtoSessionToJSONUsesLegacyLeverageOnlyWithoutTargetFacts(t *testing.T) {
+	encoded, err := json.Marshal(protoSessionToJSON(&portfoliov1.StrategySessionEntry{SessionId: "historical", Leverage: 7}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body struct {
+		Leverage    *float64                        `json:"leverage"`
+		TargetFacts []sessionTargetLeverageFactJSON `json:"target_leverage_facts"`
+	}
+	if err := json.Unmarshal(encoded, &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Leverage == nil || *body.Leverage != 7 || len(body.TargetFacts) != 0 {
+		t.Fatalf("historical leverage fallback missing: leverage=%v facts=%+v JSON=%s", body.Leverage, body.TargetFacts, encoded)
+	}
+}
+
 // ── snapshots handler ────────────────────────────────────────────────────
 
 func TestGetSessionSnapshots_DefaultLimitOffsetAndPagedShape(t *testing.T) {

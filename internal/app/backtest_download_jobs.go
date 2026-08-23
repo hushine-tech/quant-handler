@@ -200,7 +200,6 @@ func (s *server) runDownloadAndRunJob(ctx context.Context, jobID string, cli str
 		UserId:          uid,
 		RuntimeId:       runtimeID,
 		MaxLossClosePct: body.MaxLossClosePct,
-		Leverage:        body.Leverage,
 	})
 	if err != nil {
 		fail(err)
@@ -242,7 +241,6 @@ func (s *server) runDownloadAndRunJob(ctx context.Context, jobID string, cli str
 		UserId:          uid,
 		RuntimeId:       runtimeID,
 		MaxLossClosePct: body.MaxLossClosePct,
-		Leverage:        body.Leverage,
 	})
 	if err != nil {
 		fail(err)

@@ -122,6 +122,15 @@ type previewRunStrategyResponse struct {
 	RiskControls         riskControlsJSON          `json:"risk_controls"`
 }
 
+type runStrategyResponseJSON struct {
+	SessionID      string                             `json:"session_id"`
+	OK             bool                               `json:"ok"`
+	Failures       []preflightFailureJSON             `json:"failures"`
+	TargetResults  []strategyLeverageTargetResultJSON `json:"target_results"`
+	Code           string                             `json:"code"`
+	RollbackFailed bool                               `json:"rollback_failed"`
+}
+
 type riskControlsJSON struct {
 	MaxLossClosePct    float64 `json:"max_loss_close_pct"`
 	MaxLossCloseSource string  `json:"max_loss_close_source"`
@@ -130,9 +139,34 @@ type riskControlsJSON struct {
 }
 
 type strategyOrderTargetJSON struct {
-	Exchange string `json:"exchange"`
-	Market   string `json:"market"`
-	Symbol   string `json:"symbol"`
+	Exchange          string  `json:"exchange"`
+	Market            string  `json:"market"`
+	Symbol            string  `json:"symbol"`
+	EffectiveLeverage uint32  `json:"effective_leverage,omitempty"`
+	LeverageSource    string  `json:"leverage_source,omitempty"`
+	CurrentLeverage   *uint32 `json:"current_leverage,omitempty"`
+	ChangeRequired    bool    `json:"change_required"`
+	VenueID           int64   `json:"venue_id,omitempty"`
+	LeverageStatus    string  `json:"leverage_status,omitempty"`
+}
+
+type strategyLeverageTargetResultJSON struct {
+	VenueID           int64   `json:"venue_id"`
+	Exchange          int32   `json:"exchange"`
+	ExchangeLabel     string  `json:"exchange_label,omitempty"`
+	Market            int32   `json:"market"`
+	MarketLabel       string  `json:"market_label,omitempty"`
+	Symbol            string  `json:"symbol"`
+	EffectiveLeverage uint32  `json:"effective_leverage"`
+	LeverageSource    string  `json:"leverage_source"`
+	PreviousLeverage  *uint32 `json:"previous_leverage,omitempty"`
+	CurrentLeverage   *uint32 `json:"current_leverage,omitempty"`
+	ConfirmedLeverage *uint32 `json:"confirmed_leverage,omitempty"`
+	ChangeRequired    bool    `json:"change_required"`
+	Status            string  `json:"status"`
+	ErrorCode         string  `json:"error_code,omitempty"`
+	ErrorMessage      string  `json:"error_message,omitempty"`
+	Retryable         bool    `json:"retryable"`
 }
 
 type strategyRouteJSON struct {
@@ -231,7 +265,6 @@ func (s *server) handleRunStrategy(w http.ResponseWriter, r *http.Request, portf
 		UserId:          uid,
 		RuntimeId:       runtimeID,
 		MaxLossClosePct: body.MaxLossClosePct,
-		Leverage:        body.Leverage,
 	})
 	previewCancel()
 	if err != nil {
@@ -298,7 +331,6 @@ func (s *server) handleRunStrategy(w http.ResponseWriter, r *http.Request, portf
 		UserId:          uid,
 		RuntimeId:       runtimeID,
 		MaxLossClosePct: body.MaxLossClosePct,
-		Leverage:        body.Leverage,
 	})
 	if err != nil {
 		if writeRuntimeDependencyError(w, err) {
@@ -309,8 +341,14 @@ func (s *server) handleRunStrategy(w http.ResponseWriter, r *http.Request, portf
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
-		"session_id": resp.GetSessionId(),
+	failures := make([]preflightFailureJSON, 0, len(resp.GetFailures()))
+	for _, failure := range resp.GetFailures() {
+		failures = append(failures, preflightFailureToJSON(failure))
+	}
+	writeJSON(w, http.StatusOK, runStrategyResponseJSON{
+		SessionID: resp.GetSessionId(), OK: resp.GetOk(), Failures: failures,
+		TargetResults: strategyLeverageTargetResultsToJSON(resp.GetTargetResults()),
+		Code:          resp.GetCode(), RollbackFailed: resp.GetRollbackFailed(),
 	})
 }
 
@@ -441,7 +479,6 @@ func (s *server) handlePreviewRunStrategy(w http.ResponseWriter, r *http.Request
 		UserId:          uid,
 		RuntimeId:       runtimeID,
 		MaxLossClosePct: body.MaxLossClosePct,
-		Leverage:        body.Leverage,
 	})
 	if err != nil {
 		if writeRuntimeDependencyError(w, err) {
@@ -571,12 +608,52 @@ func orderTargetBindingsToJSON(bindings []*strategyv1.StrategyOrderTargetBinding
 			continue
 		}
 		out = append(out, strategyOrderTargetJSON{
-			Exchange: strings.ToLower(strings.TrimSpace(b.GetExchange())),
-			Market:   marketDataMarketToStrategyMarket(b.GetMarket()),
-			Symbol:   strings.ToUpper(strings.TrimSpace(b.GetSymbol())),
+			Exchange:          strings.ToLower(strings.TrimSpace(b.GetExchange())),
+			Market:            marketDataMarketToStrategyMarket(b.GetMarket()),
+			Symbol:            strings.ToUpper(strings.TrimSpace(b.GetSymbol())),
+			EffectiveLeverage: b.GetEffectiveLeverage(),
+			LeverageSource:    b.GetLeverageSource(),
+			CurrentLeverage:   cloneUint32(b.CurrentLeverage),
+			ChangeRequired:    b.GetChangeRequired(),
+			VenueID:           b.GetVenueId(),
+			LeverageStatus:    b.GetLeverageStatus(),
 		})
 	}
 	return out
+}
+
+func strategyLeverageTargetResultsToJSON(results []*strategyv1.StrategyLeverageTargetResult) []strategyLeverageTargetResultJSON {
+	out := make([]strategyLeverageTargetResultJSON, 0, len(results))
+	for _, result := range results {
+		if result == nil {
+			continue
+		}
+		exchangeLabel := orderExchangeLabel(result.GetExchange())
+		if exchangeLabel == "unknown" {
+			exchangeLabel = ""
+		}
+		marketLabel := orderMarketLabel(result.GetMarket())
+		if marketLabel == "unknown" {
+			marketLabel = ""
+		}
+		out = append(out, strategyLeverageTargetResultJSON{
+			VenueID: result.GetVenueId(), Exchange: result.GetExchange(), ExchangeLabel: exchangeLabel,
+			Market: result.GetMarket(), MarketLabel: marketLabel, Symbol: strings.ToUpper(strings.TrimSpace(result.GetSymbol())),
+			EffectiveLeverage: result.GetEffectiveLeverage(), LeverageSource: result.GetLeverageSource(),
+			PreviousLeverage: cloneUint32(result.PreviousLeverage), CurrentLeverage: cloneUint32(result.CurrentLeverage),
+			ConfirmedLeverage: cloneUint32(result.ConfirmedLeverage), ChangeRequired: result.GetChangeRequired(),
+			Status: result.GetStatus(), ErrorCode: result.GetErrorCode(), ErrorMessage: result.GetErrorMessage(), Retryable: result.GetRetryable(),
+		})
+	}
+	return out
+}
+
+func cloneUint32(value *uint32) *uint32 {
+	if value == nil {
+		return nil
+	}
+	copy := *value
+	return &copy
 }
 
 func routeBindingsToJSON(bindings []*strategyv1.StrategyRouteBinding) []strategyRouteJSON {

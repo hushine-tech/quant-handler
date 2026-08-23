@@ -65,6 +65,10 @@ func (f *fakeControlPanelStrategyProxy) RunStrategy(ctx context.Context, in *str
 	return &strategyv1.RunStrategyResponse{SessionId: "selfhosted-sess"}, nil
 }
 
+func (f *fakeControlPanelStrategyProxy) PrepareRunStrategyStart(context.Context, *strategyv1.PrepareRunStrategyStartRequest, ...grpc.CallOption) (*strategyv1.PreparedRunStrategyStart, error) {
+	return nil, status.Error(codes.Unimplemented, "not used by quant-handler tests")
+}
+
 func (f *fakeControlPanelStrategyProxy) GetStrategyStatus(ctx context.Context, in *strategyv1.GetStrategyStatusRequest, _ ...grpc.CallOption) (*strategyv1.GetStrategyStatusResponse, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -354,8 +358,61 @@ func TestRunStrategy_ExplicitRuntimeIDRoutesByID(t *testing.T) {
 	if proxy.runReq.GetRuntimeId() != "rt_self" {
 		t.Fatalf("proxy RunStrategy runtime_id = %q", proxy.runReq.GetRuntimeId())
 	}
-	if proxy.runReq.GetLeverage() != 5 {
-		t.Fatalf("proxy RunStrategy leverage = %v, want 5", proxy.runReq.GetLeverage())
+	if proxy.runReq.GetLeverage() != 0 {
+		t.Fatalf("proxy RunStrategy legacy leverage = %v, want ignored zero", proxy.runReq.GetLeverage())
+	}
+}
+
+func TestRunStrategy_PreservesStructuredLeverageFailureResult(t *testing.T) {
+	proxy := &fakeControlPanelStrategyProxy{runResp: &strategyv1.RunStrategyResponse{
+		Ok:             false,
+		Code:           "LEVERAGE_ROLLBACK_FAILED",
+		RollbackFailed: true,
+		Failures: []*strategyv1.PreflightFailureProto{{
+			Kind: "leverage", Reason: "ETHUSDT confirm failed", Code: "LEVERAGE_CONFIRM_FAILED",
+			Exchange: 1, Market: 2, Symbol: "ETHUSDT", VenueId: 8, Environment: 1, Retryable: true, Source: "core-service",
+		}},
+		TargetResults: []*strategyv1.StrategyLeverageTargetResult{{
+			VenueId: 8, Exchange: 1, Market: 2, Symbol: "BTCUSDT", EffectiveLeverage: 5,
+			LeverageSource: "strategy_default", PreviousLeverage: uint32Ptr(3), CurrentLeverage: uint32Ptr(3),
+			ConfirmedLeverage: uint32Ptr(5), ChangeRequired: true, Status: "rolled_back",
+		}, {
+			VenueId: 8, Exchange: 1, Market: 2, Symbol: "ETHUSDT", EffectiveLeverage: 10,
+			LeverageSource: "order_target", PreviousLeverage: uint32Ptr(2), CurrentLeverage: uint32Ptr(10),
+			ChangeRequired: true, Status: "rollback_failed", ErrorCode: "LEVERAGE_ROLLBACK_FAILED",
+			ErrorMessage: "rollback readback mismatch", Retryable: true,
+		}},
+	}}
+	resolver := &fakeResolver{resolveByIDResp: controlpanel.Route{RuntimeID: "rt_self", Source: "self_hosted"}}
+	s := &server{controlPanel: resolver, cpRuntime: proxy, jwtSecret: []byte("s"), corsOrigins: []string{"*"}}
+	req := withUID(httptest.NewRequest(http.MethodPost, "/api/portfolios/7/run-strategy",
+		bytes.NewBufferString(`{"runtime_id":"rt_self","leverage":99}`)), 42)
+	rec := httptest.NewRecorder()
+
+	s.handleRunStrategy(rec, req, 7)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s, want structured application result", rec.Code, rec.Body.String())
+	}
+	if proxy.runReq == nil || proxy.runReq.GetLeverage() != 0 {
+		t.Fatalf("legacy leverage reached strategy RPC: %+v", proxy.runReq)
+	}
+	var body runStrategyResponseJSON
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.OK || body.Code != "LEVERAGE_ROLLBACK_FAILED" || !body.RollbackFailed || len(body.Failures) != 1 || len(body.TargetResults) != 2 {
+		t.Fatalf("structured start result lost: %+v body=%s", body, rec.Body.String())
+	}
+	rolledBack := body.TargetResults[0]
+	if rolledBack.Symbol != "BTCUSDT" || rolledBack.ExchangeLabel != "binance" || rolledBack.MarketLabel != "perpetual_futures" ||
+		rolledBack.PreviousLeverage == nil || *rolledBack.PreviousLeverage != 3 || rolledBack.ConfirmedLeverage == nil || *rolledBack.ConfirmedLeverage != 5 || rolledBack.Status != "rolled_back" {
+		t.Fatalf("rolled-back target result lost: %+v", rolledBack)
+	}
+	rollbackFailed := body.TargetResults[1]
+	if rollbackFailed.Symbol != "ETHUSDT" || rollbackFailed.CurrentLeverage == nil || *rollbackFailed.CurrentLeverage != 10 ||
+		rollbackFailed.ErrorCode != "LEVERAGE_ROLLBACK_FAILED" || !rollbackFailed.Retryable {
+		t.Fatalf("rollback-failed target result lost: %+v", rollbackFailed)
 	}
 }
 

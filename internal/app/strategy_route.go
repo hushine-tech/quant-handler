@@ -6,6 +6,8 @@ import (
 	"net/http"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	controlpanelv1 "github.com/hushine-tech/control-panel-service/gen/controlpanelv1"
 	"github.com/hushine-tech/quant-handler/internal/controlpanel"
@@ -18,6 +20,14 @@ type controlPanelStrategyClient struct {
 
 func (c controlPanelStrategyClient) RunStrategy(ctx context.Context, in *strategyv1.RunStrategyRequest, opts ...grpc.CallOption) (*strategyv1.RunStrategyResponse, error) {
 	return c.rpc.RunStrategy(ctx, in, opts...)
+}
+
+// PrepareRunStrategyStart is an internal RuntimeChannel method. The public
+// control-panel gateway does not expose it, and quant-handler never calls it;
+// this explicit fail-closed method only keeps the narrow client adapter aligned
+// with the additive strategy-service interface.
+func (c controlPanelStrategyClient) PrepareRunStrategyStart(context.Context, *strategyv1.PrepareRunStrategyStartRequest, ...grpc.CallOption) (*strategyv1.PreparedRunStrategyStart, error) {
+	return nil, status.Error(codes.Unimplemented, "PrepareRunStrategyStart is internal to RuntimeChannel")
 }
 
 func (c controlPanelStrategyClient) PreviewRunStrategy(ctx context.Context, in *strategyv1.PreviewRunStrategyRequest, opts ...grpc.CallOption) (*strategyv1.PreviewRunStrategyResponse, error) {
