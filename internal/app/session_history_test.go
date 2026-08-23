@@ -350,6 +350,25 @@ func TestProtoSessionToJSONUsesLegacyLeverageOnlyWithoutTargetFacts(t *testing.T
 	}
 }
 
+func TestProtoSessionToJSONOmitsCoordinatedZeroWithoutTargetFacts(t *testing.T) {
+	encoded, err := json.Marshal(protoSessionToJSON(&portfoliov1.StrategySessionEntry{
+		SessionId: "coordinated-spot", LaunchOperationId: "launch-spot", Leverage: 0,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(encoded, &body); err != nil {
+		t.Fatal(err)
+	}
+	if leverage, exists := body["leverage"]; exists {
+		t.Fatalf("coordinated Spot response exposed historical leverage %#v: %s", leverage, encoded)
+	}
+	if facts, exists := body["target_leverage_facts"]; exists {
+		t.Fatalf("coordinated Spot response exposed target leverage facts %#v: %s", facts, encoded)
+	}
+}
+
 // ── snapshots handler ────────────────────────────────────────────────────
 
 func TestGetSessionSnapshots_DefaultLimitOffsetAndPagedShape(t *testing.T) {
