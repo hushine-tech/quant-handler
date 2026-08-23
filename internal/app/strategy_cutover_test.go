@@ -342,7 +342,7 @@ func TestRunStrategy_ExplicitRuntimeIDRoutesByID(t *testing.T) {
 	}
 	req := withUID(httptest.NewRequest(http.MethodPost,
 		"/api/portfolios/7/run-strategy",
-		bytes.NewBufferString(`{"runtime_id":"rt_self","start_time_ms":1,"end_time_ms":2,"leverage":5}`)), 42)
+		bytes.NewBufferString(`{"runtime_id":"rt_self","start_time_ms":1,"end_time_ms":2,"leverage":5,"resume_session_id":"session-recoverable-source"}`)), 42)
 	rec := httptest.NewRecorder()
 	s.handleRunStrategy(rec, req, 7)
 
@@ -360,6 +360,9 @@ func TestRunStrategy_ExplicitRuntimeIDRoutesByID(t *testing.T) {
 	}
 	if proxy.runReq.GetLeverage() != 0 {
 		t.Fatalf("proxy RunStrategy legacy leverage = %v, want ignored zero", proxy.runReq.GetLeverage())
+	}
+	if proxy.runReq.GetResumeSessionId() != "session-recoverable-source" {
+		t.Fatalf("proxy RunStrategy resume_session_id = %q", proxy.runReq.GetResumeSessionId())
 	}
 }
 

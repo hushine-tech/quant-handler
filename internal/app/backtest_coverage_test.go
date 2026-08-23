@@ -476,6 +476,17 @@ func TestDownloadAndRunJobStatusSurfacesHistoricalRequestState(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("download job did not query historical request state")
 	}
+	requestStateDeadline := time.Now().Add(time.Second)
+	for {
+		job, ok := s.downloadRunJobs.get(created.JobID)
+		if ok && len(job.Requests) == 1 {
+			break
+		}
+		if time.Now().After(requestStateDeadline) {
+			t.Fatal("download job did not publish historical request state")
+		}
+		time.Sleep(time.Millisecond)
+	}
 
 	statusReq := withUID(httptest.NewRequest(http.MethodGet, "/api/strategy/download-and-run-jobs/"+created.JobID, nil), 6)
 	statusRec := httptest.NewRecorder()

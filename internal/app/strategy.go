@@ -33,6 +33,7 @@ type runStrategyRequest struct {
 	RuntimeID       string  `json:"runtime_id"`
 	MaxLossClosePct float64 `json:"max_loss_close_pct"`
 	Leverage        float64 `json:"leverage"`
+	ResumeSessionID string  `json:"resume_session_id"`
 }
 
 type stopStrategyRequest struct {
@@ -331,6 +332,7 @@ func (s *server) handleRunStrategy(w http.ResponseWriter, r *http.Request, portf
 		UserId:          uid,
 		RuntimeId:       runtimeID,
 		MaxLossClosePct: body.MaxLossClosePct,
+		ResumeSessionId: strings.TrimSpace(body.ResumeSessionID),
 	})
 	if err != nil {
 		if writeRuntimeDependencyError(w, err) {
