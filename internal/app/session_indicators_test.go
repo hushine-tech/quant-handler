@@ -43,9 +43,6 @@ func TestHandleSessions_RoutesStrategyIndicatorDefinitions(t *testing.T) {
 	if acct.lastIndicatorDefinitionsV2Req == nil {
 		t.Fatalf("expected ListStrategyIndicatorsV2 RPC to be called")
 	}
-	if acct.lastIndicatorDefinitionsReq != nil {
-		t.Fatalf("legacy ListStrategyIndicators RPC must not be called")
-	}
 	if got := acct.lastIndicatorDefinitionsV2Req.GetSessionId(); got != "sess-1" {
 		t.Errorf("grpc session_id = %q, want sess-1", got)
 	}
@@ -76,7 +73,7 @@ func TestHandleSessions_RoutesStrategyIndicatorDefinitions(t *testing.T) {
 	}
 }
 
-func TestStrategyIndicatorV1CoexistsWithV2(t *testing.T) {
+func TestStrategyIndicatorV1Removed(t *testing.T) {
 	service := portfoliov1.File_portfolio_service_proto.Services().
 		ByName("PortfolioService")
 	if service == nil {
@@ -85,23 +82,20 @@ func TestStrategyIndicatorV1CoexistsWithV2(t *testing.T) {
 	for _, method := range []string{
 		"ListStrategyIndicators",
 		"ListStrategyIndicatorChunks",
+	} {
+		if service.Methods().ByName(protoreflect.Name(method)) != nil {
+			t.Fatalf("indicator V1 method is still present: %s", method)
+		}
+	}
+	for _, method := range []string{
 		"ListStrategyIndicatorsV2",
 		"ListStrategyIndicatorChunksV2",
 	} {
 		if service.Methods().ByName(protoreflect.Name(method)) == nil {
-			t.Fatalf("indicator coexistence method is missing: %s", method)
+			t.Fatalf("indicator V2 method is missing: %s", method)
 		}
 	}
 
-	legacy := &portfoliov1.StrategyIndicatorChunk{
-		SessionId:    "sess-1",
-		StreamKey:    "binance:spot:BTCUSDT:1m",
-		IndicatorKey: "alpha",
-		ValuesJson:   `{"values":[1]}`,
-	}
-	if legacy.GetValuesJson() == "" {
-		t.Fatal("deprecated V1 chunk no longer preserves values_json")
-	}
 	current := strategyIndicatorChunkToJSON(
 		&portfoliov1.StrategyIndicatorChunkV2{
 			SessionId:       "sess-1",
@@ -171,9 +165,6 @@ func TestHandleSessions_RoutesStrategyIndicatorChunks(t *testing.T) {
 	}
 	if acct.lastIndicatorChunksV2Req == nil {
 		t.Fatalf("expected ListStrategyIndicatorChunksV2 RPC to be called")
-	}
-	if acct.lastIndicatorChunksReq != nil {
-		t.Fatalf("legacy ListStrategyIndicatorChunks RPC must not be called")
 	}
 	if got := acct.lastIndicatorChunksV2Req.GetSessionId(); got != "sess-1" {
 		t.Errorf("grpc session_id = %q, want sess-1", got)

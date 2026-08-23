@@ -26,8 +26,6 @@ type fakeSessionPortfoliosClient struct {
 	lastGetPortfolioReq           *portfoliov1.GetPortfolioRequest
 	lastListSessionsReq           *portfoliov1.ListSessionsRequest
 	lastUpdateSessionReq          *portfoliov1.UpdateSessionRequest
-	lastIndicatorDefinitionsReq   *portfoliov1.ListStrategyIndicatorsRequest
-	lastIndicatorChunksReq        *portfoliov1.ListStrategyIndicatorChunksRequest
 	lastIndicatorDefinitionsV2Req *portfoliov1.ListStrategyIndicatorsV2Request
 	lastIndicatorChunksV2Req      *portfoliov1.ListStrategyIndicatorChunksV2Request
 
@@ -42,10 +40,6 @@ type fakeSessionPortfoliosClient struct {
 	listSessionsResp           *portfoliov1.ListSessionsResponse
 	listSessionsErr            error
 	updateSessionErr           error
-	indicatorDefinitionsResp   *portfoliov1.ListStrategyIndicatorsResponse
-	indicatorDefinitionsErr    error
-	indicatorChunksResp        *portfoliov1.ListStrategyIndicatorChunksResponse
-	indicatorChunksErr         error
 	indicatorDefinitionsV2Resp *portfoliov1.ListStrategyIndicatorsV2Response
 	indicatorDefinitionsV2Err  error
 	indicatorChunksV2Resp      *portfoliov1.ListStrategyIndicatorChunksV2Response
@@ -119,28 +113,6 @@ func (f *fakeSessionPortfoliosClient) GetSessionReconciliationSummary(_ context.
 		return nil, f.reconciliationSummaryErr
 	}
 	return f.reconciliationSummaryResp, nil
-}
-
-func (f *fakeSessionPortfoliosClient) ListStrategyIndicators(_ context.Context, in *portfoliov1.ListStrategyIndicatorsRequest, _ ...grpc.CallOption) (*portfoliov1.ListStrategyIndicatorsResponse, error) {
-	f.lastIndicatorDefinitionsReq = in
-	if f.indicatorDefinitionsErr != nil {
-		return nil, f.indicatorDefinitionsErr
-	}
-	if f.indicatorDefinitionsResp != nil {
-		return f.indicatorDefinitionsResp, nil
-	}
-	return &portfoliov1.ListStrategyIndicatorsResponse{}, nil
-}
-
-func (f *fakeSessionPortfoliosClient) ListStrategyIndicatorChunks(_ context.Context, in *portfoliov1.ListStrategyIndicatorChunksRequest, _ ...grpc.CallOption) (*portfoliov1.ListStrategyIndicatorChunksResponse, error) {
-	f.lastIndicatorChunksReq = in
-	if f.indicatorChunksErr != nil {
-		return nil, f.indicatorChunksErr
-	}
-	if f.indicatorChunksResp != nil {
-		return f.indicatorChunksResp, nil
-	}
-	return &portfoliov1.ListStrategyIndicatorChunksResponse{}, nil
 }
 
 func (f *fakeSessionPortfoliosClient) ListStrategyIndicatorsV2(_ context.Context, in *portfoliov1.ListStrategyIndicatorsV2Request, _ ...grpc.CallOption) (*portfoliov1.ListStrategyIndicatorsV2Response, error) {
