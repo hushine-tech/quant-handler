@@ -251,23 +251,44 @@ func TestCreateBacktestFuturesVenueRejectsEditableLeverage(t *testing.T) {
 	}
 }
 
-func TestCreateBacktestFuturesVenueMapsLegacyInitialBalanceToFuturesOnly(t *testing.T) {
-	fake := &fakeVenuePortfoliosClient{createResp: &portfoliov1.CreateVenueResponse{Venue: &portfoliov1.VenueEntry{VenueId: 90}}}
-	s := &server{portfolios: fake}
-	body := strings.NewReader(`{
-		"exchange":"binance","market":"perpetual_futures","environment":"backtest",
-		"margin_mode":"cross","position_mode":"one_way","initial_balance":1500
-	}`)
-	req := withUID(httptest.NewRequest(http.MethodPost, "/api/venues", body), 42)
-	rec := httptest.NewRecorder()
-
-	s.handleVenues(rec, req)
-
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+func TestCreateVenueRejectsRemovedTopLevelInitialBalance(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "Futures",
+			body: `{
+				"exchange":"binance","market":"perpetual_futures","environment":"backtest",
+				"margin_mode":"cross","position_mode":"one_way","initial_balance":1500,
+				"futures":{"margin_mode":"cross","position_mode":"one_way","initial_balance":1500}
+			}`,
+		},
+		{
+			name: "Spot",
+			body: `{
+				"exchange":"binance","market":"spot","environment":"backtest",
+				"initial_balance":1500,
+				"spot":{"assets":[{"asset":"USDT","free":"1500","locked":"0"}]}
+			}`,
+		},
 	}
-	if fake.createReq.GetSpot() != nil || fake.createReq.GetFutures().GetInitialBalance() != 1500 || fake.createReq.GetFutures().GetMarginMode() != "cross" {
-		t.Fatalf("legacy Futures bootstrap crossed route: %#v", fake.createReq)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := &fakeVenuePortfoliosClient{}
+			s := &server{portfolios: fake}
+			req := withUID(httptest.NewRequest(http.MethodPost, "/api/venues", strings.NewReader(tc.body)), 42)
+			rec := httptest.NewRecorder()
+
+			s.handleVenues(rec, req)
+
+			if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "invalid JSON") {
+				t.Fatalf("removed top-level initial_balance was not rejected by strict JSON boundary: status=%d body=%s", rec.Code, rec.Body.String())
+			}
+			if fake.createReq != nil {
+				t.Fatalf("removed top-level initial_balance reached core-service: %+v", fake.createReq)
+			}
+		})
 	}
 }
 
@@ -361,14 +382,6 @@ func TestCreateBacktestVenueRejectsWalletFromAnotherMarket(t *testing.T) {
 				"exchange":"binance","market":"spot","environment":"backtest",
 				"spot":{"assets":[{"asset":"USDT","free":"100","locked":"0"}]},
 				"futures":{"margin_mode":"cross","initial_balance":1000}
-			}`,
-		},
-		{
-			name: "Spot rejects legacy initial balance",
-			body: `{
-				"exchange":"binance","market":"spot","environment":"backtest",
-				"initial_balance":1000,
-				"spot":{"assets":[{"asset":"USDT","free":"100","locked":"0"}]}
 			}`,
 		},
 		{

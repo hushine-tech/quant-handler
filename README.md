@@ -6,12 +6,12 @@ HTTP BFF for the quant portal: JWT login, CORS for the React app, and gRPC fan-o
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `CORE_SERVICE_GRPC_ADDR` | yes | gRPC address for core-service (e.g. `127.0.0.1:50051`) |
-| `QUANT_HANDLER_JWT_SECRET` | yes | HMAC secret for signing portal JWTs |
-| `HTTP_ADDR` | no | Listen address (default `:8090`) |
-| `HANDLER_CORS_ORIGINS` | no | Comma-separated allowed `Origin` values (defaults to the local frontend at both `localhost:5173` and `127.0.0.1:5173`) |
-| `ORDER_SERVICE_GRPC_ADDR` | no | Compatibility env var for the order.v1 API gRPC address (default `127.0.0.1:50051`; currently served by core-service). |
-| `CONTROL_PANEL_SERVICE_GRPC_ADDR` | yes | gRPC address for control-panel-service (default `127.0.0.1:50054`). Required for runtime, credential, strategy proxy, and market-data control-plane paths. |
+| `DEPENDENCIES_CORE_SERVICE_GRPC` | yes | gRPC address for the core-service portfolio API (default `127.0.0.1:50051`) |
+| `DEPENDENCIES_ORDER_SERVICE_GRPC` | yes | gRPC address for the core-service-owned order API (default `127.0.0.1:50051`) |
+| `DEPENDENCIES_CONTROL_PANEL_SERVICE_GRPC` | yes | gRPC address for control-panel-service (default `127.0.0.1:50054`). Required for runtime, credential, strategy proxy, and market-data control-plane paths. |
+| `AUTH_JWT_SECRET` | yes | HMAC secret for signing portal JWTs |
+| `SERVER_HTTP_ADDR` | no | Listen address (default `:8090`) |
+| `AUTH_CORS_ORIGINS` | no | Comma-separated allowed `Origin` values (defaults to the local frontend at both `localhost:5173` and `127.0.0.1:5173`) |
 
 ## Run locally
 
@@ -55,7 +55,7 @@ surfacing a 504 to the page.
 
 ## Manual stack check (wallet wizard)
 
-1. Run **core-service** (Binance public `exchangeInfo` used for symbol cache; set `SYMBOL_CACHE_TTL` if needed).
+1. Run **core-service** (Binance public `exchangeInfo` supplies the symbol cache).
 2. Run **quant-handler** and **quant-frontend** (`VITE_API_BASE_URL` pointing at handler).
 3. Log in, create an portfolio; open portfolio detail and confirm banner (回测/测试网/实盘) and portfolio numbers are read from the portfolio snapshot.
 

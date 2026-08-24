@@ -24,9 +24,8 @@ const (
 	auditListMaxLimit     = 200
 )
 
-// pagedResponse is the wire shape every audit list handler returns. Using a
-// JSON object root (rather than a bare array) lets callers structurally
-// distinguish the paged contract from legacy flat-array responses.
+// pagedResponse is the wire shape every audit list handler returns. The JSON
+// object root carries the collection and its pagination metadata together.
 type pagedResponse struct {
 	Items      any   `json:"items"`
 	NextOffset int32 `json:"next_offset"`
