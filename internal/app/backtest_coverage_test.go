@@ -330,6 +330,37 @@ func TestDownloadAndRunJobStopsOnStructuredPreviewFailure(t *testing.T) {
 	}
 }
 
+func TestDownloadAndRunJobContinuesWhenPreviewOnlyLacksHistoricalData(t *testing.T) {
+	proxy := &fakeControlPanelStrategyProxy{
+		previewResp: &strategyv1.PreviewRunStrategyResponse{
+			Profile: "backtest", Supported: true, Ok: false,
+			Failures: []*strategyv1.PreflightFailureProto{{
+				Kind: "historical_data", Reason: "no historical kline data in requested range",
+				Code: "HISTORICAL_DATA_MISSING", Environment: 0,
+			}},
+			DeclaredInputs: []*strategyv1.LiveStreamBinding{{
+				Exchange: "binance", Market: "spot", Kind: "kline", Symbol: "BTCUSDT", Interval: "1m",
+			}},
+		},
+		runResp: &strategyv1.RunStrategyResponse{Ok: true, SessionId: "spot-session"},
+	}
+	store := newDownloadRunJobStore()
+	s := &server{marketData: &fakeMarketDataClient{coverageResp: &mdv1CoverageComplete}, downloadRunJobs: store}
+	job := store.create()
+
+	s.runDownloadAndRunJob(context.Background(), job.JobID, proxy, 6, 7, "rt-download", downloadAndRunRequest{
+		RuntimeID: "rt-download", StartTimeMS: 1779033600000, EndTimeMS: 1779037200000, Interval: "1m",
+	})
+
+	got, _ := store.get(job.JobID)
+	if proxy.runRequest() == nil {
+		t.Fatal("historical-data-only preview failure did not reach RunStrategy after coverage validation")
+	}
+	if got.Status != downloadRunReady || got.SessionID != "spot-session" {
+		t.Fatalf("download-and-run job = %+v, want ready Spot session", got)
+	}
+}
+
 func TestDownloadAndRunJobPreservesStructuredRunFailure(t *testing.T) {
 	proxy := &fakeControlPanelStrategyProxy{
 		previewResp: &strategyv1.PreviewRunStrategyResponse{

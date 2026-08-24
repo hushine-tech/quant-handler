@@ -226,7 +226,7 @@ func (s *server) runDownloadAndRunJob(ctx context.Context, jobID string, cli str
 		failStructured("runtime returned an empty strategy preview", "STRATEGY_PREVIEW_EMPTY", nil, nil, false)
 		return
 	}
-	if !preview.GetOk() {
+	if !previewAllowsHistoricalDownload(preview) {
 		failures := preflightFailuresToJSON(preview.GetFailures())
 		message := "strategy preflight failed"
 		code := "STRATEGY_PREFLIGHT_FAILED"
@@ -315,6 +315,25 @@ func (s *server) runDownloadAndRunJob(ctx context.Context, jobID string, cli str
 		job.Code = strings.TrimSpace(run.GetCode())
 		job.RollbackFailed = run.GetRollbackFailed()
 	})
+}
+
+func previewAllowsHistoricalDownload(preview *strategyv1.PreviewRunStrategyResponse) bool {
+	if preview == nil {
+		return false
+	}
+	if preview.GetOk() {
+		return true
+	}
+	failures := preview.GetFailures()
+	if len(failures) == 0 {
+		return false
+	}
+	for _, failure := range failures {
+		if failure == nil || strings.TrimSpace(failure.GetKind()) != "historical_data" {
+			return false
+		}
+	}
+	return true
 }
 
 func preflightFailuresToJSON(failures []*strategyv1.PreflightFailureProto) []preflightFailureJSON {
