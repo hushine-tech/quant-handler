@@ -24,7 +24,6 @@ const (
 )
 
 type downloadAndRunRequest struct {
-	StrategyPath    string  `json:"strategy_path"`
 	Interval        string  `json:"interval"`
 	StartTimeMS     int64   `json:"start_time_ms"`
 	EndTimeMS       int64   `json:"end_time_ms"`
@@ -213,7 +212,6 @@ func (s *server) runDownloadAndRunJob(ctx context.Context, jobID string, cli str
 
 	preview, err := cli.PreviewRunStrategy(ctx, &strategyv1.PreviewRunStrategyRequest{
 		PortfolioId:     portfolioID,
-		StrategyPath:    body.StrategyPath,
 		StartTimeMs:     body.StartTimeMS,
 		EndTimeMs:       body.EndTimeMS,
 		UserId:          uid,
@@ -272,7 +270,6 @@ func (s *server) runDownloadAndRunJob(ctx context.Context, jobID string, cli str
 
 	run, err := cli.RunStrategy(ctx, &strategyv1.RunStrategyRequest{
 		PortfolioId:     portfolioID,
-		StrategyPath:    body.StrategyPath,
 		Interval:        body.Interval,
 		StartTimeMs:     body.StartTimeMS,
 		EndTimeMs:       body.EndTimeMS,

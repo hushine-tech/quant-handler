@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/hushine-tech/quant-handler/internal/controlpanel"
@@ -12,6 +13,26 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
+
+func TestStrategyRequestBodiesRejectLegacyStrategyPath(t *testing.T) {
+	for name, destination := range map[string]any{
+		"run":              &runStrategyRequest{},
+		"preview":          &previewRunStrategyRequest{},
+		"coverage-preview": &coveragePreviewRequest{},
+		"download-and-run": &downloadAndRunRequest{},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := decodeStrategyRequestBody(
+				strings.NewReader(`{"runtime_id":"rt-1","strategy_path":"legacy.module"}`),
+				destination,
+				false,
+			)
+			if err == nil || !strings.Contains(err.Error(), "unknown field") {
+				t.Fatalf("decode error = %v, want unknown strategy_path field", err)
+			}
+		})
+	}
+}
 
 func TestPreviewRunStrategy_ForwardsBodyAndReturnsJSON(t *testing.T) {
 	proxy := &fakeControlPanelStrategyProxy{
@@ -69,7 +90,7 @@ func TestPreviewRunStrategy_ForwardsBodyAndReturnsJSON(t *testing.T) {
 		corsOrigins: []string{"*"},
 	}
 
-	body := `{"runtime_id":"rt-preview","strategy_path":"","start_time_ms":0,"end_time_ms":0,"max_loss_close_pct":0.25}`
+	body := `{"runtime_id":"rt-preview","start_time_ms":0,"end_time_ms":0,"max_loss_close_pct":0.25}`
 	req := withUID(httptest.NewRequest(http.MethodPost,
 		"/api/portfolios/7/preview-run-strategy", bytes.NewBufferString(body)), 17)
 	rec := httptest.NewRecorder()

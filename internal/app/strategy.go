@@ -26,7 +26,6 @@ const (
 // ── Request / Response types ─────────────────────────────────────────────────
 
 type runStrategyRequest struct {
-	StrategyPath    string  `json:"strategy_path"`
 	Interval        string  `json:"interval"`
 	StartTimeMs     int64   `json:"start_time_ms"`
 	EndTimeMs       int64   `json:"end_time_ms"`
@@ -41,7 +40,6 @@ type stopStrategyRequest struct {
 }
 
 type previewRunStrategyRequest struct {
-	StrategyPath    string  `json:"strategy_path"`
 	StartTimeMs     int64   `json:"start_time_ms"`
 	EndTimeMs       int64   `json:"end_time_ms"`
 	RuntimeID       string  `json:"runtime_id"`
@@ -229,7 +227,6 @@ func (s *server) handleRunStrategy(w http.ResponseWriter, r *http.Request, portf
 		writeErr(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
-	// strategy_path 可以为空：Phase 2 中 strategy-service 会通过 GetActiveStrategy 获取 DB 存储的策略
 	interval := body.Interval
 	if interval == "" {
 		interval = "1m"
@@ -256,7 +253,6 @@ func (s *server) handleRunStrategy(w http.ResponseWriter, r *http.Request, portf
 	previewCtx, previewCancel := context.WithTimeout(r.Context(), previewRunStrategyRPCTimeout)
 	preview, err := cli.PreviewRunStrategy(previewCtx, &strategyv1.PreviewRunStrategyRequest{
 		PortfolioId:     portfolioID,
-		StrategyPath:    body.StrategyPath,
 		StartTimeMs:     body.StartTimeMs,
 		EndTimeMs:       body.EndTimeMs,
 		UserId:          uid,
@@ -321,7 +317,6 @@ func (s *server) handleRunStrategy(w http.ResponseWriter, r *http.Request, portf
 	defer cancel()
 	resp, err := cli.RunStrategy(rpcCtx, &strategyv1.RunStrategyRequest{
 		PortfolioId:     portfolioID,
-		StrategyPath:    body.StrategyPath,
 		Interval:        interval,
 		StartTimeMs:     body.StartTimeMs,
 		EndTimeMs:       body.EndTimeMs,
@@ -471,7 +466,6 @@ func (s *server) handlePreviewRunStrategy(w http.ResponseWriter, r *http.Request
 	defer cancel()
 	resp, err := cli.PreviewRunStrategy(rpcCtx, &strategyv1.PreviewRunStrategyRequest{
 		PortfolioId:     portfolioID,
-		StrategyPath:    body.StrategyPath,
 		StartTimeMs:     body.StartTimeMs,
 		EndTimeMs:       body.EndTimeMs,
 		UserId:          uid,

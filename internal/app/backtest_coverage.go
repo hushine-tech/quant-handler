@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"strings"
 	"time"
@@ -13,10 +12,9 @@ import (
 )
 
 type coveragePreviewRequest struct {
-	StrategyPath string `json:"strategy_path"`
-	StartTimeMS  int64  `json:"start_time_ms"`
-	EndTimeMS    int64  `json:"end_time_ms"`
-	RuntimeID    string `json:"runtime_id"`
+	StartTimeMS int64  `json:"start_time_ms"`
+	EndTimeMS   int64  `json:"end_time_ms"`
+	RuntimeID   string `json:"runtime_id"`
 }
 
 type coveragePreviewResponse struct {
@@ -73,7 +71,7 @@ func (s *server) handleCoveragePreview(w http.ResponseWriter, r *http.Request, p
 
 func decodeCoveragePreviewRequest(w http.ResponseWriter, r *http.Request) (coveragePreviewRequest, bool) {
 	var body coveragePreviewRequest
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	if err := decodeStrategyRequestBody(r.Body, &body, false); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid JSON")
 		return coveragePreviewRequest{}, false
 	}
@@ -103,12 +101,11 @@ func (s *server) previewStrategyForCoverage(ctx context.Context, w http.Response
 		return nil, false
 	}
 	resp, err := cli.PreviewRunStrategy(ctx, &strategyv1.PreviewRunStrategyRequest{
-		PortfolioId:    portfolioID,
-		StrategyPath: body.StrategyPath,
-		StartTimeMs:  body.StartTimeMS,
-		EndTimeMs:    body.EndTimeMS,
-		UserId:       uid,
-		RuntimeId:    runtimeID,
+		PortfolioId: portfolioID,
+		StartTimeMs: body.StartTimeMS,
+		EndTimeMs:   body.EndTimeMS,
+		UserId:      uid,
+		RuntimeId:   runtimeID,
 	})
 	if err != nil {
 		code, msg := grpcToHTTP(err)
