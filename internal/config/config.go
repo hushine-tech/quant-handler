@@ -76,34 +76,22 @@ func Load(path string) (*Config, error) {
 func (c *Config) ApplyEnvOverrides() {
 	if v := os.Getenv("SERVER_HTTP_ADDR"); v != "" {
 		c.Server.HTTPAddr = v
-	} else if v := os.Getenv("HTTP_ADDR"); v != "" {
-		c.Server.HTTPAddr = v
 	}
 
 	if v := os.Getenv("DEPENDENCIES_CORE_SERVICE_GRPC"); v != "" {
 		c.Dependencies.PortfolioServiceGRPC = v
-	} else if v := os.Getenv("CORE_SERVICE_GRPC_ADDR"); v != "" {
-		c.Dependencies.PortfolioServiceGRPC = v
 	}
 	if v := os.Getenv("DEPENDENCIES_ORDER_SERVICE_GRPC"); v != "" {
 		c.Dependencies.OrderServiceGRPC = v
-	} else if v := os.Getenv("ORDER_SERVICE_GRPC_ADDR"); v != "" {
-		c.Dependencies.OrderServiceGRPC = v
 	}
 	if v := os.Getenv("DEPENDENCIES_CONTROL_PANEL_SERVICE_GRPC"); v != "" {
-		c.Dependencies.ControlPanelServiceGRPC = v
-	} else if v := os.Getenv("CONTROL_PANEL_SERVICE_GRPC_ADDR"); v != "" {
 		c.Dependencies.ControlPanelServiceGRPC = v
 	}
 
 	if v := os.Getenv("AUTH_JWT_SECRET"); v != "" {
 		c.Auth.JWTSecret = v
-	} else if v := os.Getenv("QUANT_HANDLER_JWT_SECRET"); v != "" {
-		c.Auth.JWTSecret = v
 	}
 	if v := os.Getenv("AUTH_CORS_ORIGINS"); v != "" {
-		c.Auth.CORSOrigins = splitCSV(v)
-	} else if v := os.Getenv("HANDLER_CORS_ORIGINS"); v != "" {
 		c.Auth.CORSOrigins = splitCSV(v)
 	}
 }

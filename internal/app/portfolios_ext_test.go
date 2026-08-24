@@ -142,7 +142,6 @@ type fakeCreatePortfolioClient struct {
 
 	createPortfolioReq *portfoliov1.CreatePortfolioRequest
 	createVenueReq     *portfoliov1.CreateVenueRequest
-	updateSnapshotReq  *portfoliov1.UpdatePortfolioSnapshotRequest
 }
 
 func (f *fakeCreatePortfolioClient) CreatePortfolio(_ context.Context, req *portfoliov1.CreatePortfolioRequest, _ ...grpc.CallOption) (*portfoliov1.CreatePortfolioResponse, error) {
@@ -159,11 +158,6 @@ func (f *fakeCreatePortfolioClient) CreatePortfolio(_ context.Context, req *port
 func (f *fakeCreatePortfolioClient) CreateVenue(_ context.Context, req *portfoliov1.CreateVenueRequest, _ ...grpc.CallOption) (*portfoliov1.CreateVenueResponse, error) {
 	f.createVenueReq = req
 	return &portfoliov1.CreateVenueResponse{Venue: &portfoliov1.VenueEntry{VenueId: 88}}, nil
-}
-
-func (f *fakeCreatePortfolioClient) UpdatePortfolioSnapshot(_ context.Context, req *portfoliov1.UpdatePortfolioSnapshotRequest, _ ...grpc.CallOption) (*portfoliov1.UpdatePortfolioSnapshotResponse, error) {
-	f.updateSnapshotReq = req
-	return &portfoliov1.UpdatePortfolioSnapshotResponse{Snapshot: &portfoliov1.PortfolioSnapshot{PortfolioId: req.GetPortfolioId(), UserId: req.GetUserId()}}, nil
 }
 
 func TestCreatePortfolioCreatesPlainPortfolioContext(t *testing.T) {
@@ -188,9 +182,8 @@ func TestCreatePortfolioCreatesPlainPortfolioContext(t *testing.T) {
 	if fake.createPortfolioReq.GetUserId() != 7 || fake.createPortfolioReq.GetName() != "demo-portfolio" || fake.createPortfolioReq.GetEnvironment() != 1 {
 		t.Fatalf("create portfolio request = %+v", fake.createPortfolioReq)
 	}
-	if fake.createVenueReq != nil || fake.updateSnapshotReq != nil {
-		t.Fatalf("portfolio creation must not configure venues or wallet state: venue=%+v snapshot=%+v",
-			fake.createVenueReq, fake.updateSnapshotReq)
+	if fake.createVenueReq != nil {
+		t.Fatalf("portfolio creation must not configure venues: %+v", fake.createVenueReq)
 	}
 }
 
@@ -229,9 +222,9 @@ func TestCreateBacktestPortfolioRejectsLegacyWalletBootstrapPayload(t *testing.T
 			if rec.Code != http.StatusBadRequest {
 				t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
 			}
-			if fake.createPortfolioReq != nil || fake.createVenueReq != nil || fake.updateSnapshotReq != nil {
-				t.Fatalf("legacy wallet bootstrap must not call core-service: portfolio=%+v venue=%+v snapshot=%+v",
-					fake.createPortfolioReq, fake.createVenueReq, fake.updateSnapshotReq)
+			if fake.createPortfolioReq != nil || fake.createVenueReq != nil {
+				t.Fatalf("legacy wallet bootstrap must not call core-service: portfolio=%+v venue=%+v",
+					fake.createPortfolioReq, fake.createVenueReq)
 			}
 		})
 	}
@@ -271,9 +264,9 @@ func TestCreatePortfolioRejectsDeprecatedPortfolioLevelRuntimePayload(t *testing
 			if rec.Code != http.StatusBadRequest {
 				t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
 			}
-			if fake.createPortfolioReq != nil || fake.createVenueReq != nil || fake.updateSnapshotReq != nil {
-				t.Fatalf("deprecated payload should not call core-service: portfolio=%+v venue=%+v snapshot=%+v",
-					fake.createPortfolioReq, fake.createVenueReq, fake.updateSnapshotReq)
+			if fake.createPortfolioReq != nil || fake.createVenueReq != nil {
+				t.Fatalf("deprecated payload should not call core-service: portfolio=%+v venue=%+v",
+					fake.createPortfolioReq, fake.createVenueReq)
 			}
 		})
 	}

@@ -189,13 +189,11 @@ func (s *server) listRuntimeCredentials(w http.ResponseWriter, r *http.Request) 
 		writeErr(w, http.StatusUnauthorized, "missing user context")
 		return
 	}
-	includeRevoked := r.URL.Query().Get("include_revoked") == "true"
 	includeInactive := r.URL.Query().Get("include_inactive") == "true"
 	limit, offset := parseCollectionPaging(r)
 	page := collectionPageRequested(r)
 	req := &controlpanelv1.ListRuntimeCredentialsRequest{
 		UserId:          uid,
-		IncludeRevoked:  includeRevoked,
 		IncludeInactive: includeInactive,
 	}
 	if page {

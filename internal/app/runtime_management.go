@@ -90,7 +90,7 @@ type debugWorkspaceJSON struct {
 type debugDatasetJSON struct {
 	DatasetID      string `json:"dataset_id,omitempty"`
 	UserID         int64  `json:"user_id,omitempty"`
-	PortfolioID      int64  `json:"portfolio_id,omitempty"`
+	PortfolioID    int64  `json:"portfolio_id,omitempty"`
 	RuntimeID      string `json:"runtime_id,omitempty"`
 	Market         string `json:"market,omitempty"`
 	Symbol         string `json:"symbol,omitempty"`
@@ -167,7 +167,7 @@ func debugDatasetToJSON(ds *controlpanel.DebugDatasetState) *debugDatasetJSON {
 	return &debugDatasetJSON{
 		DatasetID:      ds.DatasetID,
 		UserID:         ds.UserID,
-		PortfolioID:      ds.PortfolioID,
+		PortfolioID:    ds.PortfolioID,
 		RuntimeID:      ds.RuntimeID,
 		Market:         ds.Market,
 		Symbol:         ds.Symbol,
@@ -430,12 +430,10 @@ func normalizedRuntimeRole(role string) string {
 }
 
 func runtimeHealthyForSelection(rt controlpanel.Runtime) bool {
-	switch strings.ToLower(strings.TrimSpace(rt.Status)) {
-	case "active", "running", "ready", "healthy", "online", "paired":
-		return !rt.HeartbeatAt.IsZero() && strings.TrimSpace(rt.ConnectionOwnerInstanceID) != ""
-	default:
+	if rt.Status != "active" {
 		return false
 	}
+	return !rt.HeartbeatAt.IsZero() && strings.TrimSpace(rt.ConnectionOwnerInstanceID) != ""
 }
 
 func (s *server) ensureHostedRuntime(w http.ResponseWriter, r *http.Request) {

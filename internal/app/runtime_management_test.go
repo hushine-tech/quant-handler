@@ -22,7 +22,7 @@ func TestRuntimeManagement_ListRuntimes(t *testing.T) {
 				UserID:          42,
 				Name:            "default",
 				Source:          "hosted",
-				Status:          "running",
+				Status:          "active",
 				ResourceProfile: "small",
 				Version:         "v1",
 				HeartbeatAt:     heartbeat,
@@ -85,6 +85,23 @@ func TestRuntimeManagement_ListEligibleExecutorRuntimesFiltersRoleEnvironmentAnd
 	}
 	if body.Total != 1 {
 		t.Fatalf("total = %d, want filtered total 1", body.Total)
+	}
+}
+
+func TestRuntimeHealthyForSelectionAcceptsOnlyActiveStatus(t *testing.T) {
+	heartbeat := time.Date(2026, 5, 13, 1, 2, 3, 0, time.UTC)
+	current := controlpanel.Runtime{Status: "active", HeartbeatAt: heartbeat, ConnectionOwnerInstanceID: "cp-1"}
+	if !runtimeHealthyForSelection(current) {
+		t.Fatal("active runtime with heartbeat and owner must be selectable")
+	}
+	for _, removedStatus := range []string{"running", "ready", "healthy", "online", "paired"} {
+		t.Run(removedStatus, func(t *testing.T) {
+			runtime := current
+			runtime.Status = removedStatus
+			if runtimeHealthyForSelection(runtime) {
+				t.Fatalf("removed runtime status %q must not be selectable", removedStatus)
+			}
+		})
 	}
 }
 
@@ -197,7 +214,7 @@ func TestRuntimeManagement_GetRuntimeDebugDataset(t *testing.T) {
 		debugDataset: controlpanel.DebugDatasetState{
 			DatasetID:      "dbg-1",
 			UserID:         42,
-			PortfolioID:      7,
+			PortfolioID:    7,
 			RuntimeID:      "rt-debug",
 			Market:         "futures",
 			Symbol:         "ETHUSDT",
