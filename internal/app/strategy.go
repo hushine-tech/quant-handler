@@ -990,7 +990,7 @@ func (s *server) loadSessionForRuntimeRoute(w http.ResponseWriter, r *http.Reque
 
 func strategySessionTerminal(status string) bool {
 	switch strings.ToLower(strings.TrimSpace(status)) {
-	case "completed", "finished", "stopped", "failed", "stop_failed", "recoverable":
+	case "finished", "stopped", "failed", "stop_failed", "recoverable":
 		return true
 	default:
 		return false

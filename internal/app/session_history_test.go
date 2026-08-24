@@ -536,13 +536,13 @@ func TestSessionOrderLifecycleEndpointReturnsEvents(t *testing.T) {
 	}
 }
 
-func TestStoppingFailedStatusReturnedToFrontend(t *testing.T) {
+func TestStopFailedStatusReturnedToFrontend(t *testing.T) {
 	acct := &fakeSessionPortfoliosClient{
 		getSessionResp: &portfoliov1.GetSessionResponse{Session: &portfoliov1.StrategySessionEntry{
 			SessionId:   "sess-stop-failed",
 			UserId:      7,
 			PortfolioId: 42,
-			Status:      "stopping_failed",
+			Status:      "stop_failed",
 			Error:       "manual exchange close required",
 			RuntimeId:   "rt-1",
 		}},
@@ -563,7 +563,7 @@ func TestStoppingFailedStatusReturnedToFrontend(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if body.Status != "stopping_failed" || body.Error != "manual exchange close required" {
+	if body.Status != "stop_failed" || body.Error != "manual exchange close required" {
 		t.Fatalf("session status/error = %+v", body)
 	}
 }
