@@ -193,7 +193,7 @@ func TestMarketData_Create_acceptsFlatBody(t *testing.T) {
 	}
 	s := newServerWithFakeMarketData(t, fake)
 
-	body := `{"exchange":"binance","market":"futures","symbol":"BTCUSDT","interval":"1m","needs_live_delivery":true}`
+	body := `{"scope":"live","exchange":"binance","market":"futures","symbol":"BTCUSDT","interval":"1m","needs_live_delivery":true}`
 	req := withUID(httptest.NewRequest(http.MethodPost, "/api/market-data/requests", bytes.NewBufferString(body)), 7)
 	rec := httptest.NewRecorder()
 
@@ -219,6 +219,23 @@ func TestMarketData_Create_acceptsFlatBody(t *testing.T) {
 	}
 }
 
+func TestMarketData_Create_rejectsEmptyScope(t *testing.T) {
+	fake := &fakeMarketDataClient{}
+	s := newServerWithFakeMarketData(t, fake)
+	body := `{"exchange":"binance","market":"futures","symbol":"BTCUSDT","interval":"1m","needs_live_delivery":true}`
+	req := withUID(httptest.NewRequest(http.MethodPost, "/api/market-data/requests", bytes.NewBufferString(body)), 7)
+	rec := httptest.NewRecorder()
+
+	s.handleMarketData(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+	}
+	if fake.lastCreateReq != nil {
+		t.Fatal("gRPC CreateMarketDataRequest must not be called for empty scope")
+	}
+}
+
 func TestMarketData_Create_defaultsKindToKline(t *testing.T) {
 	fake := &fakeMarketDataClient{
 		createResp: &mdv1.CreateMarketDataRequestResponse{
@@ -228,7 +245,7 @@ func TestMarketData_Create_defaultsKindToKline(t *testing.T) {
 	}
 	s := newServerWithFakeMarketData(t, fake)
 
-	body := `{"exchange":"binance","market":"spot","symbol":"ETHUSDT","interval":"5m"}`
+	body := `{"scope":"live","exchange":"binance","market":"spot","symbol":"ETHUSDT","interval":"5m"}`
 	req := withUID(httptest.NewRequest(http.MethodPost, "/api/market-data/requests", bytes.NewBufferString(body)), 1)
 	rec := httptest.NewRecorder()
 
@@ -281,7 +298,7 @@ func TestMarketData_Create_acceptsNestedKey(t *testing.T) {
 	}
 	s := newServerWithFakeMarketData(t, fake)
 
-	body := `{"key":{"exchange":"binance","market":"futures","kind":"kline","symbol":"SOLUSDT","interval":"15m"}}`
+	body := `{"scope":"live","key":{"exchange":"binance","market":"futures","kind":"kline","symbol":"SOLUSDT","interval":"15m"}}`
 	req := withUID(httptest.NewRequest(http.MethodPost, "/api/market-data/requests", bytes.NewBufferString(body)), 1)
 	rec := httptest.NewRecorder()
 
@@ -339,7 +356,7 @@ func TestMarketData_Create_rejectsMissingUser(t *testing.T) {
 	fake := &fakeMarketDataClient{}
 	s := newServerWithFakeMarketData(t, fake)
 
-	body := `{"exchange":"binance","market":"futures","symbol":"BTCUSDT","interval":"1m"}`
+	body := `{"scope":"live","exchange":"binance","market":"futures","symbol":"BTCUSDT","interval":"1m"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/market-data/requests", bytes.NewBufferString(body))
 	rec := httptest.NewRecorder()
 
@@ -366,7 +383,7 @@ func TestMarketData_Create_mapsGrpcInvalidToBadRequest(t *testing.T) {
 		createErr: status.Error(codes.InvalidArgument, "invalid market"),
 	}
 	s := newServerWithFakeMarketData(t, fake)
-	body := `{"exchange":"binance","market":"futures","symbol":"BTCUSDT","interval":"1m"}`
+	body := `{"scope":"live","exchange":"binance","market":"futures","symbol":"BTCUSDT","interval":"1m"}`
 	req := withUID(httptest.NewRequest(http.MethodPost, "/api/market-data/requests", bytes.NewBufferString(body)), 1)
 	rec := httptest.NewRecorder()
 	s.handleMarketData(rec, req)
