@@ -473,10 +473,6 @@ func (s *server) createMarketDataRequest(w http.ResponseWriter, r *http.Request)
 		keyFlat.Kind = "kline"
 	}
 	scope := strings.TrimSpace(strings.ToLower(body.Scope))
-	if scope == "" {
-		writeErr(w, http.StatusBadRequest, "scope is required and must be 'live' or 'historical'")
-		return
-	}
 	if scope != "live" && scope != "historical" {
 		writeErr(w, http.StatusBadRequest, "scope must be 'live' or 'historical'")
 		return
