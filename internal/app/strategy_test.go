@@ -56,8 +56,6 @@ func TestPreviewRunStrategy_ForwardsBodyAndReturnsJSON(t *testing.T) {
 			RiskControls: &strategyv1.RiskControls{
 				MaxLossClosePct:    0.2,
 				MaxLossCloseSource: "strategy",
-				Leverage:           3,
-				LeverageSource:     "request_default",
 			},
 		},
 	}
@@ -71,7 +69,7 @@ func TestPreviewRunStrategy_ForwardsBodyAndReturnsJSON(t *testing.T) {
 		corsOrigins: []string{"*"},
 	}
 
-	body := `{"runtime_id":"rt-preview","strategy_path":"","start_time_ms":0,"end_time_ms":0,"max_loss_close_pct":0.25,"leverage":3}`
+	body := `{"runtime_id":"rt-preview","strategy_path":"","start_time_ms":0,"end_time_ms":0,"max_loss_close_pct":0.25}`
 	req := withUID(httptest.NewRequest(http.MethodPost,
 		"/api/portfolios/7/preview-run-strategy", bytes.NewBufferString(body)), 17)
 	rec := httptest.NewRecorder()
@@ -93,10 +91,6 @@ func TestPreviewRunStrategy_ForwardsBodyAndReturnsJSON(t *testing.T) {
 	if got := proxy.previewReq.GetMaxLossClosePct(); got != 0.25 {
 		t.Errorf("max_loss_close_pct forwarded = %v, want 0.25", got)
 	}
-	if got := proxy.previewReq.GetLeverage(); got != 0 {
-		t.Errorf("legacy leverage forwarded = %v, want ignored zero", got)
-	}
-
 	var resp previewRunStrategyResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode response: %v", err)
@@ -140,8 +134,55 @@ func TestPreviewRunStrategy_ForwardsBodyAndReturnsJSON(t *testing.T) {
 	if resp.RiskControls.MaxLossClosePct != 0.2 || resp.RiskControls.MaxLossCloseSource != "strategy" {
 		t.Fatalf("risk_controls = %+v, want strategy 0.2", resp.RiskControls)
 	}
-	if resp.RiskControls.Leverage != 3 || resp.RiskControls.LeverageSource != "request_default" {
-		t.Fatalf("risk_controls leverage = %+v, want request_default 3", resp.RiskControls)
+	var raw map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode raw response: %v", err)
+	}
+	riskControls, ok := raw["risk_controls"].(map[string]any)
+	if !ok {
+		t.Fatalf("risk_controls JSON = %#v", raw["risk_controls"])
+	}
+	if _, exists := riskControls["leverage"]; exists {
+		t.Fatalf("risk_controls exposed removed Session leverage: %s", rec.Body.String())
+	}
+	if _, exists := riskControls["leverage_source"]; exists {
+		t.Fatalf("risk_controls exposed removed Session leverage source: %s", rec.Body.String())
+	}
+}
+
+func TestStrategyHandlersRejectRemovedSessionLeverage(t *testing.T) {
+	tests := []struct {
+		name   string
+		handle func(*server, http.ResponseWriter, *http.Request)
+		path   string
+	}{
+		{
+			name: "run",
+			handle: func(s *server, w http.ResponseWriter, r *http.Request) {
+				s.handleRunStrategy(w, r, 7)
+			},
+			path: "/api/portfolios/7/run-strategy",
+		},
+		{
+			name: "preview",
+			handle: func(s *server, w http.ResponseWriter, r *http.Request) {
+				s.handlePreviewRunStrategy(w, r, 7)
+			},
+			path: "/api/portfolios/7/preview-run-strategy",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &server{jwtSecret: []byte("s"), corsOrigins: []string{"*"}}
+			req := withUID(httptest.NewRequest(http.MethodPost, tt.path, bytes.NewBufferString(`{"leverage":9}`)), 17)
+			rec := httptest.NewRecorder()
+
+			tt.handle(s, rec, req)
+
+			if rec.Code != http.StatusBadRequest || !bytes.Contains(rec.Body.Bytes(), []byte("invalid JSON")) {
+				t.Fatalf("status=%d body=%s, want removed leverage rejected as invalid JSON", rec.Code, rec.Body.String())
+			}
+		})
 	}
 }
 

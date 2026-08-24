@@ -32,7 +32,6 @@ type runStrategyRequest struct {
 	EndTimeMs       int64   `json:"end_time_ms"`
 	RuntimeID       string  `json:"runtime_id"`
 	MaxLossClosePct float64 `json:"max_loss_close_pct"`
-	Leverage        float64 `json:"leverage"`
 	ResumeSessionID string  `json:"resume_session_id"`
 }
 
@@ -47,7 +46,6 @@ type previewRunStrategyRequest struct {
 	EndTimeMs       int64   `json:"end_time_ms"`
 	RuntimeID       string  `json:"runtime_id"`
 	MaxLossClosePct float64 `json:"max_loss_close_pct"`
-	Leverage        float64 `json:"leverage"`
 }
 
 type validateStrategySourceRequest struct {
@@ -135,8 +133,6 @@ type runStrategyResponseJSON struct {
 type riskControlsJSON struct {
 	MaxLossClosePct    float64 `json:"max_loss_close_pct"`
 	MaxLossCloseSource string  `json:"max_loss_close_source"`
-	Leverage           float64 `json:"leverage"`
-	LeverageSource     string  `json:"leverage_source"`
 }
 
 type strategyOrderTargetJSON struct {
@@ -229,7 +225,7 @@ func (s *server) handleRunStrategy(w http.ResponseWriter, r *http.Request, portf
 	}
 
 	var body runStrategyRequest
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	if err := decodeStrategyRequestBody(r.Body, &body, false); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
@@ -447,7 +443,7 @@ func (s *server) handlePreviewRunStrategy(w http.ResponseWriter, r *http.Request
 	var body previewRunStrategyRequest
 	// Optional body: empty body is valid (backtest with zero time range → the
 	// evaluator returns an INVALID_REQUEST failure, which is the right signal).
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil && !errors.Is(err, io.EOF) {
+	if err := decodeStrategyRequestBody(r.Body, &body, true); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
@@ -520,10 +516,18 @@ func (s *server) handlePreviewRunStrategy(w http.ResponseWriter, r *http.Request
 		RiskControls: riskControlsJSON{
 			MaxLossClosePct:    resp.GetRiskControls().GetMaxLossClosePct(),
 			MaxLossCloseSource: resp.GetRiskControls().GetMaxLossCloseSource(),
-			Leverage:           resp.GetRiskControls().GetLeverage(),
-			LeverageSource:     resp.GetRiskControls().GetLeverageSource(),
 		},
 	})
+}
+
+func decodeStrategyRequestBody(body io.Reader, dst any, allowEmpty bool) error {
+	decoder := json.NewDecoder(body)
+	decoder.DisallowUnknownFields()
+	err := decoder.Decode(dst)
+	if allowEmpty && errors.Is(err, io.EOF) {
+		return nil
+	}
+	return err
 }
 
 func preflightFailureToJSON(failure *strategyv1.PreflightFailureProto) preflightFailureJSON {

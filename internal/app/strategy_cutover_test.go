@@ -342,7 +342,7 @@ func TestRunStrategy_ExplicitRuntimeIDRoutesByID(t *testing.T) {
 	}
 	req := withUID(httptest.NewRequest(http.MethodPost,
 		"/api/portfolios/7/run-strategy",
-		bytes.NewBufferString(`{"runtime_id":"rt_self","start_time_ms":1,"end_time_ms":2,"leverage":5,"resume_session_id":"session-recoverable-source"}`)), 42)
+		bytes.NewBufferString(`{"runtime_id":"rt_self","start_time_ms":1,"end_time_ms":2,"resume_session_id":"session-recoverable-source"}`)), 42)
 	rec := httptest.NewRecorder()
 	s.handleRunStrategy(rec, req, 7)
 
@@ -357,9 +357,6 @@ func TestRunStrategy_ExplicitRuntimeIDRoutesByID(t *testing.T) {
 	}
 	if proxy.runReq.GetRuntimeId() != "rt_self" {
 		t.Fatalf("proxy RunStrategy runtime_id = %q", proxy.runReq.GetRuntimeId())
-	}
-	if proxy.runReq.GetLeverage() != 0 {
-		t.Fatalf("proxy RunStrategy legacy leverage = %v, want ignored zero", proxy.runReq.GetLeverage())
 	}
 	if proxy.runReq.GetResumeSessionId() != "session-recoverable-source" {
 		t.Fatalf("proxy RunStrategy resume_session_id = %q", proxy.runReq.GetResumeSessionId())
@@ -389,7 +386,7 @@ func TestRunStrategy_PreservesStructuredLeverageFailureResult(t *testing.T) {
 	resolver := &fakeResolver{resolveByIDResp: controlpanel.Route{RuntimeID: "rt_self", Source: "self_hosted"}}
 	s := &server{controlPanel: resolver, cpRuntime: proxy, jwtSecret: []byte("s"), corsOrigins: []string{"*"}}
 	req := withUID(httptest.NewRequest(http.MethodPost, "/api/portfolios/7/run-strategy",
-		bytes.NewBufferString(`{"runtime_id":"rt_self","leverage":99}`)), 42)
+		bytes.NewBufferString(`{"runtime_id":"rt_self"}`)), 42)
 	rec := httptest.NewRecorder()
 
 	s.handleRunStrategy(rec, req, 7)
@@ -397,8 +394,8 @@ func TestRunStrategy_PreservesStructuredLeverageFailureResult(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s, want structured application result", rec.Code, rec.Body.String())
 	}
-	if proxy.runReq == nil || proxy.runReq.GetLeverage() != 0 {
-		t.Fatalf("legacy leverage reached strategy RPC: %+v", proxy.runReq)
+	if proxy.runReq == nil {
+		t.Fatal("strategy RPC was not called")
 	}
 	var body runStrategyResponseJSON
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {

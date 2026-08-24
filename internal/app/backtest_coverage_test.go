@@ -203,7 +203,7 @@ func TestDownloadAndRunCreatesJob(t *testing.T) {
 		downloadRunJobs: newDownloadRunJobStore(),
 	}
 
-	body := bytes.NewBufferString(`{"runtime_id":"rt-download","start_time_ms":1779033600000,"end_time_ms":1779037200000,"interval":"1m","max_loss_close_pct":0.25,"leverage":9}`)
+	body := bytes.NewBufferString(`{"runtime_id":"rt-download","start_time_ms":1779033600000,"end_time_ms":1779037200000,"interval":"1m","max_loss_close_pct":0.25}`)
 	req := withUID(httptest.NewRequest(http.MethodPost, "/api/portfolios/7/strategy/download-and-run", body), 6)
 	rec := httptest.NewRecorder()
 
@@ -238,11 +238,19 @@ func TestDownloadAndRunCreatesJob(t *testing.T) {
 	if got := runReq.GetMaxLossClosePct(); got != 0.25 {
 		t.Fatalf("run max_loss_close_pct=%v want 0.25", got)
 	}
-	if got := previewReq.GetLeverage(); got != 0 {
-		t.Fatalf("preview legacy leverage=%v want ignored zero", got)
-	}
-	if got := runReq.GetLeverage(); got != 0 {
-		t.Fatalf("run legacy leverage=%v want ignored zero", got)
+}
+
+func TestDownloadAndRunRejectsRemovedSessionLeverage(t *testing.T) {
+	s := &server{marketData: &fakeMarketDataClient{}, downloadRunJobs: newDownloadRunJobStore()}
+	req := withUID(httptest.NewRequest(http.MethodPost,
+		"/api/portfolios/7/strategy/download-and-run",
+		bytes.NewBufferString(`{"leverage":9}`)), 6)
+	rec := httptest.NewRecorder()
+
+	s.handleDownloadAndRun(rec, req, 7)
+
+	if rec.Code != http.StatusBadRequest || !bytes.Contains(rec.Body.Bytes(), []byte("invalid JSON")) {
+		t.Fatalf("status=%d body=%s, want removed leverage rejected as invalid JSON", rec.Code, rec.Body.String())
 	}
 }
 

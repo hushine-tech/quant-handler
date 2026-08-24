@@ -274,7 +274,7 @@ func TestProtoSessionToJSONEmitsExplicitFalseIndicatorFinalizationPending(
 func TestProtoSessionToJSONPrefersDurableTargetLeverageFacts(t *testing.T) {
 	now := timestamppb.Now()
 	encoded, err := json.Marshal(protoSessionToJSON(&portfoliov1.StrategySessionEntry{
-		SessionId: "mixed-leverage", Leverage: 99,
+		SessionId: "mixed-leverage",
 		TargetLeverageFacts: []*portfoliov1.SessionTargetLeverageFact{{
 			SessionId: "mixed-leverage", VenueId: 8, Exchange: 1, Environment: 1, Market: 2, Symbol: "BTCUSDT",
 			EffectiveLeverage: 5, LeverageSource: "strategy_default", PreviousLeverage: uint32Ptr(3), ConfirmedLeverage: 5,
@@ -289,14 +289,17 @@ func TestProtoSessionToJSONPrefersDurableTargetLeverageFacts(t *testing.T) {
 		t.Fatal(err)
 	}
 	var body struct {
-		Leverage    *float64                        `json:"leverage"`
 		TargetFacts []sessionTargetLeverageFactJSON `json:"target_leverage_facts"`
 	}
 	if err := json.Unmarshal(encoded, &body); err != nil {
 		t.Fatal(err)
 	}
-	if body.Leverage != nil {
-		t.Fatalf("new session exposed misleading scalar leverage: %s", encoded)
+	var raw map[string]any
+	if err := json.Unmarshal(encoded, &raw); err != nil {
+		t.Fatal(err)
+	}
+	if leverage, exists := raw["leverage"]; exists {
+		t.Fatalf("Session response exposed removed scalar leverage %#v: %s", leverage, encoded)
 	}
 	if len(body.TargetFacts) != 2 || body.TargetFacts[0].Symbol != "BTCUSDT" || body.TargetFacts[0].EffectiveLeverage != 5 ||
 		body.TargetFacts[0].PreviousLeverage == nil || *body.TargetFacts[0].PreviousLeverage != 3 || body.TargetFacts[0].ConfirmedLeverage != 5 ||
@@ -305,26 +308,9 @@ func TestProtoSessionToJSONPrefersDurableTargetLeverageFacts(t *testing.T) {
 	}
 }
 
-func TestProtoSessionToJSONUsesLegacyLeverageOnlyWithoutTargetFacts(t *testing.T) {
-	encoded, err := json.Marshal(protoSessionToJSON(&portfoliov1.StrategySessionEntry{SessionId: "historical", Leverage: 7}))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var body struct {
-		Leverage    *float64                        `json:"leverage"`
-		TargetFacts []sessionTargetLeverageFactJSON `json:"target_leverage_facts"`
-	}
-	if err := json.Unmarshal(encoded, &body); err != nil {
-		t.Fatal(err)
-	}
-	if body.Leverage == nil || *body.Leverage != 7 || len(body.TargetFacts) != 0 {
-		t.Fatalf("historical leverage fallback missing: leverage=%v facts=%+v JSON=%s", body.Leverage, body.TargetFacts, encoded)
-	}
-}
-
-func TestProtoSessionToJSONOmitsCoordinatedZeroWithoutTargetFacts(t *testing.T) {
+func TestProtoSessionToJSONOmitsTargetFactsForSpotSession(t *testing.T) {
 	encoded, err := json.Marshal(protoSessionToJSON(&portfoliov1.StrategySessionEntry{
-		SessionId: "coordinated-spot", LaunchOperationId: "launch-spot", Leverage: 0,
+		SessionId: "coordinated-spot", LaunchOperationId: "launch-spot",
 	}))
 	if err != nil {
 		t.Fatal(err)
@@ -334,7 +320,7 @@ func TestProtoSessionToJSONOmitsCoordinatedZeroWithoutTargetFacts(t *testing.T) 
 		t.Fatal(err)
 	}
 	if leverage, exists := body["leverage"]; exists {
-		t.Fatalf("coordinated Spot response exposed historical leverage %#v: %s", leverage, encoded)
+		t.Fatalf("Spot Session response exposed removed scalar leverage %#v: %s", leverage, encoded)
 	}
 	if facts, exists := body["target_leverage_facts"]; exists {
 		t.Fatalf("coordinated Spot response exposed target leverage facts %#v: %s", facts, encoded)

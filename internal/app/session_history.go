@@ -1055,7 +1055,6 @@ type sessionJSON struct {
 	SessionType                  string                          `json:"session_type,omitempty"`
 	RuntimeVersion               string                          `json:"runtime_version,omitempty"`
 	SessionName                  string                          `json:"session_name,omitempty"`
-	Leverage                     *float64                        `json:"leverage,omitempty"`
 	TargetLeverageFacts          []sessionTargetLeverageFactJSON `json:"target_leverage_facts,omitempty"`
 	IndicatorFinalizationPending bool                            `json:"indicator_finalization_pending"`
 	StartedAt                    string                          `json:"started_at"`
@@ -1105,10 +1104,6 @@ func protoSessionToJSON(se *portfoliov1.StrategySessionEntry) sessionJSON {
 		SessionName:                  se.GetSessionName(),
 		IndicatorFinalizationPending: se.GetIndicatorFinalizationPending(),
 		TargetLeverageFacts:          sessionTargetLeverageFactsToJSON(se.GetTargetLeverageFacts()),
-	}
-	if len(j.TargetLeverageFacts) == 0 && se.GetLeverage() > 0 {
-		legacy := se.GetLeverage()
-		j.Leverage = &legacy
 	}
 	if raw := []byte(se.GetErrorDetailJson()); json.Valid(raw) {
 		j.ErrorDetail = append(json.RawMessage(nil), raw...)

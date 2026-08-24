@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"sort"
@@ -31,7 +30,6 @@ type downloadAndRunRequest struct {
 	EndTimeMS       int64   `json:"end_time_ms"`
 	RuntimeID       string  `json:"runtime_id"`
 	MaxLossClosePct float64 `json:"max_loss_close_pct"`
-	Leverage        float64 `json:"leverage"`
 }
 
 type downloadRunJob struct {
@@ -115,7 +113,7 @@ func (s *server) handleDownloadAndRun(w http.ResponseWriter, r *http.Request, po
 		return
 	}
 	var body downloadAndRunRequest
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	if err := decodeStrategyRequestBody(r.Body, &body, false); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
