@@ -390,9 +390,9 @@ func TestPortfolioSnapshotWalletIncludesMarginBalanceFields(t *testing.T) {
 					FuturesPositionEquity: 10761.5682,
 					MetricsAuthoritative:  true,
 					Spot: &portfoliov1.SpotWallet{
-						Free: 5000,
 						Assets: []*portfoliov1.SpotAsset{
-							{Symbol: "USDC", Qty: 5000, Price: float64Ptr(1)},
+							{Asset: "USDT", FreeDecimal: "5000", LockedDecimal: "0"},
+							{Asset: "USDC", FreeDecimal: "5000", LockedDecimal: "0", PriceDecimal: func() *string { value := "1"; return &value }()},
 						},
 					},
 					Futures: &portfoliov1.FuturesWallet{
@@ -484,16 +484,11 @@ func TestPortfolioSnapshotWalletIncludesMarginBalanceFields(t *testing.T) {
 	}
 }
 
-func float64Ptr(v float64) *float64 {
-	x := v
-	return &x
-}
-
 func TestProtoSpotToJSONEmitsCanonicalExactAssetShape(t *testing.T) {
-	price := 42000.5
+	price := "42000.50000000"
 	encoded, err := json.Marshal(protoSpotToJSON(&portfoliov1.SpotWallet{Assets: []*portfoliov1.SpotAsset{
-		{Asset: "USDT", Free: 1000, FreeDecimal: "1000.00000000", LockedDecimal: "0.00000000"},
-		{Asset: "BTC", Free: 0.01, FreeDecimal: "0.01000000", Locked: 0.001, LockedDecimal: "0.00100000", AvgEntryPrice: 40000, Price: &price},
+		{Asset: "USDT", FreeDecimal: "1000.00000000", LockedDecimal: "0.00000000"},
+		{Asset: "BTC", FreeDecimal: "0.01000000", LockedDecimal: "0.00100000", AvgEntryPriceDecimal: "40000.00000000", PriceDecimal: &price},
 	}}))
 	if err != nil {
 		t.Fatal(err)
@@ -514,7 +509,7 @@ func TestProtoSpotToJSONEmitsCanonicalExactAssetShape(t *testing.T) {
 		t.Fatalf("USDT asset=%#v JSON=%s", body.Assets, encoded)
 	}
 	btc := body.Assets[1]
-	if btc.Asset != "BTC" || btc.Free != "0.01000000" || btc.Locked != "0.00100000" || btc.AvgEntryPrice != "40000" || btc.Price != "42000.5" {
+	if btc.Asset != "BTC" || btc.Free != "0.01000000" || btc.Locked != "0.00100000" || btc.AvgEntryPrice != "40000.00000000" || btc.Price != "42000.50000000" {
 		t.Fatalf("BTC asset=%#v JSON=%s", btc, encoded)
 	}
 	var raw map[string]any
@@ -529,10 +524,13 @@ func TestProtoSpotToJSONEmitsCanonicalExactAssetShape(t *testing.T) {
 	}
 }
 
-func TestProtoSpotToJSONReadsLegacyCoreShapeButWritesCanonicalAssets(t *testing.T) {
+func TestProtoSpotToJSONPreservesExactZeroAndOmitsMissingPrice(t *testing.T) {
+	price := "0"
 	encoded, err := json.Marshal(protoSpotToJSON(&portfoliov1.SpotWallet{
-		Free: 100, Locked: 2,
-		Assets: []*portfoliov1.SpotAsset{{Symbol: "BTC", Qty: 0.25, Locked: 0.01}},
+		Assets: []*portfoliov1.SpotAsset{
+			{Asset: "USDT", FreeDecimal: "0", LockedDecimal: "0"},
+			{Asset: "BTC", FreeDecimal: "0", LockedDecimal: "0", PriceDecimal: &price},
+		},
 	}))
 	if err != nil {
 		t.Fatal(err)
@@ -546,11 +544,11 @@ func TestProtoSpotToJSONReadsLegacyCoreShapeButWritesCanonicalAssets(t *testing.
 	if len(body.Assets) != 2 {
 		t.Fatalf("assets=%#v JSON=%s", body.Assets, encoded)
 	}
-	if body.Assets[0] != (spotAssetResponse{Asset: "USDT", Free: "100", Locked: "2"}) {
-		t.Fatalf("legacy USDT=%#v", body.Assets[0])
+	if body.Assets[0] != (spotAssetResponse{Asset: "USDT", Free: "0", Locked: "0"}) {
+		t.Fatalf("exact USDT=%#v", body.Assets[0])
 	}
-	if body.Assets[1] != (spotAssetResponse{Asset: "BTC", Free: "0.25", Locked: "0.01"}) {
-		t.Fatalf("legacy BTC=%#v", body.Assets[1])
+	if body.Assets[1] != (spotAssetResponse{Asset: "BTC", Free: "0", Locked: "0", Price: "0"}) {
+		t.Fatalf("exact BTC=%#v", body.Assets[1])
 	}
 }
 
@@ -612,13 +610,13 @@ func TestVenueSnapshotJSONExposesCanonicalSpotSymbolMetadata(t *testing.T) {
 }
 
 func TestPortfolioSnapshotValuationDoesNotInventSpotSymbolWithoutMetadataMapping(t *testing.T) {
-	price := 50000.0
+	price := "50000"
 	wallet := &portfoliov1.PortfolioWalletState{
 		Environment: 0,
 		TotalValue:  100,
 		Spot: &portfoliov1.SpotWallet{Assets: []*portfoliov1.SpotAsset{
-			{Asset: "USDT", Free: 100, FreeDecimal: "100", LockedDecimal: "0"},
-			{Asset: "BTC", Free: 0.1, FreeDecimal: "0.1", LockedDecimal: "0", Price: &price},
+			{Asset: "USDT", FreeDecimal: "100", LockedDecimal: "0"},
+			{Asset: "BTC", FreeDecimal: "0.1", LockedDecimal: "0", PriceDecimal: &price},
 		}},
 	}
 	snapshot := &portfoliov1.PortfolioSnapshot{
@@ -670,7 +668,7 @@ func TestPortfolioSnapshotWalletStructurallySeparatesCanonicalFromDisplay(t *tes
 					SpotEstimatedValue:    9997.9,
 					FuturesPositionEquity: 10761.5682,
 					MetricsAuthoritative:  true,
-					Spot:                  &portfoliov1.SpotWallet{Free: 0, Assets: nil},
+					Spot:                  &portfoliov1.SpotWallet{Assets: nil},
 					Futures: &portfoliov1.FuturesWallet{
 						MarginMode:              "cross",
 						PositionMode:            "one_way",

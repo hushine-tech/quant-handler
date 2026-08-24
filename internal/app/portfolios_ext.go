@@ -438,12 +438,9 @@ func spotSymbolPricesFromWallet(wallet *portfoliov1.SpotWallet, metadata []*port
 				continue
 			}
 			asset := strings.ToUpper(strings.TrimSpace(item.GetAsset()))
-			if asset == "" {
-				asset = strings.ToUpper(strings.TrimSpace(item.GetSymbol()))
-			}
-			mark := item.GetAvgEntryPrice()
-			if item.Price != nil {
-				mark = item.GetPrice()
+			mark, _ := strconv.ParseFloat(item.GetAvgEntryPriceDecimal(), 64)
+			if item.PriceDecimal != nil {
+				mark, _ = strconv.ParseFloat(item.GetPriceDecimal(), 64)
 			}
 			if asset != "" && mark > 0 {
 				marksByAsset[asset] = mark
@@ -494,60 +491,27 @@ func protoSpotToJSON(sw *portfoliov1.SpotWallet) any {
 	if sw == nil {
 		return nil
 	}
-	assets := make([]spotAssetResponse, 0, len(sw.GetAssets())+1)
-	hasUSDT := false
-	for _, item := range sw.GetAssets() {
-		if item != nil && strings.EqualFold(strings.TrimSpace(firstNonEmpty(item.GetAsset(), item.GetSymbol())), "USDT") {
-			hasUSDT = true
-			break
-		}
-	}
-	if !hasUSDT && (sw.GetFree() != 0 || sw.GetLocked() != 0) {
-		assets = append(assets, spotAssetResponse{
-			Asset: "USDT", Free: formatDecimalFloat(sw.GetFree()), Locked: formatDecimalFloat(sw.GetLocked()),
-		})
-	}
+	assets := make([]spotAssetResponse, 0, len(sw.GetAssets()))
 	for _, a := range sw.GetAssets() {
 		if a == nil {
 			continue
 		}
-		assetCode := strings.ToUpper(strings.TrimSpace(firstNonEmpty(a.GetAsset(), a.GetSymbol())))
+		assetCode := strings.ToUpper(strings.TrimSpace(a.GetAsset()))
 		if assetCode == "" || (assetCode != "USDT" && strings.HasSuffix(assetCode, "USDT")) {
 			continue
 		}
-		free := a.GetFree()
-		if strings.TrimSpace(a.GetAsset()) == "" {
-			free = a.GetQty()
-		}
 		row := spotAssetResponse{
-			Asset: assetCode, Free: firstNonEmpty(strings.TrimSpace(a.GetFreeDecimal()), formatDecimalFloat(free)),
-			Locked: firstNonEmpty(strings.TrimSpace(a.GetLockedDecimal()), formatDecimalFloat(a.GetLocked())),
+			Asset: assetCode, Free: a.GetFreeDecimal(), Locked: a.GetLockedDecimal(),
 		}
-		if a.GetAvgEntryPrice() != 0 {
-			row.AvgEntryPrice = formatDecimalFloat(a.GetAvgEntryPrice())
+		if a.GetAvgEntryPriceDecimal() != "" {
+			row.AvgEntryPrice = a.GetAvgEntryPriceDecimal()
 		}
-		if a.Price != nil {
-			row.Price = formatDecimalFloat(a.GetPrice())
+		if a.PriceDecimal != nil {
+			row.Price = a.GetPriceDecimal()
 		}
 		assets = append(assets, row)
 	}
 	return spotWalletResponse{Assets: assets}
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if value != "" {
-			return value
-		}
-	}
-	return ""
-}
-
-func formatDecimalFloat(value float64) string {
-	if value == 0 {
-		return "0"
-	}
-	return strconv.FormatFloat(value, 'f', -1, 64)
 }
 
 func protoFuturesToJSON(fw *portfoliov1.FuturesWallet) any {

@@ -124,7 +124,9 @@ func (s *server) createVenue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body venueBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&body); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
@@ -187,7 +189,7 @@ func (s *server) createVenue(w http.ResponseWriter, r *http.Request) {
 				writeErr(w, http.StatusBadRequest, "backtest Spot venue accepts only the canonical spot wallet")
 				return
 			}
-			bootstrap, err = buildWalletBootstrap(body.Spot, nil, nil)
+			bootstrap, err = buildWalletBootstrap(body.Spot, nil)
 		} else {
 			if body.Spot != nil {
 				writeErr(w, http.StatusBadRequest, "backtest Futures venue cannot include a Spot wallet")
@@ -205,7 +207,7 @@ func (s *server) createVenue(w http.ResponseWriter, r *http.Request) {
 					InitialBalance: *body.InitialBalance,
 				}
 			}
-			bootstrap, err = buildWalletBootstrap(nil, futuresInput, nil)
+			bootstrap, err = buildWalletBootstrap(nil, futuresInput)
 		}
 		if err != nil {
 			writeErr(w, http.StatusBadRequest, err.Error())

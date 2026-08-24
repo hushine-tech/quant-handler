@@ -2,6 +2,7 @@ package walletagg
 
 import (
 	"math"
+	"strconv"
 	"strings"
 
 	portfoliov1 "github.com/hushine-tech/core-service/gen/portfoliov1"
@@ -31,15 +32,13 @@ func SpotEstimatedValue(sw *portfoliov1.SpotWallet) float64 {
 		return 0
 	}
 	ev := 0.0
-	hasUSDT := false
 	for _, a := range sw.GetAssets() {
 		asset, free := spotAssetIdentity(a)
-		q := free + a.GetLocked()
+		q := free + spotDecimalValue(a.GetLockedDecimal())
 		if math.Abs(q) <= qtyEps {
 			continue
 		}
 		if asset == "USDT" {
-			hasUSDT = true
 			ev += q
 			continue
 		}
@@ -48,9 +47,6 @@ func SpotEstimatedValue(sw *portfoliov1.SpotWallet) float64 {
 			continue
 		}
 		ev += q * mark
-	}
-	if !hasUSDT {
-		ev += sw.GetFree() + sw.GetLocked()
 	}
 	return ev
 }
@@ -75,21 +71,16 @@ func SpotEstimatedValueWithMetadata(sw *portfoliov1.SpotWallet, metadata []*port
 		}
 	}
 	total := 0.0
-	hasUSDT := false
 	for _, item := range sw.GetAssets() {
 		asset, free := spotAssetIdentity(item)
-		quantity := free + item.GetLocked()
+		quantity := free + spotDecimalValue(item.GetLockedDecimal())
 		if asset == "USDT" {
-			hasUSDT = true
 			total += quantity
 			continue
 		}
 		if price := marksByAsset[asset]; price > 0 {
 			total += quantity * price
 		}
-	}
-	if !hasUSDT {
-		total += sw.GetFree() + sw.GetLocked()
 	}
 	return total
 }
@@ -99,25 +90,28 @@ func spotAssetIdentity(a *portfoliov1.SpotAsset) (string, float64) {
 		return "", 0
 	}
 	asset := strings.ToUpper(strings.TrimSpace(a.GetAsset()))
-	free := a.GetFree()
-	if asset == "" {
-		asset = strings.ToUpper(strings.TrimSpace(a.GetSymbol()))
-		free = a.GetQty()
-	}
-	return asset, free
+	return asset, spotDecimalValue(a.GetFreeDecimal())
 }
 
 func spotAssetMark(a *portfoliov1.SpotAsset) float64 {
 	if a == nil {
 		return 0
 	}
-	if a.Price != nil {
-		return *a.Price
+	if a.PriceDecimal != nil {
+		return spotDecimalValue(a.GetPriceDecimal())
 	}
-	if a.GetAvgEntryPrice() > 0 {
-		return a.GetAvgEntryPrice()
+	if value := spotDecimalValue(a.GetAvgEntryPriceDecimal()); value > 0 {
+		return value
 	}
 	return 0
+}
+
+func spotDecimalValue(raw string) float64 {
+	value, err := strconv.ParseFloat(strings.TrimSpace(raw), 64)
+	if err != nil || math.IsNaN(value) || math.IsInf(value, 0) {
+		return 0
+	}
+	return value
 }
 
 // FuturesPositionEquity approximates the portfolio-level futures equity directly
@@ -177,8 +171,7 @@ func isolatedWBRaw(p *portfoliov1.FuturesPosition) float64 {
 }
 
 // TotalValue matches strategy _compute_total_value: futures equity plus Spot
-// estimated value. SpotEstimatedValue already applies the rolling legacy cash
-// fallback without discarding canonical USDT assets.
+// estimated value from canonical Spot assets.
 func TotalValue(fw *portfoliov1.FuturesWallet, sw *portfoliov1.SpotWallet) float64 {
 	return FuturesPositionEquity(fw) + SpotEstimatedValue(sw)
 }

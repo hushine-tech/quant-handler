@@ -328,28 +328,26 @@ func (s *server) getSessionIntents(w http.ResponseWriter, r *http.Request, sessi
 	}
 
 	type intentJSON struct {
-		Time                  string  `json:"time"`
-		IntentID              string  `json:"intent_id"`
-		PortfolioID           int64   `json:"portfolio_id"`
-		Symbol                string  `json:"symbol"`
-		Side                  string  `json:"side"`
-		RequestedQty          float64 `json:"requested_qty"`
-		RequestedPrice        float64 `json:"requested_price"`
-		RequestedQtyDecimal   string  `json:"requested_qty_decimal"`
-		RequestedPriceDecimal string  `json:"requested_price_decimal,omitempty"`
-		StrategyID            int64   `json:"strategy_id"`
-		Environment           int32   `json:"environment"`
-		EnvironmentLabel      string  `json:"environment_label"`
-		Market                string  `json:"market"`
-		MarketLabel           string  `json:"market_label"`
-		VenueID               int64   `json:"venue_id,omitempty"`
-		Exchange              int32   `json:"exchange"`
-		ExchangeLabel         string  `json:"exchange_label"`
-		PositionSide          string  `json:"position_side"`
-		SessionID             string  `json:"session_id,omitempty"`
-		Status                string  `json:"status,omitempty"`
-		RejectCode            string  `json:"reject_code,omitempty"`
-		RejectMessage         string  `json:"reject_message,omitempty"`
+		Time                  string `json:"time"`
+		IntentID              string `json:"intent_id"`
+		PortfolioID           int64  `json:"portfolio_id"`
+		Symbol                string `json:"symbol"`
+		Side                  string `json:"side"`
+		RequestedQtyDecimal   string `json:"requested_qty_decimal"`
+		RequestedPriceDecimal string `json:"requested_price_decimal,omitempty"`
+		StrategyID            int64  `json:"strategy_id"`
+		Environment           int32  `json:"environment"`
+		EnvironmentLabel      string `json:"environment_label"`
+		Market                string `json:"market"`
+		MarketLabel           string `json:"market_label"`
+		VenueID               int64  `json:"venue_id,omitempty"`
+		Exchange              int32  `json:"exchange"`
+		ExchangeLabel         string `json:"exchange_label"`
+		PositionSide          string `json:"position_side"`
+		SessionID             string `json:"session_id,omitempty"`
+		Status                string `json:"status,omitempty"`
+		RejectCode            string `json:"reject_code,omitempty"`
+		RejectMessage         string `json:"reject_message,omitempty"`
 	}
 
 	intents := resp.GetIntents()
@@ -361,10 +359,8 @@ func (s *server) getSessionIntents(w http.ResponseWriter, r *http.Request, sessi
 			PortfolioID:           it.GetPortfolioId(),
 			Symbol:                it.GetSymbol(),
 			Side:                  it.GetSide(),
-			RequestedQty:          it.GetRequestedQty(),
-			RequestedPrice:        it.GetRequestedPrice(),
-			RequestedQtyDecimal:   exactDecimalOrLegacy(it.GetRequestedQtyDecimal(), it.GetRequestedQty()),
-			RequestedPriceDecimal: optionalExactDecimalOrLegacy(it.RequestedPriceDecimal, it.GetRequestedPrice()),
+			RequestedQtyDecimal:   it.GetRequestedQtyDecimal(),
+			RequestedPriceDecimal: it.GetRequestedPriceDecimal(),
 			StrategyID:            it.GetStrategyId(),
 			Environment:           it.GetEnvironment(),
 			EnvironmentLabel:      venueEnvironmentLabel(it.GetEnvironment()),
@@ -418,36 +414,31 @@ func (s *server) getSessionOrders(w http.ResponseWriter, r *http.Request, sessio
 	}
 
 	type orderJSON struct {
-		Time                      string  `json:"time"`
-		OrderID                   string  `json:"order_id"`
-		ExchangeOrderID           string  `json:"exchange_order_id,omitempty"`
-		ClientOrderID             string  `json:"client_order_id,omitempty"`
-		AttemptID                 string  `json:"attempt_id,omitempty"`
-		IntentID                  string  `json:"intent_id,omitempty"`
-		Symbol                    string  `json:"symbol"`
-		Side                      string  `json:"side"`
-		OrigQty                   float64 `json:"orig_qty"`
-		ExecutedQty               float64 `json:"executed_qty"`
-		RemainingQty              float64 `json:"remaining_qty"`
-		AvgPrice                  float64 `json:"avg_price"`
-		Price                     float64 `json:"price"`
-		OrigQtyDecimal            string  `json:"orig_qty_decimal"`
-		ExecutedQtyDecimal        string  `json:"executed_qty_decimal"`
-		RemainingQtyDecimal       string  `json:"remaining_qty_decimal"`
-		AvgPriceDecimal           string  `json:"avg_price_decimal"`
-		PriceDecimal              string  `json:"price_decimal,omitempty"`
-		CumulativeQuoteQtyDecimal string  `json:"cumulative_quote_qty_decimal"`
-		Status                    string  `json:"status"`
-		Environment               int32   `json:"environment"`
-		EnvironmentLabel          string  `json:"environment_label"`
-		Market                    string  `json:"market"`
-		MarketLabel               string  `json:"market_label"`
-		VenueID                   int64   `json:"venue_id,omitempty"`
-		Exchange                  int32   `json:"exchange"`
-		ExchangeLabel             string  `json:"exchange_label"`
-		PositionSide              string  `json:"position_side"`
-		StrategyID                int64   `json:"strategy_id"`
-		ErrorMessage              string  `json:"error_message,omitempty"`
+		Time                      string `json:"time"`
+		OrderID                   string `json:"order_id"`
+		ExchangeOrderID           string `json:"exchange_order_id,omitempty"`
+		ClientOrderID             string `json:"client_order_id,omitempty"`
+		AttemptID                 string `json:"attempt_id,omitempty"`
+		IntentID                  string `json:"intent_id,omitempty"`
+		Symbol                    string `json:"symbol"`
+		Side                      string `json:"side"`
+		OrigQtyDecimal            string `json:"orig_qty_decimal"`
+		ExecutedQtyDecimal        string `json:"executed_qty_decimal"`
+		RemainingQtyDecimal       string `json:"remaining_qty_decimal"`
+		AvgPriceDecimal           string `json:"avg_price_decimal"`
+		PriceDecimal              string `json:"price_decimal,omitempty"`
+		CumulativeQuoteQtyDecimal string `json:"cumulative_quote_qty_decimal"`
+		Status                    string `json:"status"`
+		Environment               int32  `json:"environment"`
+		EnvironmentLabel          string `json:"environment_label"`
+		Market                    string `json:"market"`
+		MarketLabel               string `json:"market_label"`
+		VenueID                   int64  `json:"venue_id,omitempty"`
+		Exchange                  int32  `json:"exchange"`
+		ExchangeLabel             string `json:"exchange_label"`
+		PositionSide              string `json:"position_side"`
+		StrategyID                int64  `json:"strategy_id"`
+		ErrorMessage              string `json:"error_message,omitempty"`
 	}
 
 	orders := resp.GetOrders()
@@ -462,17 +453,12 @@ func (s *server) getSessionOrders(w http.ResponseWriter, r *http.Request, sessio
 			IntentID:                  o.GetIntentId(),
 			Symbol:                    o.GetSymbol(),
 			Side:                      o.GetSide(),
-			OrigQty:                   o.GetOrigQty(),
-			ExecutedQty:               o.GetExecutedQty(),
-			RemainingQty:              o.GetRemainingQty(),
-			AvgPrice:                  o.GetAvgPrice(),
-			Price:                     o.GetPrice(),
-			OrigQtyDecimal:            exactDecimalOrLegacy(o.GetOrigQtyDecimal(), o.GetOrigQty()),
-			ExecutedQtyDecimal:        exactDecimalOrLegacy(o.GetExecutedQtyDecimal(), o.GetExecutedQty()),
-			RemainingQtyDecimal:       exactDecimalOrLegacy(o.GetRemainingQtyDecimal(), o.GetRemainingQty()),
-			AvgPriceDecimal:           exactDecimalOrLegacy(o.GetAvgPriceDecimal(), o.GetAvgPrice()),
-			PriceDecimal:              optionalExactDecimalOrLegacy(o.PriceDecimal, o.GetPrice()),
-			CumulativeQuoteQtyDecimal: exactQuoteQtyOrProduct(o.GetCumulativeQuoteQtyDecimal(), o.GetExecutedQtyDecimal(), o.GetExecutedQty(), o.GetAvgPriceDecimal(), o.GetAvgPrice()),
+			OrigQtyDecimal:            o.GetOrigQtyDecimal(),
+			ExecutedQtyDecimal:        o.GetExecutedQtyDecimal(),
+			RemainingQtyDecimal:       o.GetRemainingQtyDecimal(),
+			AvgPriceDecimal:           o.GetAvgPriceDecimal(),
+			PriceDecimal:              o.GetPriceDecimal(),
+			CumulativeQuoteQtyDecimal: o.GetCumulativeQuoteQtyDecimal(),
 			Status:                    o.GetStatus(),
 			Environment:               o.GetEnvironment(),
 			EnvironmentLabel:          venueEnvironmentLabel(o.GetEnvironment()),
@@ -525,32 +511,29 @@ func (s *server) getSessionAttempts(w http.ResponseWriter, r *http.Request, sess
 	}
 
 	type attemptJSON struct {
-		Time                  string  `json:"time"`
-		AttemptID             string  `json:"attempt_id"`
-		IntentID              string  `json:"intent_id,omitempty"`
-		OrderID               string  `json:"order_id,omitempty"`
-		ExchangeOrderID       string  `json:"exchange_order_id,omitempty"`
-		ClientOrderID         string  `json:"client_order_id,omitempty"`
-		Symbol                string  `json:"symbol"`
-		Side                  string  `json:"side"`
-		RequestedQty          float64 `json:"requested_qty"`
-		RequestedPrice        float64 `json:"requested_price"`
-		MarkPrice             float64 `json:"mark_price"`
-		RequestedQtyDecimal   string  `json:"requested_qty_decimal"`
-		RequestedPriceDecimal string  `json:"requested_price_decimal,omitempty"`
-		MarkPriceDecimal      string  `json:"mark_price_decimal"`
-		Status                string  `json:"status"`
-		Environment           int32   `json:"environment"`
-		EnvironmentLabel      string  `json:"environment_label"`
-		Market                string  `json:"market"`
-		MarketLabel           string  `json:"market_label"`
-		VenueID               int64   `json:"venue_id,omitempty"`
-		Exchange              int32   `json:"exchange"`
-		ExchangeLabel         string  `json:"exchange_label"`
-		PositionSide          string  `json:"position_side"`
-		StrategyID            int64   `json:"strategy_id"`
-		ErrorMessage          string  `json:"error_message,omitempty"`
-		RecoveryError         string  `json:"recovery_error,omitempty"`
+		Time                  string `json:"time"`
+		AttemptID             string `json:"attempt_id"`
+		IntentID              string `json:"intent_id,omitempty"`
+		OrderID               string `json:"order_id,omitempty"`
+		ExchangeOrderID       string `json:"exchange_order_id,omitempty"`
+		ClientOrderID         string `json:"client_order_id,omitempty"`
+		Symbol                string `json:"symbol"`
+		Side                  string `json:"side"`
+		RequestedQtyDecimal   string `json:"requested_qty_decimal"`
+		RequestedPriceDecimal string `json:"requested_price_decimal,omitempty"`
+		MarkPriceDecimal      string `json:"mark_price_decimal"`
+		Status                string `json:"status"`
+		Environment           int32  `json:"environment"`
+		EnvironmentLabel      string `json:"environment_label"`
+		Market                string `json:"market"`
+		MarketLabel           string `json:"market_label"`
+		VenueID               int64  `json:"venue_id,omitempty"`
+		Exchange              int32  `json:"exchange"`
+		ExchangeLabel         string `json:"exchange_label"`
+		PositionSide          string `json:"position_side"`
+		StrategyID            int64  `json:"strategy_id"`
+		ErrorMessage          string `json:"error_message,omitempty"`
+		RecoveryError         string `json:"recovery_error,omitempty"`
 	}
 
 	attempts := resp.GetAttempts()
@@ -565,12 +548,9 @@ func (s *server) getSessionAttempts(w http.ResponseWriter, r *http.Request, sess
 			ClientOrderID:         a.GetClientOrderId(),
 			Symbol:                a.GetSymbol(),
 			Side:                  a.GetSide(),
-			RequestedQty:          a.GetRequestedQty(),
-			RequestedPrice:        a.GetRequestedPrice(),
-			MarkPrice:             a.GetMarkPrice(),
-			RequestedQtyDecimal:   exactDecimalOrLegacy(a.GetRequestedQtyDecimal(), a.GetRequestedQty()),
-			RequestedPriceDecimal: optionalExactDecimalOrLegacy(a.RequestedPriceDecimal, a.GetRequestedPrice()),
-			MarkPriceDecimal:      exactDecimalOrLegacy(a.GetMarkPriceDecimal(), a.GetMarkPrice()),
+			RequestedQtyDecimal:   a.GetRequestedQtyDecimal(),
+			RequestedPriceDecimal: a.GetRequestedPriceDecimal(),
+			MarkPriceDecimal:      a.GetMarkPriceDecimal(),
 			Status:                a.GetStatus(),
 			Environment:           a.GetEnvironment(),
 			EnvironmentLabel:      venueEnvironmentLabel(a.GetEnvironment()),
@@ -624,33 +604,30 @@ func (s *server) getSessionFills(w http.ResponseWriter, r *http.Request, session
 	}
 
 	type fillJSON struct {
-		Time             string  `json:"time"`
-		FillID           string  `json:"fill_id"`
-		ExchangeTradeID  string  `json:"exchange_trade_id,omitempty"`
-		OrderID          string  `json:"order_id"`
-		ExchangeOrderID  string  `json:"exchange_order_id,omitempty"`
-		AttemptID        string  `json:"attempt_id,omitempty"`
-		IntentID         string  `json:"intent_id,omitempty"`
-		Symbol           string  `json:"symbol"`
-		Side             string  `json:"side"`
-		Qty              float64 `json:"qty"`
-		FillPrice        float64 `json:"fill_price"`
-		Fee              float64 `json:"fee"`
-		FeeAsset         string  `json:"fee_asset"`
-		QtyDecimal       string  `json:"qty_decimal"`
-		FillPriceDecimal string  `json:"fill_price_decimal"`
-		FeeDecimal       string  `json:"fee_decimal"`
-		QuoteQtyDecimal  string  `json:"quote_qty_decimal"`
-		Status           string  `json:"status"`
-		Environment      int32   `json:"environment"`
-		EnvironmentLabel string  `json:"environment_label"`
-		Market           string  `json:"market"`
-		MarketLabel      string  `json:"market_label"`
-		VenueID          int64   `json:"venue_id,omitempty"`
-		Exchange         int32   `json:"exchange"`
-		ExchangeLabel    string  `json:"exchange_label"`
-		PositionSide     string  `json:"position_side"`
-		StrategyID       int64   `json:"strategy_id"`
+		Time             string `json:"time"`
+		FillID           string `json:"fill_id"`
+		ExchangeTradeID  string `json:"exchange_trade_id,omitempty"`
+		OrderID          string `json:"order_id"`
+		ExchangeOrderID  string `json:"exchange_order_id,omitempty"`
+		AttemptID        string `json:"attempt_id,omitempty"`
+		IntentID         string `json:"intent_id,omitempty"`
+		Symbol           string `json:"symbol"`
+		Side             string `json:"side"`
+		FeeAsset         string `json:"fee_asset"`
+		QtyDecimal       string `json:"qty_decimal"`
+		FillPriceDecimal string `json:"fill_price_decimal"`
+		FeeDecimal       string `json:"fee_decimal"`
+		QuoteQtyDecimal  string `json:"quote_qty_decimal"`
+		Status           string `json:"status"`
+		Environment      int32  `json:"environment"`
+		EnvironmentLabel string `json:"environment_label"`
+		Market           string `json:"market"`
+		MarketLabel      string `json:"market_label"`
+		VenueID          int64  `json:"venue_id,omitempty"`
+		Exchange         int32  `json:"exchange"`
+		ExchangeLabel    string `json:"exchange_label"`
+		PositionSide     string `json:"position_side"`
+		StrategyID       int64  `json:"strategy_id"`
 	}
 
 	fills := resp.GetFills()
@@ -666,14 +643,11 @@ func (s *server) getSessionFills(w http.ResponseWriter, r *http.Request, session
 			IntentID:         f.GetIntentId(),
 			Symbol:           f.GetSymbol(),
 			Side:             f.GetSide(),
-			Qty:              f.GetQty(),
-			FillPrice:        f.GetFillPrice(),
-			Fee:              f.GetFee(),
 			FeeAsset:         f.GetFeeAsset(),
-			QtyDecimal:       exactDecimalOrLegacy(f.GetQtyDecimal(), f.GetQty()),
-			FillPriceDecimal: exactDecimalOrLegacy(f.GetFillPriceDecimal(), f.GetFillPrice()),
-			FeeDecimal:       exactDecimalOrLegacy(f.GetFeeDecimal(), f.GetFee()),
-			QuoteQtyDecimal:  exactQuoteQtyOrProduct(f.GetQuoteQtyDecimal(), f.GetQtyDecimal(), f.GetQty(), f.GetFillPriceDecimal(), f.GetFillPrice()),
+			QtyDecimal:       f.GetQtyDecimal(),
+			FillPriceDecimal: f.GetFillPriceDecimal(),
+			FeeDecimal:       f.GetFeeDecimal(),
+			QuoteQtyDecimal:  f.GetQuoteQtyDecimal(),
 			Status:           f.GetStatus(),
 			Environment:      f.GetEnvironment(),
 			EnvironmentLabel: venueEnvironmentLabel(f.GetEnvironment()),
@@ -837,14 +811,11 @@ func fillDeltaToJSON(delta *orderv1.FillDeltaEntry) map[string]any {
 		"exchange_trade_id":  delta.GetExchangeTradeId(),
 		"exchange_order_id":  delta.GetExchangeOrderId(),
 		"symbol":             delta.GetSymbol(),
-		"qty":                delta.GetQty(),
-		"fill_price":         delta.GetFillPrice(),
-		"fee":                delta.GetFee(),
 		"fee_asset":          delta.GetFeeAsset(),
-		"qty_decimal":        exactDecimalOrLegacy(delta.GetQtyDecimal(), delta.GetQty()),
-		"fill_price_decimal": exactDecimalOrLegacy(delta.GetFillPriceDecimal(), delta.GetFillPrice()),
-		"fee_decimal":        exactDecimalOrLegacy(delta.GetFeeDecimal(), delta.GetFee()),
-		"quote_qty_decimal":  exactQuoteQtyOrProduct(delta.GetQuoteQtyDecimal(), delta.GetQtyDecimal(), delta.GetQty(), delta.GetFillPriceDecimal(), delta.GetFillPrice()),
+		"qty_decimal":        delta.GetQtyDecimal(),
+		"fill_price_decimal": delta.GetFillPriceDecimal(),
+		"fee_decimal":        delta.GetFeeDecimal(),
+		"quote_qty_decimal":  delta.GetQuoteQtyDecimal(),
 		"fee_missing":        delta.GetFeeMissing(),
 		"trade_time":         protoTime(delta.GetTradeTime()),
 	}
@@ -859,19 +830,15 @@ func orderStateToJSON(state *orderv1.OrderStateEntry) map[string]any {
 		"client_order_id":              state.GetClientOrderId(),
 		"symbol":                       state.GetSymbol(),
 		"status":                       state.GetStatus(),
-		"orig_qty":                     state.GetOrigQty(),
-		"executed_qty":                 state.GetExecutedQty(),
-		"remaining_qty":                state.GetRemainingQty(),
-		"avg_price":                    state.GetAvgPrice(),
-		"orig_qty_decimal":             exactDecimalOrLegacy(state.GetOrigQtyDecimal(), state.GetOrigQty()),
-		"executed_qty_decimal":         exactDecimalOrLegacy(state.GetExecutedQtyDecimal(), state.GetExecutedQty()),
-		"remaining_qty_decimal":        exactDecimalOrLegacy(state.GetRemainingQtyDecimal(), state.GetRemainingQty()),
-		"avg_price_decimal":            exactDecimalOrLegacy(state.GetAvgPriceDecimal(), state.GetAvgPrice()),
-		"cumulative_quote_qty_decimal": exactQuoteQtyOrProduct(state.GetCumulativeQuoteQtyDecimal(), state.GetExecutedQtyDecimal(), state.GetExecutedQty(), state.GetAvgPriceDecimal(), state.GetAvgPrice()),
+		"orig_qty_decimal":             state.GetOrigQtyDecimal(),
+		"executed_qty_decimal":         state.GetExecutedQtyDecimal(),
+		"remaining_qty_decimal":        state.GetRemainingQtyDecimal(),
+		"avg_price_decimal":            state.GetAvgPriceDecimal(),
+		"cumulative_quote_qty_decimal": state.GetCumulativeQuoteQtyDecimal(),
 		"updated_at":                   protoTime(state.GetUpdatedAt()),
 	}
-	if price := optionalExactDecimalOrLegacy(state.PriceDecimal, 0); price != "" {
-		out["price_decimal"] = price
+	if state.PriceDecimal != nil {
+		out["price_decimal"] = state.GetPriceDecimal()
 	}
 	return out
 }

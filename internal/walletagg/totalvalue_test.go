@@ -8,11 +8,11 @@ import (
 )
 
 func TestSpotEstimatedValue(t *testing.T) {
-	p := 41000.0
+	p := "41000"
 	sw := &portfoliov1.SpotWallet{
 		Assets: []*portfoliov1.SpotAsset{
-			{Asset: "USDT", Free: 5000, Locked: 100},
-			{Asset: "BTC", Free: 0.1, Price: &p},
+			{Asset: "USDT", FreeDecimal: "5000", LockedDecimal: "100"},
+			{Asset: "BTC", FreeDecimal: "0.1", LockedDecimal: "0", PriceDecimal: &p},
 		},
 	}
 	got := SpotEstimatedValue(sw)
@@ -25,8 +25,8 @@ func TestSpotEstimatedValue(t *testing.T) {
 func TestSpotEstimatedValueUsesAvgWhenNoPrice(t *testing.T) {
 	sw := &portfoliov1.SpotWallet{
 		Assets: []*portfoliov1.SpotAsset{
-			{Asset: "USDT", Free: 100},
-			{Asset: "ETH", Free: 2, AvgEntryPrice: 2500},
+			{Asset: "USDT", FreeDecimal: "100", LockedDecimal: "0"},
+			{Asset: "ETH", FreeDecimal: "2", LockedDecimal: "0", AvgEntryPriceDecimal: "2500"},
 		},
 	}
 	got := SpotEstimatedValue(sw)
@@ -44,11 +44,11 @@ func TestTotalValueFlatIsolated(t *testing.T) {
 			{Symbol: "ETHUSDT", InitialBalance: 1500, Leverage: 10, FeeRate: 0.0004},
 		},
 	}
-	p := 3000.0
+	p := "3000"
 	sw := &portfoliov1.SpotWallet{
 		Assets: []*portfoliov1.SpotAsset{
-			{Asset: "USDT", Free: 1000},
-			{Asset: "ETH", Free: 1, Price: &p},
+			{Asset: "USDT", FreeDecimal: "1000", LockedDecimal: "0"},
+			{Asset: "ETH", FreeDecimal: "1", LockedDecimal: "0", PriceDecimal: &p},
 		},
 	}
 	tv := TotalValue(fw, sw)
@@ -60,7 +60,7 @@ func TestTotalValueFlatIsolated(t *testing.T) {
 
 func TestTotalValuePreservesCanonicalUSDTOnlyWallet(t *testing.T) {
 	sw := &portfoliov1.SpotWallet{Assets: []*portfoliov1.SpotAsset{{
-		Asset: "USDT", Free: 1000, Locked: 25, FreeDecimal: "1000.00000000", LockedDecimal: "25.00000000",
+		Asset: "USDT", FreeDecimal: "1000.00000000", LockedDecimal: "25.00000000",
 	}}}
 	if got := TotalValue(nil, sw); got != 1025 {
 		t.Fatalf("canonical USDT-only total=%v want=1025", got)
@@ -69,9 +69,9 @@ func TestTotalValuePreservesCanonicalUSDTOnlyWallet(t *testing.T) {
 
 func TestSpotEstimatedValueWithMetadataMapsBaseAssetToSymbolPrice(t *testing.T) {
 	sw := &portfoliov1.SpotWallet{Assets: []*portfoliov1.SpotAsset{
-		{Asset: "USDT", Free: 100},
-		{Asset: "BTC", Free: 0.1},
-		{Asset: "1000SATS", Free: 2},
+		{Asset: "USDT", FreeDecimal: "100", LockedDecimal: "0"},
+		{Asset: "BTC", FreeDecimal: "0.1", LockedDecimal: "0"},
+		{Asset: "1000SATS", FreeDecimal: "2", LockedDecimal: "0"},
 	}}
 	metadata := []*portfoliov1.SpotSymbolMetadata{
 		{Symbol: "BTCUSDT", BaseAsset: "BTC", QuoteAsset: "USDT", Status: "TRADING"},
@@ -87,7 +87,7 @@ func TestSpotEstimatedValueWithMetadataMapsBaseAssetToSymbolPrice(t *testing.T) 
 }
 
 func TestSpotEstimatedValueWithMetadataDoesNotInventSymbolFromAssetText(t *testing.T) {
-	sw := &portfoliov1.SpotWallet{Assets: []*portfoliov1.SpotAsset{{Asset: "USDT", Free: 100}, {Asset: "BTC", Free: 1}}}
+	sw := &portfoliov1.SpotWallet{Assets: []*portfoliov1.SpotAsset{{Asset: "USDT", FreeDecimal: "100", LockedDecimal: "0"}, {Asset: "BTC", FreeDecimal: "1", LockedDecimal: "0"}}}
 	got := SpotEstimatedValueWithMetadata(sw, nil, map[string]float64{"BTCUSDT": 41000})
 	if got != 100 {
 		t.Fatalf("valuation invented BTCUSDT without metadata: %v", got)

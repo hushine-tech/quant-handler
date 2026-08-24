@@ -1175,8 +1175,8 @@ func buildDebugPackageWallet(snapshot *portfoliov1.PortfolioSnapshot, spot debug
 				return debugPackageWallet{}, fmt.Errorf("canonical Spot wallet contains duplicate asset %s", asset)
 			}
 			assets[asset] = debugPackageWalletAsset{
-				Asset: asset, Free: debugPackageDecimal(value.GetFreeDecimal(), value.GetFree()), Locked: debugPackageDecimal(value.GetLockedDecimal(), value.GetLocked()),
-				AvgEntryPrice: debugPackageOptionalDecimal(value.GetAvgEntryPrice()),
+				Asset: asset, Free: value.GetFreeDecimal(), Locked: value.GetLockedDecimal(),
+				AvgEntryPrice: value.GetAvgEntryPriceDecimal(),
 			}
 		}
 	}
@@ -1268,13 +1268,6 @@ func debugPackageDecimal(exact string, fallback float64) string {
 		return value
 	}
 	return strconv.FormatFloat(fallback, 'f', 8, 64)
-}
-
-func debugPackageOptionalDecimal(value float64) string {
-	if value == 0 {
-		return ""
-	}
-	return strconv.FormatFloat(value, 'f', 8, 64)
 }
 
 func buildDebugPackageArchive(body debugPackageBody, strategyCode string, inputs []debugPackageInput, targets []debugPackageOrderTarget, spot debugPackageSpotSnapshot, wallet debugPackageWallet, streams []debugPackageStreamPayload) ([]byte, error) {

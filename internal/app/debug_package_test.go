@@ -384,7 +384,7 @@ class MyStrategy:
 			want:   "non-negative exact decimal",
 		},
 		{
-			name: "non-finite fallback Spot balance",
+			name: "missing exact Spot balance",
 			portfolio: func() *fakeDebugPackagePortfolioClient {
 				portfolio := newDebugPackagePortfolioFake(`
 class MyStrategy:
@@ -393,7 +393,6 @@ class MyStrategy:
 `)
 				asset := portfolio.snapshot.Snapshot.Wallet.Spot.Assets[0]
 				asset.FreeDecimal = ""
-				asset.Free = math.NaN()
 				return portfolio
 			},
 			userID: 9,

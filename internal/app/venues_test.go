@@ -187,7 +187,7 @@ func TestCreateBacktestFuturesVenueForwardsOnlyFuturesWallet(t *testing.T) {
 			"margin_mode":"cross",
 			"position_mode":"one_way",
 			"initial_balance":1500,
-			"positions":[{"symbol":"ETHUSDT","direction":1,"initial_balance":500,"leverage":10,"fee_rate":0.0004}]
+			"positions":[{"symbol":"ETHUSDT","direction":1,"initial_balance":500,"fee_rate":0.0004}]
 		}
 	}`)
 	req := withUID(httptest.NewRequest(http.MethodPost, "/api/venues", body), 42)
@@ -204,9 +204,50 @@ func TestCreateBacktestFuturesVenueForwardsOnlyFuturesWallet(t *testing.T) {
 	if fake.createReq.GetSpot() != nil {
 		t.Fatalf("Spot wallet leaked into Futures venue: %+v", fake.createReq.GetSpot())
 	}
+	if leverage := fake.createReq.GetFutures().GetPositions()[0].GetLeverage(); leverage != 0 {
+		t.Fatalf("Venue bootstrap assigned strategy-owned leverage: %v", leverage)
+	}
 	if fake.createReq.GetTotalValue() != 1500 || fake.createReq.GetWalletBalance() != 1500 || fake.createReq.GetAvailableBalance() != 1500 {
 		t.Fatalf("bootstrap totals = total:%v wallet:%v available:%v",
 			fake.createReq.GetTotalValue(), fake.createReq.GetWalletBalance(), fake.createReq.GetAvailableBalance())
+	}
+}
+
+func TestCreateBacktestFuturesVenueRejectsEditableLeverage(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "venue scalar",
+			body: `{"exchange":"binance","market":"perpetual_futures","environment":"backtest","leverage":10,"futures":{"margin_mode":"cross","initial_balance":1000}}`,
+		},
+		{
+			name: "wallet scalar",
+			body: `{"exchange":"binance","market":"perpetual_futures","environment":"backtest","futures":{"margin_mode":"cross","initial_balance":1000,"leverage":10}}`,
+		},
+		{
+			name: "position",
+			body: `{"exchange":"binance","market":"perpetual_futures","environment":"backtest","futures":{"margin_mode":"isolated","positions":[{"symbol":"ETHUSDT","initial_balance":1000,"leverage":10}]}}`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := &fakeVenuePortfoliosClient{}
+			s := &server{portfolios: fake}
+			req := withUID(httptest.NewRequest(http.MethodPost, "/api/venues", strings.NewReader(tc.body)), 42)
+			rec := httptest.NewRecorder()
+
+			s.handleVenues(rec, req)
+
+			if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "invalid JSON") {
+				t.Fatalf("editable leverage was not rejected: status=%d body=%s", rec.Code, rec.Body.String())
+			}
+			if fake.createReq != nil {
+				t.Fatalf("editable leverage reached core-service: %+v", fake.createReq)
+			}
+		})
 	}
 }
 
@@ -257,7 +298,7 @@ func TestCreateBacktestSpotVenueForwardsOnlyCanonicalSpotWallet(t *testing.T) {
 	if len(spotAssets) != 2 || spotAssets[0].GetAsset() != "USDT" || spotAssets[0].GetFreeDecimal() != "250.00000000" || spotAssets[0].GetLockedDecimal() != "0.00000000" {
 		t.Fatalf("canonical USDT bootstrap = %+v", spotAssets)
 	}
-	if spotAssets[1].GetAsset() != "BTC" || spotAssets[1].GetFreeDecimal() != "0.01000000" || spotAssets[1].GetSymbol() != "" || spotAssets[1].GetQty() != 0 {
+	if spotAssets[1].GetAsset() != "BTC" || spotAssets[1].GetFreeDecimal() != "0.01000000" || spotAssets[1].GetLockedDecimal() != "0.00000000" || spotAssets[1].GetAvgEntryPriceDecimal() != "25000.00000000" {
 		t.Fatalf("canonical BTC bootstrap = %+v", spotAssets[1])
 	}
 	if fake.createReq.GetTotalValue() != 500 || fake.createReq.GetWalletBalance() != 500 || fake.createReq.GetAvailableBalance() != 250 {

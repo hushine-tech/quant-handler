@@ -448,17 +448,13 @@ func TestSessionOrderLifecycleEndpointReturnsEvents(t *testing.T) {
 					OccurredAt:      occurred,
 					CreatedAt:       occurred,
 					FillDelta: &orderv1.FillDeltaEntry{
-						Symbol: "ETHUSDT", Qty: 0.25, FillPrice: 3100, Fee: 0.12, FeeAsset: "USDT", TradeTime: occurred,
+						Symbol: "ETHUSDT", FeeAsset: "USDT", TradeTime: occurred,
 						QtyDecimal: "0.25000000", FillPriceDecimal: "3100.00000001", FeeDecimal: "0.12000000", QuoteQtyDecimal: "775.00000000",
 					},
 					OrderState: &orderv1.OrderStateEntry{
 						ExchangeOrderId: "ex-order-1",
 						Symbol:          "ETHUSDT",
 						Status:          "PARTIALLY_FILLED",
-						OrigQty:         1,
-						ExecutedQty:     0.25,
-						RemainingQty:    0.75,
-						AvgPrice:        3100,
 						UpdatedAt:       occurred,
 						OrigQtyDecimal:  "1.00000000", ExecutedQtyDecimal: "0.25000000", RemainingQtyDecimal: "0.75000000",
 						AvgPriceDecimal: "3100.00000001", CumulativeQuoteQtyDecimal: "775.00000000",
@@ -496,20 +492,17 @@ func TestSessionOrderLifecycleEndpointReturnsEvents(t *testing.T) {
 			PositionSide  string `json:"position_side"`
 			Side          string `json:"side"`
 			FillDelta     struct {
-				Symbol           string  `json:"symbol"`
-				Qty              float64 `json:"qty"`
-				QtyDecimal       string  `json:"qty_decimal"`
-				FillPriceDecimal string  `json:"fill_price_decimal"`
-				FeeDecimal       string  `json:"fee_decimal"`
-				QuoteQtyDecimal  string  `json:"quote_qty_decimal"`
+				Symbol           string `json:"symbol"`
+				QtyDecimal       string `json:"qty_decimal"`
+				FillPriceDecimal string `json:"fill_price_decimal"`
+				FeeDecimal       string `json:"fee_decimal"`
+				QuoteQtyDecimal  string `json:"quote_qty_decimal"`
 			} `json:"fill_delta"`
 			OrderState struct {
-				Status                    string  `json:"status"`
-				ExecutedQty               float64 `json:"executed_qty"`
-				RemainingQty              float64 `json:"remaining_qty"`
-				ExecutedQtyDecimal        string  `json:"executed_qty_decimal"`
-				RemainingQtyDecimal       string  `json:"remaining_qty_decimal"`
-				CumulativeQuoteQtyDecimal string  `json:"cumulative_quote_qty_decimal"`
+				Status                    string `json:"status"`
+				ExecutedQtyDecimal        string `json:"executed_qty_decimal"`
+				RemainingQtyDecimal       string `json:"remaining_qty_decimal"`
+				CumulativeQuoteQtyDecimal string `json:"cumulative_quote_qty_decimal"`
 			} `json:"order_state"`
 		} `json:"items"`
 		NextEventID int64 `json:"next_event_id"`
@@ -535,7 +528,7 @@ func TestSessionOrderLifecycleEndpointReturnsEvents(t *testing.T) {
 	if item.ExchangeLabel != "binance" || item.MarketLabel != "perpetual_futures" || item.PositionSide != "LONG" || item.Side != "BUY" {
 		t.Fatalf("route facts = %+v", item)
 	}
-	if item.FillDelta.Symbol != "ETHUSDT" || item.FillDelta.Qty != 0.25 || item.OrderState.ExecutedQty != 0.25 || item.OrderState.RemainingQty != 0.75 {
+	if item.FillDelta.Symbol != "ETHUSDT" {
 		t.Fatalf("fill/state = %+v", item)
 	}
 	if body.NextEventID != 101 || body.NextOffset != 101 || body.HasMore {
@@ -997,15 +990,15 @@ func TestGetSessionIntents_HasMoreComputedFromTotal(t *testing.T) {
 		intentsResp: &orderv1.QueryOrderIntentsResponse{
 			Intents: []*orderv1.OrderIntentEntry{
 				{
-					IntentId:      "i-1",
-					Symbol:        "BTCUSDT",
-					Side:          "BUY",
-					RequestedQty:  1,
-					Status:        "REJECTED",
-					RejectCode:    "MIN_NOTIONAL_VIOLATION",
-					RejectMessage: "notional 16.8809 is below min_notional 20",
+					IntentId:            "i-1",
+					Symbol:              "BTCUSDT",
+					Side:                "BUY",
+					RequestedQtyDecimal: "1",
+					Status:              "REJECTED",
+					RejectCode:          "MIN_NOTIONAL_VIOLATION",
+					RejectMessage:       "notional 16.8809 is below min_notional 20",
 				},
-				{IntentId: "i-2", Symbol: "ETHUSDT", Side: "SELL", RequestedQty: 2},
+				{IntentId: "i-2", Symbol: "ETHUSDT", Side: "SELL", RequestedQtyDecimal: "2"},
 			},
 			Total: 50,
 		},

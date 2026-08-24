@@ -121,19 +121,19 @@ func TestMarketOrderHistoryOmitsAbsentOptionalPrices(t *testing.T) {
 	}
 }
 
-func TestOrderHistoryDoesNotSynthesizeMissingExactDecimalsFromFloatFields(t *testing.T) {
+func TestOrderHistoryKeepsMissingExactDecimalsUnavailable(t *testing.T) {
 	fake := &fakeOrdersClient{
 		intentsResp: &orderv1.QueryOrderIntentsResponse{Intents: []*orderv1.OrderIntentEntry{{
-			IntentId: "i-float-only", RequestedQty: 0.1, RequestedPrice: 0.2,
+			IntentId: "i-missing-exact",
 		}}},
 		attemptsResp: &orderv1.QueryOrderAttemptsResponse{Attempts: []*orderv1.OrderAttemptEntry{{
-			AttemptId: "a-float-only", RequestedQty: 0.1, RequestedPrice: 0.2, MarkPrice: 0.3,
+			AttemptId: "a-missing-exact",
 		}}},
 		ordersResp: &orderv1.QueryOrdersResponse{Orders: []*orderv1.ExchangeOrderEntry{{
-			OrderId: "o-float-only", OrigQty: 0.1, ExecutedQty: 0.05, RemainingQty: 0.05, AvgPrice: 0.2, Price: 0.2,
+			OrderId: "o-missing-exact",
 		}}},
 		fillsResp: &orderv1.QueryOrderFillsResponse{Fills: []*orderv1.OrderFillEntry{{
-			FillId: "f-float-only", Qty: 0.1, FillPrice: 0.2, Fee: 0.001,
+			FillId: "f-missing-exact",
 		}}},
 	}
 	s := newOrderHistoryServer(fake)
@@ -175,12 +175,8 @@ func TestOrderHistoryDoesNotSynthesizeMissingExactDecimalsFromFloatFields(t *tes
 		})
 	}
 
-	assertNoSynthesizedExactValues(t, fillDeltaToJSON(&orderv1.FillDeltaEntry{
-		Qty: 0.1, FillPrice: 0.2, Fee: 0.001,
-	}), []string{"qty_decimal", "fill_price_decimal", "fee_decimal", "quote_qty_decimal"})
-	assertNoSynthesizedExactValues(t, orderStateToJSON(&orderv1.OrderStateEntry{
-		OrigQty: 0.1, ExecutedQty: 0.05, RemainingQty: 0.05, AvgPrice: 0.2,
-	}), []string{"orig_qty_decimal", "executed_qty_decimal", "remaining_qty_decimal", "avg_price_decimal", "price_decimal", "cumulative_quote_qty_decimal"})
+	assertNoSynthesizedExactValues(t, fillDeltaToJSON(&orderv1.FillDeltaEntry{}), []string{"qty_decimal", "fill_price_decimal", "fee_decimal", "quote_qty_decimal"})
+	assertNoSynthesizedExactValues(t, orderStateToJSON(&orderv1.OrderStateEntry{}), []string{"orig_qty_decimal", "executed_qty_decimal", "remaining_qty_decimal", "avg_price_decimal", "price_decimal", "cumulative_quote_qty_decimal"})
 }
 
 func assertNoSynthesizedExactValues(t *testing.T, item map[string]any, fields []string) {
@@ -315,9 +311,9 @@ func TestOrderHistory_envelopeShape(t *testing.T) {
 					PortfolioId:        3,
 					Symbol:             "BTCUSDT",
 					Side:               "BUY",
-					OrigQty:            0.1,
-					ExecutedQty:        0.05,
-					AvgPrice:           50000,
+					OrigQtyDecimal:     "0.1",
+					ExecutedQtyDecimal: "0.05",
+					AvgPriceDecimal:    "50000",
 					PostOnly:           true,
 					GoodTillDate:       goodTillDate,
 					ReduceOnly:         true,
@@ -341,20 +337,20 @@ func TestOrderHistory_envelopeShape(t *testing.T) {
 	}
 	var body struct {
 		Items []struct {
-			OrderID            string  `json:"order_id"`
-			PortfolioID        int64   `json:"portfolio_id"`
-			Symbol             string  `json:"symbol"`
-			OrigQty            float64 `json:"orig_qty"`
-			ExecutedQty        float64 `json:"executed_qty"`
-			AvgPrice           float64 `json:"avg_price"`
-			PostOnly           bool    `json:"post_only"`
-			GoodTill           string  `json:"good_till_date"`
-			ReduceOnly         bool    `json:"reduce_only"`
-			RecoveryStatus     string  `json:"recovery_status"`
-			NextCheckAt        string  `json:"next_check_at"`
-			RecoveryDeadlineAt string  `json:"recovery_deadline_at"`
-			LastRecoveryError  string  `json:"last_recovery_error"`
-			ForceClosedAt      string  `json:"force_closed_at"`
+			OrderID            string `json:"order_id"`
+			PortfolioID        int64  `json:"portfolio_id"`
+			Symbol             string `json:"symbol"`
+			OrigQtyDecimal     string `json:"orig_qty_decimal"`
+			ExecutedQtyDecimal string `json:"executed_qty_decimal"`
+			AvgPriceDecimal    string `json:"avg_price_decimal"`
+			PostOnly           bool   `json:"post_only"`
+			GoodTill           string `json:"good_till_date"`
+			ReduceOnly         bool   `json:"reduce_only"`
+			RecoveryStatus     string `json:"recovery_status"`
+			NextCheckAt        string `json:"next_check_at"`
+			RecoveryDeadlineAt string `json:"recovery_deadline_at"`
+			LastRecoveryError  string `json:"last_recovery_error"`
+			ForceClosedAt      string `json:"force_closed_at"`
 		} `json:"items"`
 		Total int64 `json:"total"`
 	}
@@ -370,7 +366,7 @@ func TestOrderHistory_envelopeShape(t *testing.T) {
 	if body.Items[0].OrderID != "o1" || body.Items[0].Symbol != "BTCUSDT" {
 		t.Errorf("unexpected item: %+v", body.Items[0])
 	}
-	if body.Items[0].OrigQty != 0.1 || body.Items[0].ExecutedQty != 0.05 || body.Items[0].AvgPrice != 50000 {
+	if body.Items[0].OrigQtyDecimal != "0.1" || body.Items[0].ExecutedQtyDecimal != "0.05" || body.Items[0].AvgPriceDecimal != "50000" {
 		t.Errorf("unexpected quantitative fields: %+v", body.Items[0])
 	}
 	if !body.Items[0].PostOnly || !body.Items[0].ReduceOnly || body.Items[0].GoodTill != "2030-01-01T00:00:00Z" {
@@ -429,20 +425,20 @@ func TestOrderHistoryPreservesExactDecimalFieldsAndFeeAsset(t *testing.T) {
 	orderPrice := "50000.00000001"
 	fake := &fakeOrdersClient{
 		intentsResp: &orderv1.QueryOrderIntentsResponse{Intents: []*orderv1.OrderIntentEntry{{
-			IntentId: "i-exact", Environment: 1, RequestedQty: 9007199254740992, RequestedPrice: 0.00000001,
+			IntentId: "i-exact", Environment: 1,
 			RequestedQtyDecimal: "9007199254740993.00000000", RequestedPriceDecimal: &requestedPrice,
 		}}},
 		attemptsResp: &orderv1.QueryOrderAttemptsResponse{Attempts: []*orderv1.OrderAttemptEntry{{
-			AttemptId: "a-exact", Environment: 1, RequestedQty: 9007199254740992, RequestedPrice: 0.00000001, MarkPrice: 50000,
+			AttemptId: "a-exact", Environment: 1,
 			RequestedQtyDecimal: "9007199254740993.00000000", RequestedPriceDecimal: &requestedPrice, MarkPriceDecimal: "50000.00000001",
 		}}},
 		ordersResp: &orderv1.QueryOrdersResponse{Orders: []*orderv1.ExchangeOrderEntry{{
-			OrderId: "o-exact", Environment: 1, OrigQty: 9007199254740992, ExecutedQty: 0.00000001, RemainingQty: 0.1, AvgPrice: 50000, Price: 50000,
+			OrderId: "o-exact", Environment: 1,
 			OrigQtyDecimal: "9007199254740993.00000000", ExecutedQtyDecimal: "0.00000001", RemainingQtyDecimal: "0.09999999",
 			AvgPriceDecimal: "50000.00000001", PriceDecimal: &orderPrice, CumulativeQuoteQtyDecimal: "123456789.00000001",
 		}}},
 		fillsResp: &orderv1.QueryOrderFillsResponse{Fills: []*orderv1.OrderFillEntry{{
-			FillId: "f-exact", Environment: 1, Qty: 0.00000001, FillPrice: 50000, Fee: 0.001, FeeAsset: "BNB",
+			FillId: "f-exact", Environment: 1, FeeAsset: "BNB",
 			QtyDecimal: "0.00000001", FillPriceDecimal: "50000.00000001", FeeDecimal: "0.00100000", QuoteQtyDecimal: "0.00050000",
 		}}},
 	}
@@ -510,7 +506,6 @@ func TestOrderHistoryPreservesExactDecimalFieldsAndFeeAsset(t *testing.T) {
 	}, []string{"qty", "fill_price", "fee"})
 
 	delta := fillDeltaToJSON(&orderv1.FillDeltaEntry{
-		Qty: 0.00000001, FillPrice: 50000, Fee: 0.001,
 		QtyDecimal: "0.00000001", FillPriceDecimal: "50000.00000001", FeeDecimal: "0.00100000", QuoteQtyDecimal: "0.00050000",
 	})
 	for field, want := range map[string]string{
@@ -527,7 +522,6 @@ func TestOrderHistoryPreservesExactDecimalFieldsAndFeeAsset(t *testing.T) {
 	}
 
 	state := orderStateToJSON(&orderv1.OrderStateEntry{
-		OrigQty: 9007199254740992, ExecutedQty: 0.00000001, RemainingQty: 0.1, AvgPrice: 50000,
 		OrigQtyDecimal: "9007199254740993.00000000", ExecutedQtyDecimal: "0.00000001", RemainingQtyDecimal: "0.09999999",
 		AvgPriceDecimal: "50000.00000001", PriceDecimal: &orderPrice, CumulativeQuoteQtyDecimal: "123456789.00000001",
 	})
@@ -553,17 +547,17 @@ func TestOrderAttempts_envelopeShape(t *testing.T) {
 			Total: 7,
 			Attempts: []*orderv1.OrderAttemptEntry{
 				{
-					AttemptId:       "a1",
-					PortfolioId:     3,
-					Symbol:          "BTCUSDT",
-					Side:            "BUY",
-					RequestedQty:    0.1,
-					Status:          "FAILED",
-					PostOnly:        true,
-					GoodTillDate:    goodTillDate,
-					ReduceOnly:      true,
-					RiskStatus:      "REJECT",
-					RiskReasonsJson: `[{"code":"ROUTE_PENDING_EXECUTION","message":"route has pending execution"}]`,
+					AttemptId:           "a1",
+					PortfolioId:         3,
+					Symbol:              "BTCUSDT",
+					Side:                "BUY",
+					RequestedQtyDecimal: "0.1",
+					Status:              "FAILED",
+					PostOnly:            true,
+					GoodTillDate:        goodTillDate,
+					ReduceOnly:          true,
+					RiskStatus:          "REJECT",
+					RiskReasonsJson:     `[{"code":"ROUTE_PENDING_EXECUTION","message":"route has pending execution"}]`,
 				},
 			},
 		},
@@ -579,15 +573,15 @@ func TestOrderAttempts_envelopeShape(t *testing.T) {
 	}
 	var body struct {
 		Items []struct {
-			AttemptID    string  `json:"attempt_id"`
-			PortfolioID  int64   `json:"portfolio_id"`
-			RequestedQty float64 `json:"requested_qty"`
-			Status       string  `json:"status"`
-			PostOnly     bool    `json:"post_only"`
-			GoodTill     string  `json:"good_till_date"`
-			ReduceOnly   bool    `json:"reduce_only"`
-			RiskStatus   string  `json:"risk_status"`
-			RiskReasons  []struct {
+			AttemptID           string `json:"attempt_id"`
+			PortfolioID         int64  `json:"portfolio_id"`
+			RequestedQtyDecimal string `json:"requested_qty_decimal"`
+			Status              string `json:"status"`
+			PostOnly            bool   `json:"post_only"`
+			GoodTill            string `json:"good_till_date"`
+			ReduceOnly          bool   `json:"reduce_only"`
+			RiskStatus          string `json:"risk_status"`
+			RiskReasons         []struct {
 				Code    string `json:"code"`
 				Message string `json:"message"`
 			} `json:"risk_reasons"`
@@ -600,7 +594,7 @@ func TestOrderAttempts_envelopeShape(t *testing.T) {
 	if body.Total != 7 || len(body.Items) != 1 {
 		t.Fatalf("unexpected body: %+v", body)
 	}
-	if body.Items[0].AttemptID != "a1" || body.Items[0].RequestedQty != 0.1 || body.Items[0].Status != "FAILED" {
+	if body.Items[0].AttemptID != "a1" || body.Items[0].RequestedQtyDecimal != "0.1" || body.Items[0].Status != "FAILED" {
 		t.Errorf("unexpected attempt item: %+v", body.Items[0])
 	}
 	if !body.Items[0].PostOnly || !body.Items[0].ReduceOnly || body.Items[0].GoodTill != "2030-01-01T00:00:00Z" {
@@ -723,20 +717,20 @@ func TestOrderIntents_envelopeShape(t *testing.T) {
 			Total: 3,
 			Intents: []*orderv1.OrderIntentEntry{
 				{
-					IntentId:       "i1",
-					PortfolioId:    9,
-					Symbol:         "BTCUSDT",
-					Side:           "BUY",
-					RequestedQty:   0.1,
-					RequestedPrice: 50000,
-					StrategyId:     5,
-					Market:         2,
-					Status:         "REJECTED",
-					RejectCode:     "MIN_NOTIONAL_VIOLATION",
-					RejectMessage:  "notional 16.8809 is below min_notional 20",
-					PostOnly:       true,
-					GoodTillDate:   goodTillDate,
-					ReduceOnly:     true,
+					IntentId:              "i1",
+					PortfolioId:           9,
+					Symbol:                "BTCUSDT",
+					Side:                  "BUY",
+					RequestedQtyDecimal:   "0.1",
+					RequestedPriceDecimal: func() *string { value := "50000"; return &value }(),
+					StrategyId:            5,
+					Market:                2,
+					Status:                "REJECTED",
+					RejectCode:            "MIN_NOTIONAL_VIOLATION",
+					RejectMessage:         "notional 16.8809 is below min_notional 20",
+					PostOnly:              true,
+					GoodTillDate:          goodTillDate,
+					ReduceOnly:            true,
 				},
 			},
 		},
@@ -763,20 +757,20 @@ func TestOrderIntents_envelopeShape(t *testing.T) {
 
 	var body struct {
 		Items []struct {
-			IntentID       string  `json:"intent_id"`
-			PortfolioID    int64   `json:"portfolio_id"`
-			Symbol         string  `json:"symbol"`
-			Side           string  `json:"side"`
-			RequestedQty   float64 `json:"requested_qty"`
-			RequestedPrice float64 `json:"requested_price"`
-			StrategyID     int64   `json:"strategy_id"`
-			Market         string  `json:"market"`
-			Status         string  `json:"status"`
-			RejectCode     string  `json:"reject_code"`
-			RejectMessage  string  `json:"reject_message"`
-			PostOnly       bool    `json:"post_only"`
-			GoodTill       string  `json:"good_till_date"`
-			ReduceOnly     bool    `json:"reduce_only"`
+			IntentID              string `json:"intent_id"`
+			PortfolioID           int64  `json:"portfolio_id"`
+			Symbol                string `json:"symbol"`
+			Side                  string `json:"side"`
+			RequestedQtyDecimal   string `json:"requested_qty_decimal"`
+			RequestedPriceDecimal string `json:"requested_price_decimal"`
+			StrategyID            int64  `json:"strategy_id"`
+			Market                string `json:"market"`
+			Status                string `json:"status"`
+			RejectCode            string `json:"reject_code"`
+			RejectMessage         string `json:"reject_message"`
+			PostOnly              bool   `json:"post_only"`
+			GoodTill              string `json:"good_till_date"`
+			ReduceOnly            bool   `json:"reduce_only"`
 		} `json:"items"`
 		Total int64 `json:"total"`
 	}
@@ -790,7 +784,7 @@ func TestOrderIntents_envelopeShape(t *testing.T) {
 	if got.IntentID != "i1" || got.PortfolioID != 9 || got.Symbol != "BTCUSDT" || got.Side != "BUY" {
 		t.Errorf("unexpected item identity: %+v", got)
 	}
-	if got.RequestedQty != 0.1 || got.RequestedPrice != 50000 || got.StrategyID != 5 || got.Market != "perpetual_futures" {
+	if got.RequestedQtyDecimal != "0.1" || got.RequestedPriceDecimal != "50000" || got.StrategyID != 5 || got.Market != "perpetual_futures" {
 		t.Errorf("unexpected item fields: %+v", got)
 	}
 	if got.Status != "REJECTED" || got.RejectCode != "MIN_NOTIONAL_VIOLATION" || got.RejectMessage != "notional 16.8809 is below min_notional 20" {
@@ -854,7 +848,7 @@ func TestOrderFills_envelopeShape(t *testing.T) {
 		fillsResp: &orderv1.QueryOrderFillsResponse{
 			Total: 5,
 			Fills: []*orderv1.OrderFillEntry{
-				{FillId: "f1", OrderId: "o1", PortfolioId: 3, Symbol: "BTCUSDT", Qty: 0.1, FillPrice: 50000, Fee: 0.2},
+				{FillId: "f1", OrderId: "o1", PortfolioId: 3, Symbol: "BTCUSDT", QtyDecimal: "0.1", FillPriceDecimal: "50000", FeeDecimal: "0.2"},
 			},
 		},
 	}
@@ -869,12 +863,12 @@ func TestOrderFills_envelopeShape(t *testing.T) {
 	}
 	var body struct {
 		Items []struct {
-			FillID      string  `json:"fill_id"`
-			OrderID     string  `json:"order_id"`
-			PortfolioID int64   `json:"portfolio_id"`
-			Qty         float64 `json:"qty"`
-			FillPrice   float64 `json:"fill_price"`
-			Fee         float64 `json:"fee"`
+			FillID           string `json:"fill_id"`
+			OrderID          string `json:"order_id"`
+			PortfolioID      int64  `json:"portfolio_id"`
+			QtyDecimal       string `json:"qty_decimal"`
+			FillPriceDecimal string `json:"fill_price_decimal"`
+			FeeDecimal       string `json:"fee_decimal"`
 		} `json:"items"`
 		Total int64 `json:"total"`
 	}
@@ -884,7 +878,7 @@ func TestOrderFills_envelopeShape(t *testing.T) {
 	if body.Total != 5 || len(body.Items) != 1 {
 		t.Fatalf("unexpected body: %+v", body)
 	}
-	if body.Items[0].FillID != "f1" || body.Items[0].Qty != 0.1 || body.Items[0].Fee != 0.2 {
+	if body.Items[0].FillID != "f1" || body.Items[0].QtyDecimal != "0.1" || body.Items[0].FeeDecimal != "0.2" {
 		t.Errorf("unexpected fill item: %+v", body.Items[0])
 	}
 }
