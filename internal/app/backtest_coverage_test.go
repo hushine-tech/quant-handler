@@ -240,20 +240,6 @@ func TestDownloadAndRunCreatesJob(t *testing.T) {
 	}
 }
 
-func TestDownloadAndRunRejectsRemovedSessionLeverage(t *testing.T) {
-	s := &server{marketData: &fakeMarketDataClient{}, downloadRunJobs: newDownloadRunJobStore()}
-	req := withUID(httptest.NewRequest(http.MethodPost,
-		"/api/portfolios/7/strategy/download-and-run",
-		bytes.NewBufferString(`{"leverage":9}`)), 6)
-	rec := httptest.NewRecorder()
-
-	s.handleDownloadAndRun(rec, req, 7)
-
-	if rec.Code != http.StatusBadRequest || !bytes.Contains(rec.Body.Bytes(), []byte("invalid JSON")) {
-		t.Fatalf("status=%d body=%s, want removed leverage rejected as invalid JSON", rec.Code, rec.Body.String())
-	}
-}
-
 func TestDownloadAndRunJobPreservesPreviewAndRunDependencyErrors(t *testing.T) {
 	tests := []struct {
 		name       string

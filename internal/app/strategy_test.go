@@ -150,37 +150,81 @@ func TestPreviewRunStrategy_ForwardsBodyAndReturnsJSON(t *testing.T) {
 	}
 }
 
-func TestStrategyHandlersRejectRemovedSessionLeverage(t *testing.T) {
-	tests := []struct {
-		name   string
-		handle func(*server, http.ResponseWriter, *http.Request)
-		path   string
+func TestStrategyHandlersEnforceSingleJSONDocument(t *testing.T) {
+	endpoints := []struct {
+		name            string
+		path            string
+		allowEmpty      bool
+		postDecodeError string
+		handle          func(*server, http.ResponseWriter, *http.Request)
 	}{
 		{
-			name: "run",
+			name:            "run",
+			path:            "/api/portfolios/7/run-strategy",
+			postDecodeError: "runtime selection required",
 			handle: func(s *server, w http.ResponseWriter, r *http.Request) {
 				s.handleRunStrategy(w, r, 7)
 			},
-			path: "/api/portfolios/7/run-strategy",
 		},
 		{
-			name: "preview",
+			name:            "preview",
+			path:            "/api/portfolios/7/preview-run-strategy",
+			allowEmpty:      true,
+			postDecodeError: "runtime selection required",
 			handle: func(s *server, w http.ResponseWriter, r *http.Request) {
 				s.handlePreviewRunStrategy(w, r, 7)
 			},
-			path: "/api/portfolios/7/preview-run-strategy",
+		},
+		{
+			name:            "download_and_run",
+			path:            "/api/portfolios/7/strategy/download-and-run",
+			postDecodeError: "start_time_ms and end_time_ms are required",
+			handle: func(s *server, w http.ResponseWriter, r *http.Request) {
+				s.handleDownloadAndRun(w, r, 7)
+			},
 		},
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			s := &server{jwtSecret: []byte("s"), corsOrigins: []string{"*"}}
-			req := withUID(httptest.NewRequest(http.MethodPost, tt.path, bytes.NewBufferString(`{"leverage":9}`)), 17)
-			rec := httptest.NewRecorder()
+	payloads := []struct {
+		name                   string
+		body                   string
+		invalidForRequiredBody bool
+		invalidForOptionalBody bool
+	}{
+		{name: "single_document", body: `{}`},
+		{name: "empty", invalidForRequiredBody: true},
+		{name: "whitespace", body: " \n\t", invalidForRequiredBody: true},
+		{name: "unknown_leverage", body: `{"leverage":9}`, invalidForRequiredBody: true, invalidForOptionalBody: true},
+		{name: "second_document", body: `{} {}`, invalidForRequiredBody: true, invalidForOptionalBody: true},
+		{name: "trailing_garbage", body: `{} trailing`, invalidForRequiredBody: true, invalidForOptionalBody: true},
+	}
 
-			tt.handle(s, rec, req)
+	for _, endpoint := range endpoints {
+		t.Run(endpoint.name, func(t *testing.T) {
+			for _, payload := range payloads {
+				t.Run(payload.name, func(t *testing.T) {
+					s := &server{
+						jwtSecret:       []byte("s"),
+						corsOrigins:     []string{"*"},
+						marketData:      &fakeMarketDataClient{},
+						downloadRunJobs: newDownloadRunJobStore(),
+					}
+					req := withUID(httptest.NewRequest(http.MethodPost, endpoint.path, bytes.NewBufferString(payload.body)), 17)
+					rec := httptest.NewRecorder()
 
-			if rec.Code != http.StatusBadRequest || !bytes.Contains(rec.Body.Bytes(), []byte("invalid JSON")) {
-				t.Fatalf("status=%d body=%s, want removed leverage rejected as invalid JSON", rec.Code, rec.Body.String())
+					endpoint.handle(s, rec, req)
+
+					wantInvalid := payload.invalidForRequiredBody
+					if endpoint.allowEmpty {
+						wantInvalid = payload.invalidForOptionalBody
+					}
+					gotInvalid := bytes.Contains(rec.Body.Bytes(), []byte("invalid JSON"))
+					if rec.Code != http.StatusBadRequest || gotInvalid != wantInvalid {
+						t.Fatalf("status=%d body=%s, want invalid JSON=%t", rec.Code, rec.Body.String(), wantInvalid)
+					}
+					if !wantInvalid && !bytes.Contains(rec.Body.Bytes(), []byte(endpoint.postDecodeError)) {
+						t.Fatalf("body=%s, want post-decode error %q", rec.Body.String(), endpoint.postDecodeError)
+					}
+				})
 			}
 		})
 	}

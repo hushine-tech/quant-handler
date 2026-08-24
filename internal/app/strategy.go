@@ -523,11 +523,20 @@ func (s *server) handlePreviewRunStrategy(w http.ResponseWriter, r *http.Request
 func decodeStrategyRequestBody(body io.Reader, dst any, allowEmpty bool) error {
 	decoder := json.NewDecoder(body)
 	decoder.DisallowUnknownFields()
-	err := decoder.Decode(dst)
-	if allowEmpty && errors.Is(err, io.EOF) {
-		return nil
+	if err := decoder.Decode(dst); err != nil {
+		if allowEmpty && errors.Is(err, io.EOF) {
+			return nil
+		}
+		return err
 	}
-	return err
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return errors.New("request body must contain a single JSON document")
+		}
+		return err
+	}
+	return nil
 }
 
 func preflightFailureToJSON(failure *strategyv1.PreflightFailureProto) preflightFailureJSON {
