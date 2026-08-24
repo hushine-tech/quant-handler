@@ -71,19 +71,6 @@ func withOrderUID(r *http.Request, uid int64) *http.Request {
 
 // ────────────────────────────────────────────────────────────────────────────
 
-func TestOptionalExactDecimalOrLegacyPreservesAbsentMarketPrice(t *testing.T) {
-	if got := optionalExactDecimalOrLegacy(nil, 0); got != "" {
-		t.Fatalf("absent optional price = %q, want empty", got)
-	}
-	if got := optionalExactDecimalOrLegacy(nil, 12.5); got != "12.5" {
-		t.Fatalf("legacy LIMIT price = %q, want 12.5", got)
-	}
-	exact := "9007199254740993.00000000"
-	if got := optionalExactDecimalOrLegacy(&exact, 0); got != exact {
-		t.Fatalf("exact price = %q, want %q", got, exact)
-	}
-}
-
 func TestMarketOrderHistoryOmitsAbsentOptionalPrices(t *testing.T) {
 	fake := &fakeOrdersClient{
 		intentsResp:  &orderv1.QueryOrderIntentsResponse{Intents: []*orderv1.OrderIntentEntry{{IntentId: "intent-market"}}, Total: 1},
@@ -134,20 +121,39 @@ func TestMarketOrderHistoryOmitsAbsentOptionalPrices(t *testing.T) {
 	}
 }
 
-func TestLegacyFillQuoteFallbackUsesDecimalMultiplication(t *testing.T) {
-	fake := &fakeOrdersClient{fillsResp: &orderv1.QueryOrderFillsResponse{
-		Fills: []*orderv1.OrderFillEntry{{FillId: "fill-legacy", Qty: 0.1, FillPrice: 0.2}},
-		Total: 1,
-	}}
-	s := newOrderHistoryServer(fake)
-	cases := []struct {
-		name string
-		path string
-		call func(http.ResponseWriter, *http.Request)
-	}{
-		{name: "global", path: "/api/orders/fills", call: s.handleOrderFills},
-		{name: "session", path: "/api/sessions/sess-legacy/fills", call: func(w http.ResponseWriter, r *http.Request) { s.getSessionFills(w, r, "sess-legacy") }},
+func TestOrderHistoryDoesNotSynthesizeMissingExactDecimalsFromFloatFields(t *testing.T) {
+	fake := &fakeOrdersClient{
+		intentsResp: &orderv1.QueryOrderIntentsResponse{Intents: []*orderv1.OrderIntentEntry{{
+			IntentId: "i-float-only", RequestedQty: 0.1, RequestedPrice: 0.2,
+		}}},
+		attemptsResp: &orderv1.QueryOrderAttemptsResponse{Attempts: []*orderv1.OrderAttemptEntry{{
+			AttemptId: "a-float-only", RequestedQty: 0.1, RequestedPrice: 0.2, MarkPrice: 0.3,
+		}}},
+		ordersResp: &orderv1.QueryOrdersResponse{Orders: []*orderv1.ExchangeOrderEntry{{
+			OrderId: "o-float-only", OrigQty: 0.1, ExecutedQty: 0.05, RemainingQty: 0.05, AvgPrice: 0.2, Price: 0.2,
+		}}},
+		fillsResp: &orderv1.QueryOrderFillsResponse{Fills: []*orderv1.OrderFillEntry{{
+			FillId: "f-float-only", Qty: 0.1, FillPrice: 0.2, Fee: 0.001,
+		}}},
 	}
+	s := newOrderHistoryServer(fake)
+
+	cases := []struct {
+		name   string
+		path   string
+		call   func(http.ResponseWriter, *http.Request)
+		fields []string
+	}{
+		{name: "intent", path: "/api/orders/intents", call: s.handleOrderIntents, fields: []string{"requested_qty_decimal", "requested_price_decimal"}},
+		{name: "session intent", path: "/api/sessions/sess-float-only/intents", call: func(w http.ResponseWriter, r *http.Request) { s.getSessionIntents(w, r, "sess-float-only") }, fields: []string{"requested_qty_decimal", "requested_price_decimal"}},
+		{name: "attempt", path: "/api/orders/attempts", call: s.handleOrderAttempts, fields: []string{"requested_qty_decimal", "requested_price_decimal", "mark_price_decimal"}},
+		{name: "session attempt", path: "/api/sessions/sess-float-only/attempts", call: func(w http.ResponseWriter, r *http.Request) { s.getSessionAttempts(w, r, "sess-float-only") }, fields: []string{"requested_qty_decimal", "requested_price_decimal", "mark_price_decimal"}},
+		{name: "order", path: "/api/orders", call: s.handleOrderHistory, fields: []string{"orig_qty_decimal", "executed_qty_decimal", "remaining_qty_decimal", "avg_price_decimal", "price_decimal", "cumulative_quote_qty_decimal"}},
+		{name: "session order", path: "/api/sessions/sess-float-only/orders", call: func(w http.ResponseWriter, r *http.Request) { s.getSessionOrders(w, r, "sess-float-only") }, fields: []string{"orig_qty_decimal", "executed_qty_decimal", "remaining_qty_decimal", "avg_price_decimal", "price_decimal", "cumulative_quote_qty_decimal"}},
+		{name: "fill", path: "/api/orders/fills", call: s.handleOrderFills, fields: []string{"qty_decimal", "fill_price_decimal", "fee_decimal", "quote_qty_decimal"}},
+		{name: "session fill", path: "/api/sessions/sess-float-only/fills", call: func(w http.ResponseWriter, r *http.Request) { s.getSessionFills(w, r, "sess-float-only") }, fields: []string{"qty_decimal", "fill_price_decimal", "fee_decimal", "quote_qty_decimal"}},
+	}
+
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			req := withOrderUID(httptest.NewRequest(http.MethodGet, tc.path, nil), 7)
@@ -157,88 +163,32 @@ func TestLegacyFillQuoteFallbackUsesDecimalMultiplication(t *testing.T) {
 				t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 			}
 			var body struct {
-				Items []struct {
-					QuoteQtyDecimal string `json:"quote_qty_decimal"`
-				} `json:"items"`
+				Items []map[string]any `json:"items"`
 			}
 			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 				t.Fatal(err)
 			}
-			if len(body.Items) != 1 || body.Items[0].QuoteQtyDecimal != "0.02" {
-				t.Fatalf("quote fallback=%#v body=%s", body.Items, rec.Body.String())
+			if len(body.Items) != 1 {
+				t.Fatalf("items=%#v", body.Items)
 			}
+			assertNoSynthesizedExactValues(t, body.Items[0], tc.fields)
 		})
 	}
 
-	delta := fillDeltaToJSON(&orderv1.FillDeltaEntry{Qty: 0.1, FillPrice: 0.2})
-	if got := delta["quote_qty_decimal"]; got != "0.02" {
-		t.Fatalf("lifecycle quote fallback=%#v", got)
-	}
+	assertNoSynthesizedExactValues(t, fillDeltaToJSON(&orderv1.FillDeltaEntry{
+		Qty: 0.1, FillPrice: 0.2, Fee: 0.001,
+	}), []string{"qty_decimal", "fill_price_decimal", "fee_decimal", "quote_qty_decimal"})
+	assertNoSynthesizedExactValues(t, orderStateToJSON(&orderv1.OrderStateEntry{
+		OrigQty: 0.1, ExecutedQty: 0.05, RemainingQty: 0.05, AvgPrice: 0.2,
+	}), []string{"orig_qty_decimal", "executed_qty_decimal", "remaining_qty_decimal", "avg_price_decimal", "price_decimal", "cumulative_quote_qty_decimal"})
 }
 
-func TestLegacyOrderCumulativeQuoteFallbackUsesDecimalMultiplication(t *testing.T) {
-	fake := &fakeOrdersClient{ordersResp: &orderv1.QueryOrdersResponse{
-		Orders: []*orderv1.ExchangeOrderEntry{{OrderId: "order-legacy", ExecutedQty: 0.1, AvgPrice: 0.2}},
-		Total:  1,
-	}}
-	s := newOrderHistoryServer(fake)
-	cases := []struct {
-		name string
-		path string
-		call func(http.ResponseWriter, *http.Request)
-	}{
-		{name: "global", path: "/api/orders", call: s.handleOrderHistory},
-		{name: "session", path: "/api/sessions/sess-legacy/orders", call: func(w http.ResponseWriter, r *http.Request) { s.getSessionOrders(w, r, "sess-legacy") }},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			req := withOrderUID(httptest.NewRequest(http.MethodGet, tc.path, nil), 7)
-			rec := httptest.NewRecorder()
-			tc.call(rec, req)
-			var body struct {
-				Items []struct {
-					CumulativeQuoteQtyDecimal string `json:"cumulative_quote_qty_decimal"`
-				} `json:"items"`
-			}
-			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-				t.Fatal(err)
-			}
-			if len(body.Items) != 1 || body.Items[0].CumulativeQuoteQtyDecimal != "0.02" {
-				t.Fatalf("cumulative quote fallback=%#v body=%s", body.Items, rec.Body.String())
-			}
-		})
-	}
-
-	state := orderStateToJSON(&orderv1.OrderStateEntry{ExecutedQty: 0.1, AvgPrice: 0.2})
-	if got := state["cumulative_quote_qty_decimal"]; got != "0.02" {
-		t.Fatalf("lifecycle cumulative quote fallback=%#v", got)
-	}
-}
-
-func TestMissingQuoteUsesExactQuantityAndPriceOperandsBeforeLegacyDoubles(t *testing.T) {
-	fake := &fakeOrdersClient{fillsResp: &orderv1.QueryOrderFillsResponse{
-		Fills: []*orderv1.OrderFillEntry{{
-			FillId: "fill-exact-operands", Qty: 9007199254740992, FillPrice: 0.00000001,
-			QtyDecimal: "9007199254740993.00000000", FillPriceDecimal: "0.00000001",
-		}},
-		Total: 1,
-	}}
-	s := newOrderHistoryServer(fake)
-	req := withOrderUID(httptest.NewRequest(http.MethodGet, "/api/orders/fills", nil), 7)
-	rec := httptest.NewRecorder()
-
-	s.handleOrderFills(rec, req)
-
-	var body struct {
-		Items []struct {
-			QuoteQtyDecimal string `json:"quote_qty_decimal"`
-		} `json:"items"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatal(err)
-	}
-	if len(body.Items) != 1 || body.Items[0].QuoteQtyDecimal != "90071992.54740993" {
-		t.Fatalf("exact-operand quote=%#v body=%s", body.Items, rec.Body.String())
+func assertNoSynthesizedExactValues(t *testing.T, item map[string]any, fields []string) {
+	t.Helper()
+	for _, field := range fields {
+		if value, exists := item[field]; exists && value != "" {
+			t.Errorf("%s was synthesized from a float fallback: %#v", field, value)
+		}
 	}
 }
 
@@ -498,7 +448,7 @@ func TestOrderHistoryPreservesExactDecimalFieldsAndFeeAsset(t *testing.T) {
 	}
 	s := newOrderHistoryServer(fake)
 
-	assert := func(path string, handler func(http.ResponseWriter, *http.Request), want map[string]string) {
+	assert := func(path string, handler func(http.ResponseWriter, *http.Request), want map[string]string, forbidden []string) {
 		t.Helper()
 		req := withOrderUID(httptest.NewRequest(http.MethodGet, path, nil), 7)
 		rec := httptest.NewRecorder()
@@ -520,6 +470,11 @@ func TestOrderHistoryPreservesExactDecimalFieldsAndFeeAsset(t *testing.T) {
 				t.Errorf("%s %s=%#v want exact string %q", path, field, got, value)
 			}
 		}
+		for _, field := range forbidden {
+			if value, exists := body.Items[0][field]; exists {
+				t.Errorf("%s still exposes parallel float field %s=%#v", path, field, value)
+			}
+		}
 		if got := body.Items[0]["environment"]; got != float64(1) {
 			t.Errorf("%s environment=%#v want=1", path, got)
 		}
@@ -527,26 +482,67 @@ func TestOrderHistoryPreservesExactDecimalFieldsAndFeeAsset(t *testing.T) {
 
 	assert("/api/orders/intents", s.handleOrderIntents, map[string]string{
 		"requested_qty_decimal": "9007199254740993.00000000", "requested_price_decimal": requestedPrice,
-	})
+	}, []string{"requested_qty", "requested_price"})
+	assert("/api/sessions/sess-exact/intents", func(w http.ResponseWriter, r *http.Request) { s.getSessionIntents(w, r, "sess-exact") }, map[string]string{
+		"requested_qty_decimal": "9007199254740993.00000000", "requested_price_decimal": requestedPrice,
+	}, []string{"requested_qty", "requested_price"})
 	assert("/api/orders/attempts", s.handleOrderAttempts, map[string]string{
 		"requested_qty_decimal": "9007199254740993.00000000", "requested_price_decimal": requestedPrice, "mark_price_decimal": "50000.00000001",
-	})
+	}, []string{"requested_qty", "requested_price", "mark_price"})
+	assert("/api/sessions/sess-exact/attempts", func(w http.ResponseWriter, r *http.Request) { s.getSessionAttempts(w, r, "sess-exact") }, map[string]string{
+		"requested_qty_decimal": "9007199254740993.00000000", "requested_price_decimal": requestedPrice, "mark_price_decimal": "50000.00000001",
+	}, []string{"requested_qty", "requested_price", "mark_price"})
 	assert("/api/orders", s.handleOrderHistory, map[string]string{
 		"orig_qty_decimal": "9007199254740993.00000000", "executed_qty_decimal": "0.00000001", "remaining_qty_decimal": "0.09999999",
 		"avg_price_decimal": "50000.00000001", "price_decimal": orderPrice, "cumulative_quote_qty_decimal": "123456789.00000001",
-	})
+	}, []string{"orig_qty", "executed_qty", "remaining_qty", "avg_price", "price"})
+	assert("/api/sessions/sess-exact/orders", func(w http.ResponseWriter, r *http.Request) { s.getSessionOrders(w, r, "sess-exact") }, map[string]string{
+		"orig_qty_decimal": "9007199254740993.00000000", "executed_qty_decimal": "0.00000001", "remaining_qty_decimal": "0.09999999",
+		"avg_price_decimal": "50000.00000001", "price_decimal": orderPrice, "cumulative_quote_qty_decimal": "123456789.00000001",
+	}, []string{"orig_qty", "executed_qty", "remaining_qty", "avg_price", "price"})
 	assert("/api/orders/fills", s.handleOrderFills, map[string]string{
 		"qty_decimal": "0.00000001", "fill_price_decimal": "50000.00000001", "fee_decimal": "0.00100000",
 		"quote_qty_decimal": "0.00050000", "fee_asset": "BNB",
-	})
-}
+	}, []string{"qty", "fill_price", "fee"})
+	assert("/api/sessions/sess-exact/fills", func(w http.ResponseWriter, r *http.Request) { s.getSessionFills(w, r, "sess-exact") }, map[string]string{
+		"qty_decimal": "0.00000001", "fill_price_decimal": "50000.00000001", "fee_decimal": "0.00100000",
+		"quote_qty_decimal": "0.00050000", "fee_asset": "BNB",
+	}, []string{"qty", "fill_price", "fee"})
 
-func TestExactDecimalFallbackNeverReformatsPresentExactValue(t *testing.T) {
-	if got := exactDecimalOrLegacy("9007199254740993.00000000", 9007199254740992); got != "9007199254740993.00000000" {
-		t.Fatalf("present exact value was reformatted: %q", got)
+	delta := fillDeltaToJSON(&orderv1.FillDeltaEntry{
+		Qty: 0.00000001, FillPrice: 50000, Fee: 0.001,
+		QtyDecimal: "0.00000001", FillPriceDecimal: "50000.00000001", FeeDecimal: "0.00100000", QuoteQtyDecimal: "0.00050000",
+	})
+	for field, want := range map[string]string{
+		"qty_decimal": "0.00000001", "fill_price_decimal": "50000.00000001", "fee_decimal": "0.00100000", "quote_qty_decimal": "0.00050000",
+	} {
+		if got := delta[field]; got != want {
+			t.Errorf("lifecycle fill %s=%#v want=%q", field, got, want)
+		}
 	}
-	if got := exactDecimalOrLegacy("", 0.00000001); got != "0.00000001" {
-		t.Fatalf("legacy fallback=%q want=0.00000001", got)
+	for _, field := range []string{"qty", "fill_price", "fee"} {
+		if value, exists := delta[field]; exists {
+			t.Errorf("lifecycle fill still exposes parallel float field %s=%#v", field, value)
+		}
+	}
+
+	state := orderStateToJSON(&orderv1.OrderStateEntry{
+		OrigQty: 9007199254740992, ExecutedQty: 0.00000001, RemainingQty: 0.1, AvgPrice: 50000,
+		OrigQtyDecimal: "9007199254740993.00000000", ExecutedQtyDecimal: "0.00000001", RemainingQtyDecimal: "0.09999999",
+		AvgPriceDecimal: "50000.00000001", PriceDecimal: &orderPrice, CumulativeQuoteQtyDecimal: "123456789.00000001",
+	})
+	for field, want := range map[string]string{
+		"orig_qty_decimal": "9007199254740993.00000000", "executed_qty_decimal": "0.00000001", "remaining_qty_decimal": "0.09999999",
+		"avg_price_decimal": "50000.00000001", "price_decimal": orderPrice, "cumulative_quote_qty_decimal": "123456789.00000001",
+	} {
+		if got := state[field]; got != want {
+			t.Errorf("lifecycle state %s=%#v want=%q", field, got, want)
+		}
+	}
+	for _, field := range []string{"orig_qty", "executed_qty", "remaining_qty", "avg_price"} {
+		if value, exists := state[field]; exists {
+			t.Errorf("lifecycle state still exposes parallel float field %s=%#v", field, value)
+		}
 	}
 }
 

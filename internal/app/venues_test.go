@@ -266,6 +266,49 @@ func TestCreateBacktestSpotVenueForwardsOnlyCanonicalSpotWallet(t *testing.T) {
 	}
 }
 
+func TestCreateBacktestSpotVenueStrictlyRejectsLegacyWalletFields(t *testing.T) {
+	tests := []struct {
+		name string
+		spot string
+	}{
+		{
+			name: "wallet free",
+			spot: `{"free":"100","assets":[{"asset":"USDT","free":"100","locked":"0"}]}`,
+		},
+		{
+			name: "wallet locked",
+			spot: `{"locked":"1","assets":[{"asset":"USDT","free":"100","locked":"0"}]}`,
+		},
+		{
+			name: "asset symbol",
+			spot: `{"assets":[{"asset":"USDT","symbol":"USDT","free":"100","locked":"0"}]}`,
+		},
+		{
+			name: "asset qty",
+			spot: `{"assets":[{"asset":"USDT","qty":"100","free":"100","locked":"0"}]}`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := &fakeVenuePortfoliosClient{}
+			s := &server{portfolios: fake}
+			body := `{"exchange":"binance","market":"spot","environment":"backtest","spot":` + tc.spot + `}`
+			req := withUID(httptest.NewRequest(http.MethodPost, "/api/venues", strings.NewReader(body)), 42)
+			rec := httptest.NewRecorder()
+
+			s.handleVenues(rec, req)
+
+			if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "invalid JSON") {
+				t.Fatalf("legacy field was not rejected by strict JSON boundary: status=%d body=%s", rec.Code, rec.Body.String())
+			}
+			if fake.createReq != nil {
+				t.Fatalf("legacy field reached core-service: %+v", fake.createReq)
+			}
+		})
+	}
+}
+
 func TestCreateBacktestVenueRejectsWalletFromAnotherMarket(t *testing.T) {
 	tests := []struct {
 		name string
