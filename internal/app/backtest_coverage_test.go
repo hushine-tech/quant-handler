@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -424,27 +425,178 @@ func TestDownloadAndRunJobRejectsSuccessfulRunWithoutSessionID(t *testing.T) {
 	}
 }
 
+func TestCreateMissingCoverageRequestsRequiresFundingForCompleteFuturesKlines(t *testing.T) {
+	start := time.UnixMilli(1779033600000).UTC()
+	mid := start.Add(30 * time.Minute)
+	end := start.Add(time.Hour)
+	fake := &fakeMarketDataClient{}
+	fake.coverageFn = func(req *mdv1.QueryMarketDataCoverageRequest) (*mdv1.QueryMarketDataCoverageResponse, error) {
+		if req.GetKey().GetKind() == "kline" {
+			return &mdv1.QueryMarketDataCoverageResponse{Key: req.GetKey(), Complete: true}, nil
+		}
+		return &mdv1.QueryMarketDataCoverageResponse{
+			Key: req.GetKey(), Complete: false,
+			MissingSegments: []*mdv1.MarketDataTimeRange{
+				{StartAt: timestamppb.New(start), EndAt: timestamppb.New(mid)},
+				{StartAt: timestamppb.New(mid), EndAt: timestamppb.New(end)},
+			},
+		}, nil
+	}
+	fake.createFn = func(req *mdv1.CreateMarketDataRequestRequest) (*mdv1.CreateMarketDataRequestResponse, error) {
+		id := int64(101)
+		if req.GetRequestedStartAt().AsTime().Equal(mid) {
+			id = 102
+		}
+		return &mdv1.CreateMarketDataRequestResponse{Request: &mdv1.MarketDataRequest{RequestId: id, Key: req.GetKey()}}, nil
+	}
+	s := &server{marketData: fake}
+	declared := []*strategyv1.LiveStreamBinding{
+		{Exchange: "binance", Market: "perpetual_futures", Kind: "kline", Symbol: "BTCUSDT", Interval: "1m"},
+		{Exchange: "binance", Market: "perpetual_futures", Kind: "kline", Symbol: "BTCUSDT", Interval: "1m"},
+	}
+	ids, err := s.createMissingCoverageRequests(context.Background(), 6, 7, declared, downloadAndRunRequest{
+		StartTimeMS: start.UnixMilli(), EndTimeMS: end.UnixMilli(),
+	})
+	if err != nil {
+		t.Fatalf("createMissingCoverageRequests: %v", err)
+	}
+	if len(ids) != 2 || len(fake.createCalls) != 2 {
+		t.Fatalf("Funding request IDs/calls = %v/%d, want two missing ranges without duplicate-input copies", ids, len(fake.createCalls))
+	}
+	for i, call := range fake.createCalls {
+		if call.GetUserId() != 6 || call.GetPortfolioId() != 7 || call.GetKey().GetKind() != "funding_rate" ||
+			call.GetKey().GetMarket() != "futures" || call.GetKey().GetSymbol() != "BTCUSDT" || call.GetKey().GetInterval() != "" ||
+			!call.GetRequestedStartAt().AsTime().Equal([]time.Time{start, mid}[i]) || !call.GetRequestedEndAt().AsTime().Equal([]time.Time{mid, end}[i]) {
+			t.Fatalf("Funding missing-range request %d = %#v", i, call)
+		}
+	}
+	if len(fake.coverageCalls) != 2 || fake.coverageCalls[0].GetKey().GetKind() != "kline" || fake.coverageCalls[1].GetKey().GetKind() != "funding_rate" {
+		t.Fatalf("coverage requirements = %#v, want deduplicated Kline then Funding", fake.coverageCalls)
+	}
+	retryIDs, err := s.createMissingCoverageRequests(context.Background(), 6, 7, declared, downloadAndRunRequest{
+		StartTimeMS: start.UnixMilli(), EndTimeMS: end.UnixMilli(),
+	})
+	if err != nil {
+		t.Fatalf("retry createMissingCoverageRequests: %v", err)
+	}
+	if len(retryIDs) != 2 || len(fake.createCalls) != 4 {
+		t.Fatalf("idempotent Funding retry IDs/calls = %v/%d, want the same two request IDs across an exact retry", retryIDs, len(fake.createCalls))
+	}
+	for id := range ids {
+		if _, ok := retryIDs[id]; !ok {
+			t.Fatalf("Funding retry IDs = %v, want original ID %d", retryIDs, id)
+		}
+	}
+}
+
+func TestCreateMissingCoverageRequestsCoversEveryFuturesSymbolAndOmitsSpotFunding(t *testing.T) {
+	start := time.UnixMilli(1779033600000).UTC()
+	end := start.Add(time.Hour)
+	fake := &fakeMarketDataClient{}
+	fake.coverageFn = func(req *mdv1.QueryMarketDataCoverageRequest) (*mdv1.QueryMarketDataCoverageResponse, error) {
+		if req.GetKey().GetKind() == "funding_rate" {
+			return &mdv1.QueryMarketDataCoverageResponse{Key: req.GetKey(), MissingSegments: []*mdv1.MarketDataTimeRange{{StartAt: timestamppb.New(start), EndAt: timestamppb.New(end)}}}, nil
+		}
+		return &mdv1.QueryMarketDataCoverageResponse{Key: req.GetKey(), Complete: true}, nil
+	}
+	fake.createFn = func(req *mdv1.CreateMarketDataRequestRequest) (*mdv1.CreateMarketDataRequestResponse, error) {
+		id := int64(201)
+		if req.GetKey().GetSymbol() == "ETHUSDT" {
+			id = 202
+		}
+		return &mdv1.CreateMarketDataRequestResponse{Request: &mdv1.MarketDataRequest{RequestId: id, Key: req.GetKey()}}, nil
+	}
+	declared := []*strategyv1.LiveStreamBinding{
+		{Exchange: "binance", Market: "perpetual_futures", Kind: "kline", Symbol: "BTCUSDT", Interval: "1m"},
+		{Exchange: "okx", Market: "perpetual_futures", Kind: "kline", Symbol: "ETHUSDT", Interval: "1m"},
+		{Exchange: "binance", Market: "spot", Kind: "kline", Symbol: "SOLUSDT", Interval: "1m"},
+	}
+	ids, err := (&server{marketData: fake}).createMissingCoverageRequests(context.Background(), 6, 7, declared, downloadAndRunRequest{StartTimeMS: start.UnixMilli(), EndTimeMS: end.UnixMilli()})
+	if err != nil {
+		t.Fatalf("createMissingCoverageRequests: %v", err)
+	}
+	if len(ids) != 2 || len(fake.createCalls) != 2 {
+		t.Fatalf("multi-symbol Funding IDs/calls = %v/%d, want BTC and ETH", ids, len(fake.createCalls))
+	}
+	for _, call := range fake.createCalls {
+		if call.GetKey().GetKind() != "funding_rate" || call.GetKey().GetMarket() != "futures" || call.GetKey().GetSymbol() == "SOLUSDT" {
+			t.Fatalf("unexpected Funding request = %#v", call)
+		}
+	}
+}
+
+func TestValidateDeclaredCoverageWaitsForFullWindowFundingCoverage(t *testing.T) {
+	start := time.UnixMilli(1779033600000).UTC()
+	end := start.Add(time.Hour)
+	fundingComplete := false
+	fake := &fakeMarketDataClient{
+		validateFn: func(req *mdv1.ValidateMarketDataCoverageRequest) (*mdv1.ValidateMarketDataCoverageResponse, error) {
+			return &mdv1.ValidateMarketDataCoverageResponse{Key: req.GetKey(), Ok: true}, nil
+		},
+		coverageFn: func(req *mdv1.QueryMarketDataCoverageRequest) (*mdv1.QueryMarketDataCoverageResponse, error) {
+			return &mdv1.QueryMarketDataCoverageResponse{Key: req.GetKey(), Complete: fundingComplete}, nil
+		},
+	}
+	declared := []*strategyv1.LiveStreamBinding{{Exchange: "binance", Market: "perpetual_futures", Kind: "kline", Symbol: "BTCUSDT", Interval: "1m"}}
+	s := &server{marketData: fake}
+	ok, err := s.validateDeclaredCoverage(context.Background(), declared, downloadAndRunRequest{StartTimeMS: start.UnixMilli(), EndTimeMS: end.UnixMilli()})
+	if err != nil || ok {
+		t.Fatalf("validation with missing Funding = %v/%v, want false/nil", ok, err)
+	}
+	if len(fake.coverageCalls) != 1 || fake.coverageCalls[0].GetKey().GetKind() != "funding_rate" || fake.coverageCalls[0].GetKey().GetInterval() != "" ||
+		!fake.coverageCalls[0].GetStartAt().AsTime().Equal(start) || !fake.coverageCalls[0].GetEndAt().AsTime().Equal(end) {
+		t.Fatalf("Funding validation query = %#v, want exact full window", fake.coverageCalls)
+	}
+	fundingComplete = true
+	ok, err = s.validateDeclaredCoverage(context.Background(), declared, downloadAndRunRequest{StartTimeMS: start.UnixMilli(), EndTimeMS: end.UnixMilli()})
+	if err != nil || !ok {
+		t.Fatalf("validation with complete Kline/Funding = %v/%v, want true/nil", ok, err)
+	}
+}
+
+func TestDownloadAndRunJobTracksFundingRequestError(t *testing.T) {
+	start := time.UnixMilli(1779033600000).UTC()
+	end := start.Add(time.Hour)
+	fundingKey := &mdv1.StreamKey{Exchange: "binance", Market: "futures", Kind: "funding_rate", Symbol: "BTCUSDT"}
+	fake := &fakeMarketDataClient{
+		coverageFn: func(req *mdv1.QueryMarketDataCoverageRequest) (*mdv1.QueryMarketDataCoverageResponse, error) {
+			if req.GetKey().GetKind() == "kline" {
+				return &mdv1.QueryMarketDataCoverageResponse{Key: req.GetKey(), Complete: true}, nil
+			}
+			return &mdv1.QueryMarketDataCoverageResponse{Key: req.GetKey(), MissingSegments: []*mdv1.MarketDataTimeRange{{StartAt: timestamppb.New(start), EndAt: timestamppb.New(end)}}}, nil
+		},
+		createResp:   &mdv1.CreateMarketDataRequestResponse{Request: &mdv1.MarketDataRequest{RequestId: 88, Key: fundingKey}},
+		validateResp: &mdv1.ValidateMarketDataCoverageResponse{Ok: true},
+		listResp: &mdv1.ListMarketDataRequestsResponse{Entries: []*mdv1.MarketDataRequestWithStream{{Request: &mdv1.MarketDataRequest{
+			RequestId: 88, UserId: 6, Scope: "historical", Status: "error", Key: fundingKey, LastError: "Funding storage failed",
+		}}}},
+	}
+	store := newDownloadRunJobStore()
+	job := store.create()
+	proxy := &fakeControlPanelStrategyProxy{previewResp: &strategyv1.PreviewRunStrategyResponse{
+		Profile: "backtest", Supported: true, Ok: true,
+		DeclaredInputs: []*strategyv1.LiveStreamBinding{{Exchange: "binance", Market: "perpetual_futures", Kind: "kline", Symbol: "BTCUSDT", Interval: "1m"}},
+	}}
+	s := &server{marketData: fake, downloadRunJobs: store}
+	s.runDownloadAndRunJob(context.Background(), job.JobID, proxy, 6, 7, "rt-download", downloadAndRunRequest{RuntimeID: "rt-download", StartTimeMS: start.UnixMilli(), EndTimeMS: end.UnixMilli(), Interval: "1m"})
+	got, _ := store.get(job.JobID)
+	if got.Status != downloadRunError || !strings.Contains(got.Error, "historical request 88 error: Funding storage failed") || len(got.Requests) != 1 || got.Requests[0].RequestID != 88 {
+		t.Fatalf("Funding request error job = %+v", got)
+	}
+	if proxy.runRequest() != nil {
+		t.Fatal("Backtest started before Funding coverage completed")
+	}
+}
+
 func TestDownloadAndRunJobStatusSurfacesHistoricalRequestState(t *testing.T) {
 	start := time.UnixMilli(1779033600000).UTC()
 	end := time.UnixMilli(1779037200000).UTC()
 	key := &mdv1.StreamKey{Exchange: "binance", Market: "futures", Kind: "kline", Symbol: "ETHUSDT", Interval: "1m"}
+	fundingKey := &mdv1.StreamKey{Exchange: "binance", Market: "futures", Kind: "funding_rate", Symbol: "ETHUSDT"}
 	fakeMarket := &fakeMarketDataClient{
-		createResp: &mdv1.CreateMarketDataRequestResponse{
-			Request: &mdv1.MarketDataRequest{
-				RequestId:        77,
-				UserId:           6,
-				Scope:            "historical",
-				Status:           "pending",
-				Key:              key,
-				RequestedStartAt: timestamppb.New(start),
-				RequestedEndAt:   timestamppb.New(end),
-				CreatedAt:        timestamppb.New(start),
-				UpdatedAt:        timestamppb.New(start),
-			},
-		},
 		listResp: &mdv1.ListMarketDataRequestsResponse{
-			Entries: []*mdv1.MarketDataRequestWithStream{{
-				Request: &mdv1.MarketDataRequest{
+			Entries: []*mdv1.MarketDataRequestWithStream{
+				{Request: &mdv1.MarketDataRequest{
 					RequestId:        77,
 					UserId:           6,
 					Scope:            "historical",
@@ -454,14 +606,46 @@ func TestDownloadAndRunJobStatusSurfacesHistoricalRequestState(t *testing.T) {
 					RequestedEndAt:   timestamppb.New(end),
 					CreatedAt:        timestamppb.New(start),
 					UpdatedAt:        timestamppb.New(start.Add(10 * time.Second)),
-				},
-			}},
+				}},
+				{Request: &mdv1.MarketDataRequest{
+					RequestId:        78,
+					UserId:           6,
+					Scope:            "historical",
+					Status:           "running",
+					Key:              fundingKey,
+					RequestedStartAt: timestamppb.New(start),
+					RequestedEndAt:   timestamppb.New(end),
+					CreatedAt:        timestamppb.New(start),
+					UpdatedAt:        timestamppb.New(start.Add(10 * time.Second)),
+				}},
+			},
 		},
 		listCalled: make(chan struct{}, 1),
 		validateResponses: []*mdv1.ValidateMarketDataCoverageResponse{
 			{Ok: false, Key: key, RequestedStartAt: timestamppb.New(start), RequestedEndAt: timestamppb.New(end)},
 			{Ok: true, Key: key, RequestedStartAt: timestamppb.New(start), RequestedEndAt: timestamppb.New(end)},
 		},
+	}
+	fundingCoverageCalls := 0
+	fakeMarket.coverageFn = func(req *mdv1.QueryMarketDataCoverageRequest) (*mdv1.QueryMarketDataCoverageResponse, error) {
+		if req.GetKey().GetKind() == "funding_rate" {
+			fundingCoverageCalls++
+			if fundingCoverageCalls > 1 {
+				return &mdv1.QueryMarketDataCoverageResponse{Key: req.GetKey(), Complete: true}, nil
+			}
+		}
+		return &mdv1.QueryMarketDataCoverageResponse{Key: req.GetKey(), MissingSegments: []*mdv1.MarketDataTimeRange{{StartAt: timestamppb.New(start), EndAt: timestamppb.New(end)}}}, nil
+	}
+	fakeMarket.createFn = func(req *mdv1.CreateMarketDataRequestRequest) (*mdv1.CreateMarketDataRequestResponse, error) {
+		id := int64(77)
+		if req.GetKey().GetKind() == "funding_rate" {
+			id = 78
+		}
+		return &mdv1.CreateMarketDataRequestResponse{Request: &mdv1.MarketDataRequest{
+			RequestId: id, UserId: 6, Scope: "historical", Status: "pending", Key: req.GetKey(),
+			RequestedStartAt: req.GetRequestedStartAt(), RequestedEndAt: req.GetRequestedEndAt(),
+			CreatedAt: timestamppb.New(start), UpdatedAt: timestamppb.New(start),
+		}}, nil
 	}
 	proxy := &fakeControlPanelStrategyProxy{previewResp: &strategyv1.PreviewRunStrategyResponse{
 		Profile:   "backtest",
@@ -504,7 +688,7 @@ func TestDownloadAndRunJobStatusSurfacesHistoricalRequestState(t *testing.T) {
 	requestStateDeadline := time.Now().Add(time.Second)
 	for {
 		job, ok := s.downloadRunJobs.get(created.JobID)
-		if ok && len(job.Requests) == 1 {
+		if ok && len(job.Requests) == 2 {
 			break
 		}
 		if time.Now().After(requestStateDeadline) {
@@ -527,12 +711,16 @@ func TestDownloadAndRunJobStatusSurfacesHistoricalRequestState(t *testing.T) {
 		t.Fatalf("job status should include a live progress message, body=%s", statusRec.Body.String())
 	}
 	requests, ok := statusBody["requests"].([]any)
-	if !ok || len(requests) != 1 {
+	if !ok || len(requests) != 2 {
 		t.Fatalf("job status should expose historical request details, body=%s", statusRec.Body.String())
 	}
 	first, _ := requests[0].(map[string]any)
 	if first["status"] != "running" || first["request_id"].(float64) != 77 {
 		t.Fatalf("request status = %#v, want request_id=77 status=running", first)
+	}
+	second, _ := requests[1].(map[string]any)
+	if second["status"] != "running" || second["request_id"].(float64) != 78 || second["key"].(map[string]any)["kind"] != "funding_rate" {
+		t.Fatalf("Funding request status = %#v, want request_id=78 kind=funding_rate status=running", second)
 	}
 
 	deadline := time.Now().Add(3 * time.Second)

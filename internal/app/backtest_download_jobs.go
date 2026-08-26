@@ -348,15 +348,14 @@ func preflightFailuresToJSON(failures []*strategyv1.PreflightFailureProto) []pre
 
 func (s *server) createMissingCoverageRequests(ctx context.Context, uid int64, portfolioID int64, declared []*strategyv1.LiveStreamBinding, body downloadAndRunRequest) (map[int64]struct{}, error) {
 	requestIDs := make(map[int64]struct{})
-	for _, binding := range declared {
-		key := marketDataKeyFromLiveBinding(binding)
+	for _, key := range backtestCoverageRequirements(declared) {
 		coverage, err := s.marketData.QueryMarketDataCoverage(ctx, &mdv1.QueryMarketDataCoverageRequest{
 			Key:     key,
 			StartAt: timestamppb.New(time.UnixMilli(body.StartTimeMS).UTC()),
 			EndAt:   timestamppb.New(time.UnixMilli(body.EndTimeMS).UTC()),
 		})
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("query %s coverage for %s %s: %w", key.GetKind(), key.GetMarket(), key.GetSymbol(), err)
 		}
 		if coverage.GetNonDownloadableReason() != "" {
 			return nil, fmt.Errorf("%s %s %s is not downloadable: %s", key.GetMarket(), key.GetSymbol(), key.GetInterval(), coverage.GetNonDownloadableReason())
@@ -372,11 +371,13 @@ func (s *server) createMissingCoverageRequests(ctx context.Context, uid int64, p
 				RequestedEndAt:    missing.GetEndAt(),
 			})
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("create %s historical request for %s %s: %w", key.GetKind(), key.GetMarket(), key.GetSymbol(), err)
 			}
-			if id := resp.GetRequest().GetRequestId(); id > 0 {
-				requestIDs[id] = struct{}{}
+			id := resp.GetRequest().GetRequestId()
+			if id <= 0 {
+				return nil, fmt.Errorf("create %s historical request for %s %s returned no request ID", key.GetKind(), key.GetMarket(), key.GetSymbol())
 			}
+			requestIDs[id] = struct{}{}
 		}
 	}
 	return requestIDs, nil
@@ -521,8 +522,21 @@ func messageFromHistoricalRequests(requests []marketDataRequestJSON) string {
 }
 
 func (s *server) validateDeclaredCoverage(ctx context.Context, declared []*strategyv1.LiveStreamBinding, body downloadAndRunRequest) (bool, error) {
-	for _, binding := range declared {
-		key := marketDataKeyFromLiveBinding(binding)
+	for _, key := range backtestCoverageRequirements(declared) {
+		if key.GetKind() == "funding_rate" {
+			resp, err := s.marketData.QueryMarketDataCoverage(ctx, &mdv1.QueryMarketDataCoverageRequest{
+				Key:     key,
+				StartAt: timestamppb.New(time.UnixMilli(body.StartTimeMS).UTC()),
+				EndAt:   timestamppb.New(time.UnixMilli(body.EndTimeMS).UTC()),
+			})
+			if err != nil {
+				return false, fmt.Errorf("validate Funding coverage for %s %s: %w", key.GetMarket(), key.GetSymbol(), err)
+			}
+			if !resp.GetComplete() {
+				return false, nil
+			}
+			continue
+		}
 		resp, err := s.marketData.ValidateMarketDataCoverage(ctx, &mdv1.ValidateMarketDataCoverageRequest{
 			Key:     key,
 			StartAt: timestamppb.New(time.UnixMilli(body.StartTimeMS).UTC()),
@@ -536,4 +550,34 @@ func (s *server) validateDeclaredCoverage(ctx context.Context, declared []*strat
 		}
 	}
 	return true, nil
+}
+
+func backtestCoverageRequirements(declared []*strategyv1.LiveStreamBinding) []*mdv1.StreamKey {
+	seen := make(map[string]struct{}, len(declared)*2)
+	requirements := make([]*mdv1.StreamKey, 0, len(declared)*2)
+	appendUnique := func(key *mdv1.StreamKey) {
+		key = &mdv1.StreamKey{
+			Exchange: strings.ToLower(strings.TrimSpace(key.GetExchange())),
+			Market:   strings.ToLower(strings.TrimSpace(key.GetMarket())),
+			Kind:     strings.ToLower(strings.TrimSpace(key.GetKind())),
+			Symbol:   strings.ToUpper(strings.TrimSpace(key.GetSymbol())),
+			Interval: strings.TrimSpace(key.GetInterval()),
+		}
+		identity := strings.Join([]string{key.GetExchange(), key.GetMarket(), key.GetKind(), key.GetSymbol(), key.GetInterval()}, "|")
+		if _, ok := seen[identity]; ok {
+			return
+		}
+		seen[identity] = struct{}{}
+		requirements = append(requirements, key)
+	}
+	for _, binding := range declared {
+		key := marketDataKeyFromLiveBinding(binding)
+		appendUnique(key)
+		if strings.EqualFold(strings.TrimSpace(key.GetMarket()), "futures") {
+			appendUnique(&mdv1.StreamKey{
+				Exchange: key.GetExchange(), Market: key.GetMarket(), Kind: "funding_rate", Symbol: key.GetSymbol(),
+			})
+		}
+	}
+	return requirements
 }
