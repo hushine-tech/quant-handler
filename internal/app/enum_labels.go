@@ -1,6 +1,10 @@
 package app
 
-import portfoliov1 "github.com/hushine-tech/core-service/gen/portfoliov1"
+import (
+	"fmt"
+
+	portfoliov1 "github.com/hushine-tech/core-service/gen/portfoliov1"
+)
 
 func portfolioEnvironmentFromBody(body createPortfolioBodyExt) int32 {
 	switch body.Environment {
@@ -35,13 +39,15 @@ func orderExchangeLabel(exchange int32) string {
 	}
 }
 
-func futuresPositionSideHTTPLabel(positionSide portfoliov1.FuturesPositionSide) string {
+func futuresPositionSideHTTPLabel(positionSide portfoliov1.FuturesPositionSide) (string, error) {
 	switch positionSide {
+	case portfoliov1.FuturesPositionSide_FUTURES_POSITION_SIDE_BOTH:
+		return "BOTH", nil
 	case portfoliov1.FuturesPositionSide_FUTURES_POSITION_SIDE_LONG:
-		return "LONG"
+		return "LONG", nil
 	case portfoliov1.FuturesPositionSide_FUTURES_POSITION_SIDE_SHORT:
-		return "SHORT"
+		return "SHORT", nil
 	default:
-		return "BOTH"
+		return "", fmt.Errorf("invalid futures position side %d", positionSide)
 	}
 }

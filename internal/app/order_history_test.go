@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -118,6 +119,102 @@ func TestMarketOrderHistoryOmitsAbsentOptionalPrices(t *testing.T) {
 	state := orderStateToJSON(&orderv1.OrderStateEntry{ExchangeOrderId: "market-state"})
 	if value, exists := state["price_decimal"]; exists {
 		t.Fatalf("absent lifecycle MARKET price_decimal leaked as %#v", value)
+	}
+}
+
+func TestOrderAndSessionHistoryFailClosedForInvalidFuturesPositionSide(t *testing.T) {
+	cases := []struct {
+		name string
+		call func(*server, http.ResponseWriter, *http.Request)
+	}{
+		{"global intents", func(s *server, w http.ResponseWriter, r *http.Request) { s.handleOrderIntents(w, r) }},
+		{"global orders", func(s *server, w http.ResponseWriter, r *http.Request) { s.handleOrderHistory(w, r) }},
+		{"global attempts", func(s *server, w http.ResponseWriter, r *http.Request) { s.handleOrderAttempts(w, r) }},
+		{"global fills", func(s *server, w http.ResponseWriter, r *http.Request) { s.handleOrderFills(w, r) }},
+		{"session intents", func(s *server, w http.ResponseWriter, r *http.Request) {
+			s.getSessionIntents(w, r, "sess-invalid-side")
+		}},
+		{"session orders", func(s *server, w http.ResponseWriter, r *http.Request) { s.getSessionOrders(w, r, "sess-invalid-side") }},
+		{"session attempts", func(s *server, w http.ResponseWriter, r *http.Request) {
+			s.getSessionAttempts(w, r, "sess-invalid-side")
+		}},
+		{"session fills", func(s *server, w http.ResponseWriter, r *http.Request) { s.getSessionFills(w, r, "sess-invalid-side") }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := &fakeOrdersClient{
+				intentsResp:  &orderv1.QueryOrderIntentsResponse{Intents: []*orderv1.OrderIntentEntry{{PositionSide: 99}}},
+				ordersResp:   &orderv1.QueryOrdersResponse{Orders: []*orderv1.ExchangeOrderEntry{{PositionSide: 99}}},
+				attemptsResp: &orderv1.QueryOrderAttemptsResponse{Attempts: []*orderv1.OrderAttemptEntry{{PositionSide: 99}}},
+				fillsResp:    &orderv1.QueryOrderFillsResponse{Fills: []*orderv1.OrderFillEntry{{PositionSide: 99}}},
+			}
+			s := newOrderHistoryServer(fake)
+			req := withOrderUID(httptest.NewRequest(http.MethodGet, "/api/orders", nil), 7)
+			rec := httptest.NewRecorder()
+
+			tc.call(s, rec, req)
+
+			if rec.Code != http.StatusInternalServerError {
+				t.Fatalf("status=%d, want 500; body=%s", rec.Code, rec.Body.String())
+			}
+			if !strings.Contains(rec.Body.String(), "invalid futures position side") {
+				t.Fatalf("error must be actionable: %s", rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestOrderAndSessionHistoryEmitCanonicalFuturesPositionSideStrings(t *testing.T) {
+	cases := []struct {
+		name string
+		call func(*server, http.ResponseWriter, *http.Request)
+	}{
+		{"global intents", func(s *server, w http.ResponseWriter, r *http.Request) { s.handleOrderIntents(w, r) }},
+		{"global orders", func(s *server, w http.ResponseWriter, r *http.Request) { s.handleOrderHistory(w, r) }},
+		{"global attempts", func(s *server, w http.ResponseWriter, r *http.Request) { s.handleOrderAttempts(w, r) }},
+		{"global fills", func(s *server, w http.ResponseWriter, r *http.Request) { s.handleOrderFills(w, r) }},
+		{"session intents", func(s *server, w http.ResponseWriter, r *http.Request) {
+			s.getSessionIntents(w, r, "sess-canonical-side")
+		}},
+		{"session orders", func(s *server, w http.ResponseWriter, r *http.Request) {
+			s.getSessionOrders(w, r, "sess-canonical-side")
+		}},
+		{"session attempts", func(s *server, w http.ResponseWriter, r *http.Request) {
+			s.getSessionAttempts(w, r, "sess-canonical-side")
+		}},
+		{"session fills", func(s *server, w http.ResponseWriter, r *http.Request) {
+			s.getSessionFills(w, r, "sess-canonical-side")
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := &fakeOrdersClient{
+				intentsResp:  &orderv1.QueryOrderIntentsResponse{Intents: []*orderv1.OrderIntentEntry{{PositionSide: 0}, {PositionSide: 1}, {PositionSide: 2}}},
+				ordersResp:   &orderv1.QueryOrdersResponse{Orders: []*orderv1.ExchangeOrderEntry{{PositionSide: 0}, {PositionSide: 1}, {PositionSide: 2}}},
+				attemptsResp: &orderv1.QueryOrderAttemptsResponse{Attempts: []*orderv1.OrderAttemptEntry{{PositionSide: 0}, {PositionSide: 1}, {PositionSide: 2}}},
+				fillsResp:    &orderv1.QueryOrderFillsResponse{Fills: []*orderv1.OrderFillEntry{{PositionSide: 0}, {PositionSide: 1}, {PositionSide: 2}}},
+			}
+			s := newOrderHistoryServer(fake)
+			req := withOrderUID(httptest.NewRequest(http.MethodGet, "/api/orders", nil), 7)
+			rec := httptest.NewRecorder()
+
+			tc.call(s, rec, req)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+			}
+			var body struct {
+				Items []struct {
+					PositionSide string `json:"position_side"`
+				} `json:"items"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+				t.Fatalf("decode response: %v; body=%s", err, rec.Body.String())
+			}
+			if got := body.Items; len(got) != 3 || got[0].PositionSide != "BOTH" || got[1].PositionSide != "LONG" || got[2].PositionSide != "SHORT" {
+				t.Fatalf("position sides=%#v body=%s", got, rec.Body.String())
+			}
+		})
 	}
 }
 

@@ -74,6 +74,26 @@ func TestBuildFuturesWalletRejectsNonCanonicalOrIllegalPositionSides(t *testing.
 			want:  "futures.positions[0].position_side must be BOTH, LONG, or SHORT",
 		},
 		{
+			name:  "padded side",
+			input: &futIn{PositionMode: "hedge", Positions: []futPosIn{{Symbol: "ETHUSDT", PositionSide: " LONG "}}},
+			want:  "futures.positions[0].position_side must be BOTH, LONG, or SHORT",
+		},
+		{
+			name:  "lowercase side",
+			input: &futIn{PositionMode: "hedge", Positions: []futPosIn{{Symbol: "ETHUSDT", PositionSide: "long"}}},
+			want:  "futures.positions[0].position_side must be BOTH, LONG, or SHORT",
+		},
+		{
+			name:  "numeric side",
+			input: &futIn{PositionMode: "hedge", Positions: []futPosIn{{Symbol: "ETHUSDT", PositionSide: "1"}}},
+			want:  "futures.positions[0].position_side must be BOTH, LONG, or SHORT",
+		},
+		{
+			name:  "empty side",
+			input: &futIn{PositionMode: "hedge", Positions: []futPosIn{{Symbol: "ETHUSDT", PositionSide: ""}}},
+			want:  "futures.positions[0].position_side must be BOTH, LONG, or SHORT",
+		},
+		{
 			name:  "one way long",
 			input: &futIn{PositionMode: "one_way", Positions: []futPosIn{{Symbol: "ETHUSDT", PositionSide: "LONG"}}},
 			want:  "futures.positions[0].position_side must be BOTH in one_way mode",
@@ -105,8 +125,18 @@ func TestFuturesPositionSideHTTPLabelUsesOnlyShortCanonicalStrings(t *testing.T)
 		{portfoliov1.FuturesPositionSide_FUTURES_POSITION_SIDE_SHORT, "SHORT"},
 	}
 	for _, tt := range tests {
-		if got := futuresPositionSideHTTPLabel(tt.side); got != tt.want {
+		got, err := futuresPositionSideHTTPLabel(tt.side)
+		if err != nil {
+			t.Fatalf("futuresPositionSideHTTPLabel(%v) error = %v", tt.side, err)
+		}
+		if got != tt.want {
 			t.Fatalf("futuresPositionSideHTTPLabel(%v) = %q, want %q", tt.side, got, tt.want)
 		}
+	}
+}
+
+func TestFuturesPositionSideHTTPLabelRejectsUnknownEnum(t *testing.T) {
+	if _, err := futuresPositionSideHTTPLabel(portfoliov1.FuturesPositionSide(99)); err == nil || !strings.Contains(err.Error(), "invalid futures position side") {
+		t.Fatalf("unknown enum error = %v", err)
 	}
 }

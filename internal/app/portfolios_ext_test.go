@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/hushine-tech/core-service/gen/portfoliov1"
@@ -546,7 +547,7 @@ func TestProtoSpotToJSONPreservesExactZeroAndOmitsMissingPrice(t *testing.T) {
 }
 
 func TestVenueSnapshotJSONExposesCanonicalSpotSymbolMetadata(t *testing.T) {
-	encoded, err := json.Marshal(venueSnapshotToJSON(&portfoliov1.VenueSnapshot{
+	response, err := venueSnapshotToJSON(&portfoliov1.VenueSnapshot{
 		VenueId: 88,
 		SpotSymbols: []*portfoliov1.SpotSymbolMetadata{{
 			Symbol: "BTCUSDT", BaseAsset: "BTC", QuoteAsset: "USDT", Status: "TRADING",
@@ -558,7 +559,11 @@ func TestVenueSnapshotJSONExposesCanonicalSpotSymbolMetadata(t *testing.T) {
 			}},
 			SnapshotTimeMs: 123456789,
 		}},
-	}))
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(response)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -602,6 +607,60 @@ func TestVenueSnapshotJSONExposesCanonicalSpotSymbolMetadata(t *testing.T) {
 	}
 }
 
+func TestVenueSnapshotJSONUsesCanonicalFuturesPositionSideStrings(t *testing.T) {
+	response, err := venueSnapshotToJSON(&portfoliov1.VenueSnapshot{
+		Positions: []*portfoliov1.PositionEntry{
+			{Symbol: "BTCUSDT", PositionSide: portfoliov1.FuturesPositionSide_FUTURES_POSITION_SIDE_BOTH},
+			{Symbol: "ETHUSDT", PositionSide: portfoliov1.FuturesPositionSide_FUTURES_POSITION_SIDE_LONG},
+			{Symbol: "SOLUSDT", PositionSide: portfoliov1.FuturesPositionSide_FUTURES_POSITION_SIDE_SHORT},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body struct {
+		Positions []struct {
+			Symbol       string `json:"symbol"`
+			PositionSide string `json:"position_side"`
+		} `json:"positions"`
+	}
+	if err := json.Unmarshal(encoded, &body); err != nil {
+		t.Fatal(err)
+	}
+	if got := body.Positions; len(got) != 3 || got[0].PositionSide != "BOTH" || got[1].PositionSide != "LONG" || got[2].PositionSide != "SHORT" {
+		t.Fatalf("position sides=%#v JSON=%s", got, encoded)
+	}
+}
+
+func TestPortfolioSnapshotFailsClosedForInvalidFuturesPositionSide(t *testing.T) {
+	fake := &fakePortfolioSnapshotClient{resp: &portfoliov1.GetPortfolioSnapshotResponse{Snapshot: &portfoliov1.PortfolioSnapshot{
+		PortfolioId: 42,
+		UserId:      7,
+		Wallet: &portfoliov1.PortfolioWalletState{Futures: &portfoliov1.FuturesWallet{Positions: []*portfoliov1.FuturesPosition{{
+			Symbol: "BTCUSDT", PositionSide: portfoliov1.FuturesPositionSide(99),
+		}}}},
+		Venues: []*portfoliov1.VenueSnapshot{{Positions: []*portfoliov1.PositionEntry{{
+			Symbol: "ETHUSDT", PositionSide: portfoliov1.FuturesPositionSide(99),
+		}}}},
+	}}}
+	s := &server{portfolios: fake, jwtSecret: []byte("secret"), corsOrigins: []string{"*"}}
+	req := withUID(httptest.NewRequest(http.MethodGet, "/api/portfolios/42/portfolio-snapshot", nil), 7)
+	rec := httptest.NewRecorder()
+
+	s.getPortfolioPortfolioSnapshot(rec, req, 42)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status=%d, want 500; body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "invalid futures position side") {
+		t.Fatalf("error must be actionable: %s", rec.Body.String())
+	}
+}
+
 func TestPortfolioSnapshotValuationDoesNotInventSpotSymbolWithoutMetadataMapping(t *testing.T) {
 	price := "50000"
 	wallet := &portfoliov1.PortfolioWalletState{
@@ -623,7 +682,10 @@ func TestPortfolioSnapshotValuationDoesNotInventSpotSymbolWithoutMetadataMapping
 		}},
 	}
 
-	body := portfolioSnapshotToJSON(snapshot)
+	body, err := portfolioSnapshotToJSON(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
 	items := body["items"].([]portfolioPortfolioSnapshotItemJSON)
 	display := items[0].Wallet["display"].(map[string]any)
 	if got := display["spot_estimated_value"]; got != float64(100) {
@@ -633,7 +695,10 @@ func TestPortfolioSnapshotValuationDoesNotInventSpotSymbolWithoutMetadataMapping
 	snapshot.Venues[0].SpotSymbols = []*portfoliov1.SpotSymbolMetadata{{
 		Symbol: "BTCUSDT", BaseAsset: "BTC", QuoteAsset: "USDT",
 	}}
-	body = portfolioSnapshotToJSON(snapshot)
+	body, err = portfolioSnapshotToJSON(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
 	items = body["items"].([]portfolioPortfolioSnapshotItemJSON)
 	display = items[0].Wallet["display"].(map[string]any)
 	if got := display["spot_estimated_value"]; got != float64(5100) {

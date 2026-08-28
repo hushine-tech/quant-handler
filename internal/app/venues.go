@@ -310,9 +310,14 @@ func (s *server) getVenueWallet(w http.ResponseWriter, r *http.Request, venueID 
 		writeErr(w, http.StatusNotFound, "no venue wallet")
 		return
 	}
+	walletJSON, err := portfolioWalletStateToJSON(wallet)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"venue":  venueToJSON(resp.GetVenue()),
-		"wallet": portfolioWalletStateToJSON(wallet),
+		"wallet": walletJSON,
 	})
 }
 

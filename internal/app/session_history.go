@@ -352,6 +352,11 @@ func (s *server) getSessionIntents(w http.ResponseWriter, r *http.Request, sessi
 	intents := resp.GetIntents()
 	out := make([]intentJSON, 0, len(intents))
 	for _, it := range intents {
+		positionSide, err := futuresPositionSideHTTPLabel(it.GetPositionSide())
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 		out = append(out, intentJSON{
 			Time:                  protoTime(it.GetTime()),
 			IntentID:              it.GetIntentId(),
@@ -368,7 +373,7 @@ func (s *server) getSessionIntents(w http.ResponseWriter, r *http.Request, sessi
 			VenueID:               it.GetVenueId(),
 			Exchange:              it.GetExchange(),
 			ExchangeLabel:         orderExchangeLabel(it.GetExchange()),
-			PositionSide:          futuresPositionSideHTTPLabel(it.GetPositionSide()),
+			PositionSide:          positionSide,
 			SessionID:             it.GetSessionId(),
 			Status:                it.GetStatus(),
 			RejectCode:            it.GetRejectCode(),
@@ -443,6 +448,11 @@ func (s *server) getSessionOrders(w http.ResponseWriter, r *http.Request, sessio
 	orders := resp.GetOrders()
 	out := make([]orderJSON, 0, len(orders))
 	for _, o := range orders {
+		positionSide, err := futuresPositionSideHTTPLabel(o.GetPositionSide())
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 		out = append(out, orderJSON{
 			Time:                      protoTime(o.GetTime()),
 			OrderID:                   o.GetOrderId(),
@@ -466,7 +476,7 @@ func (s *server) getSessionOrders(w http.ResponseWriter, r *http.Request, sessio
 			VenueID:                   o.GetVenueId(),
 			Exchange:                  o.GetExchange(),
 			ExchangeLabel:             orderExchangeLabel(o.GetExchange()),
-			PositionSide:              futuresPositionSideHTTPLabel(o.GetPositionSide()),
+			PositionSide:              positionSide,
 			StrategyID:                o.GetStrategyId(),
 			ErrorMessage:              o.GetErrorMessage(),
 		})
@@ -538,6 +548,11 @@ func (s *server) getSessionAttempts(w http.ResponseWriter, r *http.Request, sess
 	attempts := resp.GetAttempts()
 	out := make([]attemptJSON, 0, len(attempts))
 	for _, a := range attempts {
+		positionSide, err := futuresPositionSideHTTPLabel(a.GetPositionSide())
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 		out = append(out, attemptJSON{
 			Time:                  protoTime(a.GetTime()),
 			AttemptID:             a.GetAttemptId(),
@@ -558,7 +573,7 @@ func (s *server) getSessionAttempts(w http.ResponseWriter, r *http.Request, sess
 			VenueID:               a.GetVenueId(),
 			Exchange:              a.GetExchange(),
 			ExchangeLabel:         orderExchangeLabel(a.GetExchange()),
-			PositionSide:          futuresPositionSideHTTPLabel(a.GetPositionSide()),
+			PositionSide:          positionSide,
 			StrategyID:            a.GetStrategyId(),
 			ErrorMessage:          a.GetErrorMessage(),
 			RecoveryError:         a.GetRecoveryError(),
@@ -632,6 +647,11 @@ func (s *server) getSessionFills(w http.ResponseWriter, r *http.Request, session
 	fills := resp.GetFills()
 	out := make([]fillJSON, 0, len(fills))
 	for _, f := range fills {
+		positionSide, err := futuresPositionSideHTTPLabel(f.GetPositionSide())
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 		out = append(out, fillJSON{
 			Time:             protoTime(f.GetTime()),
 			FillID:           f.GetFillId(),
@@ -655,7 +675,7 @@ func (s *server) getSessionFills(w http.ResponseWriter, r *http.Request, session
 			VenueID:          f.GetVenueId(),
 			Exchange:         f.GetExchange(),
 			ExchangeLabel:    orderExchangeLabel(f.GetExchange()),
-			PositionSide:     futuresPositionSideHTTPLabel(f.GetPositionSide()),
+			PositionSide:     positionSide,
 			StrategyID:       f.GetStrategyId(),
 		})
 	}
@@ -705,7 +725,12 @@ func (s *server) getSessionLifecycleEvents(w http.ResponseWriter, r *http.Reques
 	out := make([]orderLifecycleEventJSON, 0, len(events))
 	var nextEventID int64
 	for _, event := range events {
-		out = append(out, orderLifecycleEventToJSON(event))
+		item, err := orderLifecycleEventToJSON(event)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		out = append(out, item)
 		if event.GetEventId() > nextEventID {
 			nextEventID = event.GetEventId()
 		}
@@ -774,7 +799,11 @@ type orderLifecycleEventJSON struct {
 	CreatedAt        string         `json:"created_at"`
 }
 
-func orderLifecycleEventToJSON(event *orderv1.OrderLifecycleEventEntry) orderLifecycleEventJSON {
+func orderLifecycleEventToJSON(event *orderv1.OrderLifecycleEventEntry) (orderLifecycleEventJSON, error) {
+	positionSide, err := futuresPositionSideHTTPLabel(event.GetPositionSide())
+	if err != nil {
+		return orderLifecycleEventJSON{}, err
+	}
 	return orderLifecycleEventJSON{
 		EventID:          event.GetEventId(),
 		SessionID:        event.GetSessionId(),
@@ -793,13 +822,13 @@ func orderLifecycleEventToJSON(event *orderv1.OrderLifecycleEventEntry) orderLif
 		ExchangeLabel:    orderExchangeLabel(event.GetExchange()),
 		Market:           event.GetMarket(),
 		MarketLabel:      orderMarketLabel(event.GetMarket()),
-		PositionSide:     futuresPositionSideHTTPLabel(event.GetPositionSide()),
+		PositionSide:     positionSide,
 		Side:             event.GetSide(),
 		FillDelta:        fillDeltaToJSON(event.GetFillDelta()),
 		OrderState:       orderStateToJSON(event.GetOrderState()),
 		OccurredAt:       protoTime(event.GetOccurredAt()),
 		CreatedAt:        protoTime(event.GetCreatedAt()),
-	}
+	}, nil
 }
 
 func fillDeltaToJSON(delta *orderv1.FillDeltaEntry) map[string]any {

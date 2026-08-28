@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	orderv1 "github.com/hushine-tech/core-service/gen/orderv1"
@@ -533,6 +534,25 @@ func TestSessionOrderLifecycleEndpointReturnsEvents(t *testing.T) {
 	}
 	if body.NextEventID != 101 || body.NextOffset != 101 || body.HasMore {
 		t.Fatalf("page = next_event_id:%d next_offset:%d has_more:%t", body.NextEventID, body.NextOffset, body.HasMore)
+	}
+}
+
+func TestSessionOrderLifecycleFailsClosedForInvalidFuturesPositionSide(t *testing.T) {
+	acct := &fakeSessionPortfoliosClient{}
+	orders := &fakeOrdersClient{lifecycleResp: &orderv1.ListOrderLifecycleEventsResponse{
+		Events: []*orderv1.OrderLifecycleEventEntry{{PositionSide: 99}},
+	}}
+	s := &server{portfolios: acct, orders: orders, jwtSecret: []byte("s"), corsOrigins: []string{"*"}}
+	req := withUID(httptest.NewRequest(http.MethodGet, "/api/sessions/sess-invalid-side/lifecycle-events", nil), 7)
+	rec := httptest.NewRecorder()
+
+	s.handleSessions(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status=%d, want 500; body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "invalid futures position side") {
+		t.Fatalf("error must be actionable: %s", rec.Body.String())
 	}
 }
 

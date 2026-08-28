@@ -94,6 +94,11 @@ func (s *server) handleOrderIntents(w http.ResponseWriter, r *http.Request) {
 
 	items := make([]intentJSON, 0, len(resp.GetIntents()))
 	for _, it := range resp.GetIntents() {
+		positionSide, err := futuresPositionSideHTTPLabel(it.GetPositionSide())
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 		items = append(items, intentJSON{
 			Time:                  protoTime(it.GetTime()),
 			IntentID:              it.GetIntentId(),
@@ -110,7 +115,7 @@ func (s *server) handleOrderIntents(w http.ResponseWriter, r *http.Request) {
 			VenueID:               it.GetVenueId(),
 			Exchange:              it.GetExchange(),
 			ExchangeLabel:         orderExchangeLabel(it.GetExchange()),
-			PositionSide:          futuresPositionSideHTTPLabel(it.GetPositionSide()),
+			PositionSide:          positionSide,
 			SessionID:             it.GetSessionId(),
 			Status:                it.GetStatus(),
 			RejectCode:            it.GetRejectCode(),
@@ -189,6 +194,11 @@ func (s *server) handleOrderHistory(w http.ResponseWriter, r *http.Request) {
 
 	items := make([]orderJSON, 0, len(resp.GetOrders()))
 	for _, o := range resp.GetOrders() {
+		positionSide, err := futuresPositionSideHTTPLabel(o.GetPositionSide())
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 		items = append(items, orderJSON{
 			Time:                      protoTime(o.GetTime()),
 			OrderID:                   o.GetOrderId(),
@@ -213,7 +223,7 @@ func (s *server) handleOrderHistory(w http.ResponseWriter, r *http.Request) {
 			VenueID:                   o.GetVenueId(),
 			Exchange:                  o.GetExchange(),
 			ExchangeLabel:             orderExchangeLabel(o.GetExchange()),
-			PositionSide:              futuresPositionSideHTTPLabel(o.GetPositionSide()),
+			PositionSide:              positionSide,
 			StrategyID:                o.GetStrategyId(),
 			SessionID:                 o.GetSessionId(),
 			ErrorMessage:              o.GetErrorMessage(),
@@ -290,6 +300,11 @@ func (s *server) handleOrderAttempts(w http.ResponseWriter, r *http.Request) {
 
 	items := make([]attemptJSON, 0, len(resp.GetAttempts()))
 	for _, a := range resp.GetAttempts() {
+		positionSide, err := futuresPositionSideHTTPLabel(a.GetPositionSide())
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 		items = append(items, attemptJSON{
 			Time:                  protoTime(a.GetTime()),
 			AttemptID:             a.GetAttemptId(),
@@ -311,7 +326,7 @@ func (s *server) handleOrderAttempts(w http.ResponseWriter, r *http.Request) {
 			VenueID:               a.GetVenueId(),
 			Exchange:              a.GetExchange(),
 			ExchangeLabel:         orderExchangeLabel(a.GetExchange()),
-			PositionSide:          futuresPositionSideHTTPLabel(a.GetPositionSide()),
+			PositionSide:          positionSide,
 			StrategyID:            a.GetStrategyId(),
 			SessionID:             a.GetSessionId(),
 			ErrorMessage:          a.GetErrorMessage(),
@@ -384,6 +399,11 @@ func (s *server) handleOrderFills(w http.ResponseWriter, r *http.Request) {
 
 	items := make([]fillJSON, 0, len(resp.GetFills()))
 	for _, f := range resp.GetFills() {
+		positionSide, err := futuresPositionSideHTTPLabel(f.GetPositionSide())
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 		items = append(items, fillJSON{
 			Time:             protoTime(f.GetTime()),
 			FillID:           f.GetFillId(),
@@ -408,7 +428,7 @@ func (s *server) handleOrderFills(w http.ResponseWriter, r *http.Request) {
 			VenueID:          f.GetVenueId(),
 			Exchange:         f.GetExchange(),
 			ExchangeLabel:    orderExchangeLabel(f.GetExchange()),
-			PositionSide:     futuresPositionSideHTTPLabel(f.GetPositionSide()),
+			PositionSide:     positionSide,
 			StrategyID:       f.GetStrategyId(),
 			SessionID:        f.GetSessionId(),
 		})

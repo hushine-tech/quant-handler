@@ -166,7 +166,11 @@ func buildFuturesWallet(in *futIn) (*portfoliov1.FuturesWallet, error) {
 		if pm == "hedge" && side == portfoliov1.FuturesPositionSide_FUTURES_POSITION_SIDE_BOTH {
 			return nil, fmt.Errorf("futures.positions[%d].position_side must be LONG or SHORT in hedge mode", index)
 		}
-		key := sym + ":" + futuresPositionSideHTTPLabel(side)
+		sideLabel, err := futuresPositionSideHTTPLabel(side)
+		if err != nil {
+			return nil, err
+		}
+		key := sym + ":" + sideLabel
 		if _, duplicate := seen[key]; duplicate {
 			continue
 		}
@@ -190,7 +194,7 @@ func buildFuturesWallet(in *futIn) (*portfoliov1.FuturesWallet, error) {
 }
 
 func parseFuturesPositionSide(raw string) (portfoliov1.FuturesPositionSide, error) {
-	switch strings.TrimSpace(raw) {
+	switch raw {
 	case "BOTH":
 		return portfoliov1.FuturesPositionSide_FUTURES_POSITION_SIDE_BOTH, nil
 	case "LONG":

@@ -155,7 +155,12 @@ func (s *server) getPortfolioPortfolioSnapshot(w http.ResponseWriter, r *http.Re
 		writeErr(w, http.StatusNotFound, "no portfolio snapshot")
 		return
 	}
-	writeJSON(w, http.StatusOK, portfolioSnapshotToJSON(snapshot))
+	body, err := portfolioSnapshotToJSON(snapshot)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, body)
 }
 
 func parsePortfolioSnapshotRequiredSymbols(values []string) ([]*portfoliov1.RequiredSymbol, error) {
@@ -203,7 +208,7 @@ func validSnapshotSymbol(symbol string) bool {
 	return true
 }
 
-func portfolioSnapshotToJSON(snapshot *portfoliov1.PortfolioSnapshot) map[string]any {
+func portfolioSnapshotToJSON(snapshot *portfoliov1.PortfolioSnapshot) (map[string]any, error) {
 	updatedAt := ""
 	if ts := snapshot.GetUpdatedAt(); ts != nil {
 		updatedAt = ts.AsTime().UTC().Format(time.RFC3339Nano)
@@ -212,14 +217,25 @@ func portfolioSnapshotToJSON(snapshot *portfoliov1.PortfolioSnapshot) map[string
 	portfolioSpotMetadata := make([]*portfoliov1.SpotSymbolMetadata, 0)
 	for _, venueSnapshot := range snapshot.GetVenues() {
 		portfolioSpotMetadata = append(portfolioSpotMetadata, venueSnapshot.GetSpotSymbols()...)
+		venueSnapshotJSON, err := venueSnapshotToJSON(venueSnapshot)
+		if err != nil {
+			return nil, err
+		}
 		item := portfolioPortfolioSnapshotItemJSON{
 			Venue:    venueFromSnapshotToJSON(snapshot.GetUserId(), snapshot.GetPortfolioId(), venueSnapshot),
-			Snapshot: venueSnapshotToJSON(venueSnapshot),
+			Snapshot: venueSnapshotJSON,
 		}
 		if wallet := venueSnapshot.GetWallet(); wallet != nil {
-			item.Wallet = portfolioWalletStateToJSONWithSpotMetadata(wallet, venueSnapshot.GetSpotSymbols())
+			item.Wallet, err = portfolioWalletStateToJSONWithSpotMetadata(wallet, venueSnapshot.GetSpotSymbols())
+			if err != nil {
+				return nil, err
+			}
 		}
 		items = append(items, item)
+	}
+	wallet, err := portfolioWalletStateToJSONWithSpotMetadata(snapshot.GetWallet(), portfolioSpotMetadata)
+	if err != nil {
+		return nil, err
 	}
 	return map[string]any{
 		"portfolio_id":      snapshot.GetPortfolioId(),
@@ -228,12 +244,12 @@ func portfolioSnapshotToJSON(snapshot *portfoliov1.PortfolioSnapshot) map[string
 		"wallet_balance":    snapshot.GetWalletBalance(),
 		"available_balance": snapshot.GetAvailableBalance(),
 		"updated_at":        updatedAt,
-		"wallet":            portfolioWalletStateToJSONWithSpotMetadata(snapshot.GetWallet(), portfolioSpotMetadata),
+		"wallet":            wallet,
 		"items":             items,
 		"venue_count":       len(items),
 		"successful":        len(items),
 		"failed":            0,
-	}
+	}, nil
 }
 
 func venueFromSnapshotToJSON(userID, portfolioID int64, snap *portfoliov1.VenueSnapshot) venueJSON {
@@ -256,9 +272,9 @@ func venueFromSnapshotToJSON(userID, portfolioID int64, snap *portfoliov1.VenueS
 	}
 }
 
-func venueSnapshotToJSON(snap *portfoliov1.VenueSnapshot) map[string]any {
+func venueSnapshotToJSON(snap *portfoliov1.VenueSnapshot) (map[string]any, error) {
 	if snap == nil {
-		return nil
+		return nil, nil
 	}
 	updatedAt := ""
 	if ts := snap.GetUpdatedAt(); ts != nil {
@@ -276,9 +292,13 @@ func venueSnapshotToJSON(snap *portfoliov1.VenueSnapshot) map[string]any {
 	}
 	positions := make([]map[string]any, 0, len(snap.GetPositions()))
 	for _, position := range snap.GetPositions() {
+		positionSide, err := futuresPositionSideHTTPLabel(position.GetPositionSide())
+		if err != nil {
+			return nil, err
+		}
 		positions = append(positions, map[string]any{
 			"symbol":            position.GetSymbol(),
-			"position_side":     position.GetPositionSide(),
+			"position_side":     positionSide,
 			"qty":               position.GetQty(),
 			"entry_price":       position.GetEntryPrice(),
 			"mark_price":        position.GetMarkPrice(),
@@ -308,7 +328,7 @@ func venueSnapshotToJSON(snap *portfoliov1.VenueSnapshot) map[string]any {
 		"balances":          balances,
 		"positions":         positions,
 		"spot_symbols":      spotSymbols,
-	}
+	}, nil
 }
 
 func protoSpotSymbolMetadataToJSON(metadata *portfoliov1.SpotSymbolMetadata) spotSymbolMetadataResponse {
@@ -371,13 +391,13 @@ func protoSpotSymbolMetadataToJSON(metadata *portfoliov1.SpotSymbolMetadata) spo
 	}
 }
 
-func portfolioWalletStateToJSON(wal *portfoliov1.PortfolioWalletState) map[string]any {
+func portfolioWalletStateToJSON(wal *portfoliov1.PortfolioWalletState) (map[string]any, error) {
 	return portfolioWalletStateToJSONWithSpotMetadata(wal, nil)
 }
 
-func portfolioWalletStateToJSONWithSpotMetadata(wal *portfoliov1.PortfolioWalletState, metadata []*portfoliov1.SpotSymbolMetadata) map[string]any {
+func portfolioWalletStateToJSONWithSpotMetadata(wal *portfoliov1.PortfolioWalletState, metadata []*portfoliov1.SpotSymbolMetadata) (map[string]any, error) {
 	if wal == nil {
-		return nil
+		return nil, nil
 	}
 	updatedAt := ""
 	if ts := wal.GetUpdatedAt(); ts != nil {
@@ -415,6 +435,10 @@ func portfolioWalletStateToJSONWithSpotMetadata(wal *portfoliov1.PortfolioWallet
 		"futures_display_usd":     protoFuturesDisplayUSDToJSON(wal.GetEnvironment(), fw),
 	}
 
+	futures, err := protoFuturesToJSON(fw)
+	if err != nil {
+		return nil, err
+	}
 	return map[string]any{
 		// ── canonical runtime fields (authoritative for trading/risk) ──
 		"environment":          wal.GetEnvironment(),
@@ -424,10 +448,10 @@ func portfolioWalletStateToJSONWithSpotMetadata(wal *portfoliov1.PortfolioWallet
 		"total_margin_balance": fw.GetTotalMarginBalance(),
 		"available_balance":    fw.GetAvailableBalance(),
 		"spot":                 protoSpotToJSON(wal.GetSpot()),
-		"futures":              protoFuturesToJSON(fw),
+		"futures":              futures,
 		// ── namespaced display surface ──
 		"display": display,
-	}
+	}, nil
 }
 
 func spotSymbolPricesFromWallet(wallet *portfoliov1.SpotWallet, metadata []*portfoliov1.SpotSymbolMetadata) map[string]float64 {
@@ -514,9 +538,9 @@ func protoSpotToJSON(sw *portfoliov1.SpotWallet) any {
 	return spotWalletResponse{Assets: assets}
 }
 
-func protoFuturesToJSON(fw *portfoliov1.FuturesWallet) any {
+func protoFuturesToJSON(fw *portfoliov1.FuturesWallet) (any, error) {
 	if fw == nil {
-		return nil
+		return nil, nil
 	}
 	type pos struct {
 		Symbol         string   `json:"symbol"`
@@ -550,10 +574,14 @@ func protoFuturesToJSON(fw *portfoliov1.FuturesWallet) any {
 	}
 	var ps []pos
 	for _, p := range fw.GetPositions() {
+		positionSide, err := futuresPositionSideHTTPLabel(p.GetPositionSide())
+		if err != nil {
+			return nil, err
+		}
 		row := pos{
 			Symbol: p.GetSymbol(), InitialBalance: p.GetInitialBalance(),
 			Leverage: p.GetLeverage(), FeeRate: p.GetFeeRate(), Qty: p.GetQty(), EntryPrice: p.GetEntryPrice(),
-			MarkPrice: p.GetMarkPrice(), UnrealizedPnl: p.GetUnrealizedPnl(), PositionSide: futuresPositionSideHTTPLabel(p.GetPositionSide()),
+			MarkPrice: p.GetMarkPrice(), UnrealizedPnl: p.GetUnrealizedPnl(), PositionSide: positionSide,
 		}
 		if p.DisplayEquity != nil {
 			v := *p.DisplayEquity
@@ -562,7 +590,7 @@ func protoFuturesToJSON(fw *portfoliov1.FuturesWallet) any {
 		ps = append(ps, row)
 	}
 	out["positions"] = ps
-	return out
+	return out, nil
 }
 
 // decodeCreatePortfolioBody accepts portfolio metadata only. Credentials and wallet

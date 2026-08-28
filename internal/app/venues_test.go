@@ -220,6 +220,10 @@ func TestCreateBacktestFuturesVenueRejectsLegacyOrNonCanonicalPositionSide(t *te
 	for _, body := range []string{
 		`{"exchange":"binance","market":"perpetual_futures","environment":"backtest","futures":{"margin_mode":"cross","position_mode":"one_way","positions":[{"symbol":"ETHUSDT","direction":1}]}}`,
 		`{"exchange":"binance","market":"perpetual_futures","environment":"backtest","futures":{"margin_mode":"cross","position_mode":"one_way","positions":[{"symbol":"ETHUSDT","position_side":"1"}]}}`,
+		`{"exchange":"binance","market":"perpetual_futures","environment":"backtest","futures":{"margin_mode":"cross","position_mode":"one_way","positions":[{"symbol":"ETHUSDT","position_side":1}]}}`,
+		`{"exchange":"binance","market":"perpetual_futures","environment":"backtest","futures":{"margin_mode":"cross","position_mode":"one_way","positions":[{"symbol":"ETHUSDT","position_side":" BOTH "}]}}`,
+		`{"exchange":"binance","market":"perpetual_futures","environment":"backtest","futures":{"margin_mode":"cross","position_mode":"one_way","positions":[{"symbol":"ETHUSDT","position_side":"both"}]}}`,
+		`{"exchange":"binance","market":"perpetual_futures","environment":"backtest","futures":{"margin_mode":"cross","position_mode":"one_way","positions":[{"symbol":"ETHUSDT","position_side":""}]}}`,
 		`{"exchange":"binance","market":"perpetual_futures","environment":"backtest","futures":{"margin_mode":"cross","position_mode":"one_way","positions":[{"symbol":"ETHUSDT","position_side":"LONG"}]}}`,
 	} {
 		fake := &fakeVenuePortfoliosClient{}
