@@ -1,5 +1,7 @@
 package app
 
+import portfoliov1 "github.com/hushine-tech/core-service/gen/portfoliov1"
+
 func portfolioEnvironmentFromBody(body createPortfolioBodyExt) int32 {
 	switch body.Environment {
 	case 1, 2:
@@ -33,11 +35,11 @@ func orderExchangeLabel(exchange int32) string {
 	}
 }
 
-func orderPositionSideLabel(positionSide int32) string {
+func futuresPositionSideHTTPLabel(positionSide portfoliov1.FuturesPositionSide) string {
 	switch positionSide {
-	case 1:
+	case portfoliov1.FuturesPositionSide_FUTURES_POSITION_SIDE_LONG:
 		return "LONG"
-	case 2:
+	case portfoliov1.FuturesPositionSide_FUTURES_POSITION_SIDE_SHORT:
 		return "SHORT"
 	default:
 		return "BOTH"

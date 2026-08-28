@@ -520,7 +520,6 @@ func protoFuturesToJSON(fw *portfoliov1.FuturesWallet) any {
 	}
 	type pos struct {
 		Symbol         string   `json:"symbol"`
-		Direction      int32    `json:"direction"`
 		InitialBalance float64  `json:"initial_balance"`
 		Leverage       float64  `json:"leverage"`
 		FeeRate        float64  `json:"fee_rate"`
@@ -552,9 +551,9 @@ func protoFuturesToJSON(fw *portfoliov1.FuturesWallet) any {
 	var ps []pos
 	for _, p := range fw.GetPositions() {
 		row := pos{
-			Symbol: p.GetSymbol(), Direction: p.GetDirection(), InitialBalance: p.GetInitialBalance(),
+			Symbol: p.GetSymbol(), InitialBalance: p.GetInitialBalance(),
 			Leverage: p.GetLeverage(), FeeRate: p.GetFeeRate(), Qty: p.GetQty(), EntryPrice: p.GetEntryPrice(),
-			MarkPrice: p.GetMarkPrice(), UnrealizedPnl: p.GetUnrealizedPnl(), PositionSide: p.GetPositionSide(),
+			MarkPrice: p.GetMarkPrice(), UnrealizedPnl: p.GetUnrealizedPnl(), PositionSide: futuresPositionSideHTTPLabel(p.GetPositionSide()),
 		}
 		if p.DisplayEquity != nil {
 			v := *p.DisplayEquity

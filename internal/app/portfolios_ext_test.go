@@ -306,7 +306,7 @@ func TestPortfolioSnapshotEndpointReturnsVenues(t *testing.T) {
 							{Asset: "USDT", WalletBalance: 2000, AvailableBalance: 1500, ValueUsdt: 2000},
 						},
 						Positions: []*portfoliov1.PositionEntry{
-							{Symbol: "ETHUSDT", PositionSide: "BOTH", Qty: 0.5, EntryPrice: 3000, MarkPrice: 3100, UnrealizedPnl: 50},
+							{Symbol: "ETHUSDT", PositionSide: portfoliov1.FuturesPositionSide_FUTURES_POSITION_SIDE_BOTH, Qty: 0.5, EntryPrice: 3000, MarkPrice: 3100, UnrealizedPnl: 50},
 						},
 					},
 				},
@@ -405,7 +405,7 @@ func TestPortfolioSnapshotWalletIncludesMarginBalanceFields(t *testing.T) {
 						DisplayMarginBalanceUsd:    10761.5682,
 						DisplayUnrealizedPnlUsd:    761.5682,
 						Positions: []*portfoliov1.FuturesPosition{
-							{Symbol: "ETHUSDT", PositionSide: "BOTH", PositionQty: -0.021, Qty: -0.021, Leverage: 20},
+							{Symbol: "ETHUSDT", PositionSide: portfoliov1.FuturesPositionSide_FUTURES_POSITION_SIDE_BOTH, PositionQty: -0.021, Qty: -0.021, Leverage: 20},
 						},
 					},
 				},

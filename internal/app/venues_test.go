@@ -187,7 +187,7 @@ func TestCreateBacktestFuturesVenueForwardsOnlyFuturesWallet(t *testing.T) {
 			"margin_mode":"cross",
 			"position_mode":"one_way",
 			"initial_balance":1500,
-			"positions":[{"symbol":"ETHUSDT","direction":1,"initial_balance":500,"fee_rate":0.0004}]
+			"positions":[{"symbol":"ETHUSDT","position_side":"BOTH","initial_balance":500,"fee_rate":0.0004}]
 		}
 	}`)
 	req := withUID(httptest.NewRequest(http.MethodPost, "/api/venues", body), 42)
@@ -207,9 +207,34 @@ func TestCreateBacktestFuturesVenueForwardsOnlyFuturesWallet(t *testing.T) {
 	if leverage := fake.createReq.GetFutures().GetPositions()[0].GetLeverage(); leverage != 0 {
 		t.Fatalf("Venue bootstrap assigned strategy-owned leverage: %v", leverage)
 	}
+	if side := fake.createReq.GetFutures().GetPositions()[0].GetPositionSide(); side != portfoliov1.FuturesPositionSide_FUTURES_POSITION_SIDE_BOTH {
+		t.Fatalf("position side = %v, want BOTH", side)
+	}
 	if fake.createReq.GetTotalValue() != 1500 || fake.createReq.GetWalletBalance() != 1500 || fake.createReq.GetAvailableBalance() != 1500 {
 		t.Fatalf("bootstrap totals = total:%v wallet:%v available:%v",
 			fake.createReq.GetTotalValue(), fake.createReq.GetWalletBalance(), fake.createReq.GetAvailableBalance())
+	}
+}
+
+func TestCreateBacktestFuturesVenueRejectsLegacyOrNonCanonicalPositionSide(t *testing.T) {
+	for _, body := range []string{
+		`{"exchange":"binance","market":"perpetual_futures","environment":"backtest","futures":{"margin_mode":"cross","position_mode":"one_way","positions":[{"symbol":"ETHUSDT","direction":1}]}}`,
+		`{"exchange":"binance","market":"perpetual_futures","environment":"backtest","futures":{"margin_mode":"cross","position_mode":"one_way","positions":[{"symbol":"ETHUSDT","position_side":"1"}]}}`,
+		`{"exchange":"binance","market":"perpetual_futures","environment":"backtest","futures":{"margin_mode":"cross","position_mode":"one_way","positions":[{"symbol":"ETHUSDT","position_side":"LONG"}]}}`,
+	} {
+		fake := &fakeVenuePortfoliosClient{}
+		s := &server{portfolios: fake}
+		req := withUID(httptest.NewRequest(http.MethodPost, "/api/venues", strings.NewReader(body)), 42)
+		rec := httptest.NewRecorder()
+
+		s.handleVenues(rec, req)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("legacy or illegal position side status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+		}
+		if fake.createReq != nil {
+			t.Fatalf("legacy or illegal position side reached core-service: %+v", fake.createReq)
+		}
 	}
 }
 

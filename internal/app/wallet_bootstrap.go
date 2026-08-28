@@ -29,7 +29,7 @@ var (
 
 type futPosIn struct {
 	Symbol         string  `json:"symbol"`
-	Direction      int32   `json:"direction"`
+	PositionSide   string  `json:"position_side"`
 	InitialBalance float64 `json:"initial_balance"`
 	FeeRate        float64 `json:"fee_rate"`
 }
@@ -120,9 +120,9 @@ func validateSpotBootstrapDecimal(field, raw string) error {
 	return nil
 }
 
-func buildFuturesWallet(in *futIn) *portfoliov1.FuturesWallet {
+func buildFuturesWallet(in *futIn) (*portfoliov1.FuturesWallet, error) {
 	if in == nil {
-		return nil
+		return nil, nil
 	}
 	mm := strings.ToLower(strings.TrimSpace(in.MarginMode))
 	if mm == "" {
@@ -150,11 +150,27 @@ func buildFuturesWallet(in *futIn) *portfoliov1.FuturesWallet {
 		fw.TotalMarginBalance = in.InitialBalance
 		fw.TotalCrossWalletBalance = in.InitialBalance
 	}
-	for _, p := range in.Positions {
+	seen := make(map[string]struct{}, len(in.Positions))
+	for index, p := range in.Positions {
 		sym := strings.ToUpper(strings.TrimSpace(p.Symbol))
 		if sym == "" {
 			continue
 		}
+		side, err := parseFuturesPositionSide(p.PositionSide)
+		if err != nil {
+			return nil, fmt.Errorf("futures.positions[%d].position_side %w", index, err)
+		}
+		if pm == "one_way" && side != portfoliov1.FuturesPositionSide_FUTURES_POSITION_SIDE_BOTH {
+			return nil, fmt.Errorf("futures.positions[%d].position_side must be BOTH in one_way mode", index)
+		}
+		if pm == "hedge" && side == portfoliov1.FuturesPositionSide_FUTURES_POSITION_SIDE_BOTH {
+			return nil, fmt.Errorf("futures.positions[%d].position_side must be LONG or SHORT in hedge mode", index)
+		}
+		key := sym + ":" + futuresPositionSideHTTPLabel(side)
+		if _, duplicate := seen[key]; duplicate {
+			continue
+		}
+		seen[key] = struct{}{}
 		ib := p.InitialBalance
 		if ib == 0 {
 			ib = 1000
@@ -165,12 +181,25 @@ func buildFuturesWallet(in *futIn) *portfoliov1.FuturesWallet {
 		}
 		fw.Positions = append(fw.Positions, &portfoliov1.FuturesPosition{
 			Symbol:         sym,
-			Direction:      p.Direction,
+			PositionSide:   side,
 			InitialBalance: ib,
 			FeeRate:        fr,
 		})
 	}
-	return fw
+	return fw, nil
+}
+
+func parseFuturesPositionSide(raw string) (portfoliov1.FuturesPositionSide, error) {
+	switch strings.TrimSpace(raw) {
+	case "BOTH":
+		return portfoliov1.FuturesPositionSide_FUTURES_POSITION_SIDE_BOTH, nil
+	case "LONG":
+		return portfoliov1.FuturesPositionSide_FUTURES_POSITION_SIDE_LONG, nil
+	case "SHORT":
+		return portfoliov1.FuturesPositionSide_FUTURES_POSITION_SIDE_SHORT, nil
+	default:
+		return portfoliov1.FuturesPositionSide_FUTURES_POSITION_SIDE_BOTH, fmt.Errorf("must be BOTH, LONG, or SHORT")
+	}
 }
 
 func spotBootstrapValue(s *portfoliov1.SpotWallet) float64 {
@@ -228,7 +257,10 @@ func buildWalletBootstrap(spotIn *spotIn, futuresIn *futIn) (walletBootstrap, er
 	if err != nil {
 		return walletBootstrap{}, err
 	}
-	futures := buildFuturesWallet(futuresIn)
+	futures, err := buildFuturesWallet(futuresIn)
+	if err != nil {
+		return walletBootstrap{}, err
+	}
 	spotValue := spotBootstrapValue(spot)
 	futuresValue := futuresBootstrapValue(futures)
 	bootstrap := walletBootstrap{
