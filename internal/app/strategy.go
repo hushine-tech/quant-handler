@@ -134,15 +134,20 @@ type riskControlsJSON struct {
 }
 
 type strategyOrderTargetJSON struct {
-	Exchange          string  `json:"exchange"`
-	Market            string  `json:"market"`
-	Symbol            string  `json:"symbol"`
-	EffectiveLeverage uint32  `json:"effective_leverage,omitempty"`
-	LeverageSource    string  `json:"leverage_source,omitempty"`
-	CurrentLeverage   *uint32 `json:"current_leverage,omitempty"`
-	ChangeRequired    bool    `json:"change_required"`
-	VenueID           int64   `json:"venue_id,omitempty"`
-	LeverageStatus    string  `json:"leverage_status,omitempty"`
+	Exchange             string  `json:"exchange"`
+	Market               string  `json:"market"`
+	Symbol               string  `json:"symbol"`
+	EffectiveLeverage    uint32  `json:"effective_leverage,omitempty"`
+	LeverageSource       string  `json:"leverage_source,omitempty"`
+	CurrentLeverage      *uint32 `json:"current_leverage,omitempty"`
+	ChangeRequired       bool    `json:"change_required"`
+	VenueID              int64   `json:"venue_id,omitempty"`
+	LeverageStatus       string  `json:"leverage_status,omitempty"`
+	RequiredMarginMode   string  `json:"required_margin_mode,omitempty"`
+	CurrentMarginMode    string  `json:"current_margin_mode,omitempty"`
+	RequiredPositionMode string  `json:"required_position_mode,omitempty"`
+	CurrentPositionMode  string  `json:"current_position_mode,omitempty"`
+	ModeStatus           string  `json:"mode_status,omitempty"`
 }
 
 type strategyLeverageTargetResultJSON struct {
@@ -617,15 +622,20 @@ func orderTargetBindingsToJSON(bindings []*strategyv1.StrategyOrderTargetBinding
 			continue
 		}
 		out = append(out, strategyOrderTargetJSON{
-			Exchange:          strings.ToLower(strings.TrimSpace(b.GetExchange())),
-			Market:            marketDataMarketToStrategyMarket(b.GetMarket()),
-			Symbol:            strings.ToUpper(strings.TrimSpace(b.GetSymbol())),
-			EffectiveLeverage: b.GetEffectiveLeverage(),
-			LeverageSource:    b.GetLeverageSource(),
-			CurrentLeverage:   cloneUint32(b.CurrentLeverage),
-			ChangeRequired:    b.GetChangeRequired(),
-			VenueID:           b.GetVenueId(),
-			LeverageStatus:    b.GetLeverageStatus(),
+			Exchange:             strings.ToLower(strings.TrimSpace(b.GetExchange())),
+			Market:               marketDataMarketToStrategyMarket(b.GetMarket()),
+			Symbol:               strings.ToUpper(strings.TrimSpace(b.GetSymbol())),
+			EffectiveLeverage:    b.GetEffectiveLeverage(),
+			LeverageSource:       b.GetLeverageSource(),
+			CurrentLeverage:      cloneUint32(b.CurrentLeverage),
+			ChangeRequired:       b.GetChangeRequired(),
+			VenueID:              b.GetVenueId(),
+			LeverageStatus:       b.GetLeverageStatus(),
+			RequiredMarginMode:   b.GetRequiredMarginMode(),
+			CurrentMarginMode:    b.GetCurrentMarginMode(),
+			RequiredPositionMode: b.GetRequiredPositionMode(),
+			CurrentPositionMode:  b.GetCurrentPositionMode(),
+			ModeStatus:           b.GetModeStatus(),
 		})
 	}
 	return out

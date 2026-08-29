@@ -60,15 +60,20 @@ func TestPreviewRunStrategy_ForwardsBodyAndReturnsJSON(t *testing.T) {
 				Interval: "1m",
 			}},
 			DeclaredOrderTargets: []*strategyv1.StrategyOrderTargetBinding{{
-				Exchange:          "binance",
-				Market:            "perpetual_futures",
-				Symbol:            "ETHUSDT",
-				EffectiveLeverage: 5,
-				LeverageSource:    "strategy_default",
-				CurrentLeverage:   uint32Ptr(3),
-				ChangeRequired:    true,
-				VenueId:           19,
-				LeverageStatus:    "change_required",
+				Exchange:             "binance",
+				Market:               "perpetual_futures",
+				Symbol:               "ETHUSDT",
+				EffectiveLeverage:    5,
+				LeverageSource:       "strategy_default",
+				CurrentLeverage:      uint32Ptr(3),
+				ChangeRequired:       true,
+				VenueId:              19,
+				LeverageStatus:       "change_required",
+				RequiredMarginMode:   "isolated",
+				CurrentMarginMode:    "cross",
+				RequiredPositionMode: "hedge",
+				CurrentPositionMode:  "hedge",
+				ModeStatus:           "mismatch",
 			}},
 			RequiredRoutes: []*strategyv1.StrategyRouteBinding{{
 				Exchange: "binance",
@@ -148,6 +153,11 @@ func TestPreviewRunStrategy_ForwardsBodyAndReturnsJSON(t *testing.T) {
 	if target.EffectiveLeverage != 5 || target.LeverageSource != "strategy_default" || target.CurrentLeverage == nil || *target.CurrentLeverage != 3 ||
 		!target.ChangeRequired || target.VenueID != 19 || target.LeverageStatus != "change_required" {
 		t.Fatalf("order target leverage facts = %+v, want unchanged typed preview facts", target)
+	}
+	if target.RequiredMarginMode != "isolated" || target.CurrentMarginMode != "cross" ||
+		target.RequiredPositionMode != "hedge" || target.CurrentPositionMode != "hedge" ||
+		target.ModeStatus != "mismatch" {
+		t.Fatalf("order target mode facts = %+v, want exact typed preview facts", target)
 	}
 	if len(resp.RequiredRoutes) != 1 || resp.RequiredRoutes[0].Market != "perpetual_futures" {
 		t.Fatalf("required_routes = %+v, want binance/perpetual_futures", resp.RequiredRoutes)

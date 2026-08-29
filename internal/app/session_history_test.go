@@ -276,7 +276,7 @@ func TestProtoSessionToJSONPrefersDurableTargetLeverageFacts(t *testing.T) {
 	now := timestamppb.Now()
 	encoded, err := json.Marshal(protoSessionToJSON(&portfoliov1.StrategySessionEntry{
 		SessionId: "mixed-leverage",
-		TargetLeverageFacts: []*portfoliov1.SessionTargetLeverageFact{{
+		TargetLeverageFacts: []*portfoliov1.SessionTargetFact{{
 			SessionId: "mixed-leverage", VenueId: 8, Exchange: 1, Environment: 1, Market: 2, Symbol: "BTCUSDT",
 			EffectiveLeverage: 5, LeverageSource: "strategy_default", PreviousLeverage: uint32Ptr(3), ConfirmedLeverage: 5,
 			ConfirmedAt: now, CreatedAt: now,

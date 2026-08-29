@@ -1112,7 +1112,7 @@ func protoSessionToJSON(se *portfoliov1.StrategySessionEntry) sessionJSON {
 	return j
 }
 
-func sessionTargetLeverageFactsToJSON(facts []*portfoliov1.SessionTargetLeverageFact) []sessionTargetLeverageFactJSON {
+func sessionTargetLeverageFactsToJSON(facts []*portfoliov1.SessionTargetFact) []sessionTargetLeverageFactJSON {
 	out := make([]sessionTargetLeverageFactJSON, 0, len(facts))
 	for _, fact := range facts {
 		if fact == nil {
