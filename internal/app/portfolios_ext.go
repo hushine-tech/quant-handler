@@ -555,7 +555,6 @@ func protoFuturesToJSON(fw *portfoliov1.FuturesWallet) (any, error) {
 		DisplayEquity  *float64 `json:"display_equity,omitempty"`
 	}
 	out := map[string]any{
-		"margin_mode":                     fw.GetMarginMode(),
 		"position_mode":                   fw.GetPositionMode(),
 		"initial_balance":                 fw.GetInitialBalance(),
 		"wallet_balance":                  fw.GetWalletBalance(),
@@ -563,7 +562,6 @@ func protoFuturesToJSON(fw *portfoliov1.FuturesWallet) (any, error) {
 		"total_margin_balance":            fw.GetTotalMarginBalance(),
 		"available_balance":               fw.GetAvailableBalance(),
 		"unrealized_pnl":                  fw.GetUnrealizedPnl(),
-		"total_unrealized_pnl":            fw.GetTotalUnrealizedPnl(),
 		"total_position_initial_margin":   fw.GetTotalPositionInitialMargin(),
 		"total_open_order_initial_margin": fw.GetTotalOpenOrderInitialMargin(),
 		"total_maint_margin":              fw.GetTotalMaintMargin(),

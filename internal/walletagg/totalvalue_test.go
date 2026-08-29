@@ -38,10 +38,10 @@ func TestSpotEstimatedValueUsesAvgWhenNoPrice(t *testing.T) {
 
 func TestTotalValueFlatIsolated(t *testing.T) {
 	fw := &portfoliov1.FuturesWallet{
-		MarginMode: "isolated", PositionMode: "one_way",
+		PositionMode: "one_way",
 		Positions: []*portfoliov1.FuturesPosition{
-			{Symbol: "BTCUSDT", InitialBalance: 2000, Leverage: 10, FeeRate: 0.0004},
-			{Symbol: "ETHUSDT", InitialBalance: 1500, Leverage: 10, FeeRate: 0.0004},
+			{Symbol: "BTCUSDT", MarginMode: "isolated", InitialBalance: 2000, Leverage: 10, FeeRate: 0.0004},
+			{Symbol: "ETHUSDT", MarginMode: "isolated", InitialBalance: 1500, Leverage: 10, FeeRate: 0.0004},
 		},
 	}
 	p := "3000"

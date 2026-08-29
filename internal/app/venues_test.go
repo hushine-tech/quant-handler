@@ -184,10 +184,9 @@ func TestCreateBacktestFuturesVenueForwardsOnlyFuturesWallet(t *testing.T) {
 		"margin_mode":"cross",
 		"position_mode":"one_way",
 		"futures":{
-			"margin_mode":"cross",
 			"position_mode":"one_way",
 			"initial_balance":1500,
-			"positions":[{"symbol":"ETHUSDT","position_side":"BOTH","initial_balance":500,"fee_rate":0.0004}]
+			"positions":[{"symbol":"ETHUSDT","position_side":"BOTH","margin_mode":"cross","initial_balance":500,"fee_rate":0.0004}]
 		}
 	}`)
 	req := withUID(httptest.NewRequest(http.MethodPost, "/api/venues", body), 42)
@@ -572,7 +571,7 @@ func TestGetVenueWalletForwardsVenueIDAndUserID(t *testing.T) {
 			},
 			Wallet: &portfoliov1.PortfolioWalletState{
 				TotalValue: 1000,
-				Futures:    &portfoliov1.FuturesWallet{MarginMode: "cross", PositionMode: "one_way"},
+				Futures:    &portfoliov1.FuturesWallet{PositionMode: "one_way"},
 			},
 		},
 	}

@@ -1535,7 +1535,7 @@ class MyStrategy:
 		snapshot: &portfoliov1.GetPortfolioSnapshotResponse{Snapshot: &portfoliov1.PortfolioSnapshot{
 			PortfolioId: 7, UserId: 42,
 			Wallet: &portfoliov1.PortfolioWalletState{Futures: &portfoliov1.FuturesWallet{
-				InitialBalance: 1000, WalletBalance: 1000, AvailableBalance: 1000, MarginMode: "cross", PositionMode: "one_way",
+				InitialBalance: 1000, WalletBalance: 1000, AvailableBalance: 1000, PositionMode: "one_way",
 			}},
 		}},
 	}

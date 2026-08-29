@@ -30,12 +30,12 @@ var (
 type futPosIn struct {
 	Symbol         string  `json:"symbol"`
 	PositionSide   string  `json:"position_side"`
+	MarginMode     string  `json:"margin_mode"`
 	InitialBalance float64 `json:"initial_balance"`
 	FeeRate        float64 `json:"fee_rate"`
 }
 
 type futIn struct {
-	MarginMode     string     `json:"margin_mode"`
 	PositionMode   string     `json:"position_mode"`
 	InitialBalance float64    `json:"initial_balance"`
 	Positions      []futPosIn `json:"positions"`
@@ -124,13 +124,6 @@ func buildFuturesWallet(in *futIn) (*portfoliov1.FuturesWallet, error) {
 	if in == nil {
 		return nil, nil
 	}
-	mm := strings.ToLower(strings.TrimSpace(in.MarginMode))
-	if mm == "" {
-		mm = "isolated"
-	}
-	if mm != "isolated" && mm != "cross" {
-		mm = "isolated"
-	}
 	pm := normPositionMode(in.PositionMode)
 	if pm == "" {
 		pm = "one_way"
@@ -139,18 +132,11 @@ func buildFuturesWallet(in *futIn) (*portfoliov1.FuturesWallet, error) {
 		pm = "one_way"
 	}
 	fw := &portfoliov1.FuturesWallet{
-		MarginMode:     mm,
 		PositionMode:   pm,
 		InitialBalance: in.InitialBalance,
 	}
-	if mm == "cross" && in.InitialBalance > 0 {
-		fw.WalletBalance = in.InitialBalance
-		fw.AvailableBalance = in.InitialBalance
-		fw.MarginBalance = in.InitialBalance
-		fw.TotalMarginBalance = in.InitialBalance
-		fw.TotalCrossWalletBalance = in.InitialBalance
-	}
 	seen := make(map[string]struct{}, len(in.Positions))
+	hasCrossPosition := false
 	for index, p := range in.Positions {
 		sym := strings.ToUpper(strings.TrimSpace(p.Symbol))
 		if sym == "" {
@@ -165,6 +151,10 @@ func buildFuturesWallet(in *futIn) (*portfoliov1.FuturesWallet, error) {
 		}
 		if pm == "hedge" && side == portfoliov1.FuturesPositionSide_FUTURES_POSITION_SIDE_BOTH {
 			return nil, fmt.Errorf("futures.positions[%d].position_side must be LONG or SHORT in hedge mode", index)
+		}
+		marginMode := strings.ToLower(strings.TrimSpace(p.MarginMode))
+		if marginMode != "cross" && marginMode != "isolated" {
+			return nil, fmt.Errorf("futures.positions[%d].margin_mode must be cross or isolated", index)
 		}
 		sideLabel, err := futuresPositionSideHTTPLabel(side)
 		if err != nil {
@@ -186,9 +176,18 @@ func buildFuturesWallet(in *futIn) (*portfoliov1.FuturesWallet, error) {
 		fw.Positions = append(fw.Positions, &portfoliov1.FuturesPosition{
 			Symbol:         sym,
 			PositionSide:   side,
+			MarginMode:     marginMode,
 			InitialBalance: ib,
 			FeeRate:        fr,
 		})
+		hasCrossPosition = hasCrossPosition || marginMode == "cross"
+	}
+	if hasCrossPosition && in.InitialBalance > 0 {
+		fw.WalletBalance = in.InitialBalance
+		fw.AvailableBalance = in.InitialBalance
+		fw.MarginBalance = in.InitialBalance
+		fw.TotalMarginBalance = in.InitialBalance
+		fw.TotalCrossWalletBalance = in.InitialBalance
 	}
 	return fw, nil
 }

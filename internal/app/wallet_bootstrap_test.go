@@ -20,8 +20,8 @@ func TestBuildFuturesWalletUsesCanonicalPositionSidesAndModeIdentity(t *testing.
 		{
 			name: "one way keeps one BOTH leg per symbol",
 			input: &futIn{PositionMode: "one_way", Positions: []futPosIn{
-				{Symbol: "ethusdt", PositionSide: "BOTH"},
-				{Symbol: "ETHUSDT", PositionSide: "BOTH"},
+				{Symbol: "ethusdt", PositionSide: "BOTH", MarginMode: "cross"},
+				{Symbol: "ETHUSDT", PositionSide: "BOTH", MarginMode: "cross"},
 			}},
 			wantSides:   []portfoliov1.FuturesPositionSide{portfoliov1.FuturesPositionSide_FUTURES_POSITION_SIDE_BOTH},
 			wantSymbols: []string{"ETHUSDT"},
@@ -29,9 +29,9 @@ func TestBuildFuturesWalletUsesCanonicalPositionSidesAndModeIdentity(t *testing.
 		{
 			name: "hedge keeps LONG and SHORT legs for same symbol",
 			input: &futIn{PositionMode: "hedge", Positions: []futPosIn{
-				{Symbol: "ETHUSDT", PositionSide: "LONG"},
-				{Symbol: "ethusdt", PositionSide: "SHORT"},
-				{Symbol: "ETHUSDT", PositionSide: "LONG"},
+				{Symbol: "ETHUSDT", PositionSide: "LONG", MarginMode: "cross"},
+				{Symbol: "ethusdt", PositionSide: "SHORT", MarginMode: "cross"},
+				{Symbol: "ETHUSDT", PositionSide: "LONG", MarginMode: "cross"},
 			}},
 			wantSides:   []portfoliov1.FuturesPositionSide{portfoliov1.FuturesPositionSide_FUTURES_POSITION_SIDE_LONG, portfoliov1.FuturesPositionSide_FUTURES_POSITION_SIDE_SHORT},
 			wantSymbols: []string{"ETHUSDT", "ETHUSDT"},
@@ -102,6 +102,11 @@ func TestBuildFuturesWalletRejectsNonCanonicalOrIllegalPositionSides(t *testing.
 			name:  "hedge both",
 			input: &futIn{PositionMode: "hedge", Positions: []futPosIn{{Symbol: "ETHUSDT", PositionSide: "BOTH"}}},
 			want:  "futures.positions[0].position_side must be LONG or SHORT in hedge mode",
+		},
+		{
+			name:  "missing per-position margin mode",
+			input: &futIn{PositionMode: "one_way", Positions: []futPosIn{{Symbol: "ETHUSDT", PositionSide: "BOTH"}}},
+			want:  "futures.positions[0].margin_mode must be cross or isolated",
 		},
 	}
 

@@ -102,7 +102,6 @@ type debugPackageFuturesWallet struct {
 	InitialBalance   string `yaml:"initial_balance"`
 	WalletBalance    string `yaml:"wallet_balance"`
 	AvailableBalance string `yaml:"available_balance"`
-	MarginMode       string `yaml:"margin_mode,omitempty"`
 	PositionMode     string `yaml:"position_mode,omitempty"`
 }
 
@@ -1191,7 +1190,7 @@ func buildDebugPackageWallet(snapshot *portfoliov1.PortfolioSnapshot, spot debug
 	if futures := walletState.GetFutures(); futures != nil {
 		out.Futures = &debugPackageFuturesWallet{
 			InitialBalance: debugPackageDecimal("", futures.GetInitialBalance()), WalletBalance: debugPackageDecimal("", futures.GetWalletBalance()),
-			AvailableBalance: debugPackageDecimal("", futures.GetAvailableBalance()), MarginMode: strings.TrimSpace(futures.GetMarginMode()), PositionMode: strings.TrimSpace(futures.GetPositionMode()),
+			AvailableBalance: debugPackageDecimal("", futures.GetAvailableBalance()), PositionMode: strings.TrimSpace(futures.GetPositionMode()),
 		}
 		if len(assets) == 0 {
 			assets[debugPackageDefaultWalletAsset] = debugPackageWalletAsset{Asset: debugPackageDefaultWalletAsset, Free: out.Futures.AvailableBalance, Locked: debugPackageDefaultDecimalValue}

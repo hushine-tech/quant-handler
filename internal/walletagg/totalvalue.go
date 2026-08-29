@@ -120,49 +120,41 @@ func FuturesPositionEquity(fw *portfoliov1.FuturesWallet) float64 {
 	if fw == nil {
 		return 0
 	}
-	mode := strings.ToLower(strings.TrimSpace(fw.GetMarginMode()))
 	pos := fw.GetPositions()
-	switch mode {
-	case "cross":
-		if len(pos) == 0 {
-			return fw.GetInitialBalance()
-		}
-		wb := fw.GetWalletBalance()
-		upnl := fw.GetTotalUnrealizedPnl()
-		im := 0.0
-		for _, p := range pos {
-			if math.Abs(p.GetQty()) <= qtyEps {
-				continue
-			}
-			lev := p.GetLeverage()
-			if lev <= 0 {
+	if len(pos) == 0 {
+		return fw.GetInitialBalance()
+	}
+	crossEquity := fw.GetWalletBalance()
+	hasCross := false
+	isolatedEquity := 0.0
+	for _, p := range pos {
+		switch strings.ToLower(strings.TrimSpace(p.GetMarginMode())) {
+		case "cross":
+			hasCross = true
+			if math.Abs(p.GetQty()) <= qtyEps || p.GetLeverage() <= 0 {
 				continue
 			}
 			mark := p.GetMarkPrice()
 			if mark == 0 {
 				mark = p.GetEntryPrice()
 			}
-			im += math.Abs(p.GetQty()) * mark / lev
-		}
-		if wb == 0 && upnl == 0 && im == 0 && fw.GetInitialBalance() > 0 {
-			return fw.GetInitialBalance()
-		}
-		return wb + upnl + im
-	default: // isolated
-		sum := 0.0
-		for _, p := range pos {
+			crossEquity += p.GetUnrealizedPnl() + math.Abs(p.GetQty())*mark/p.GetLeverage()
+		case "isolated":
 			if math.Abs(p.GetQty()) <= qtyEps {
-				sum += p.GetInitialBalance()
+				isolatedEquity += p.GetInitialBalance()
 				continue
 			}
 			im := 0.0
 			if p.GetLeverage() > 0 && p.GetEntryPrice() > 0 {
 				im = math.Abs(p.GetQty()) * p.GetEntryPrice() / p.GetLeverage()
 			}
-			sum += im + isolatedWBRaw(p) + p.GetUnrealizedPnl()
+			isolatedEquity += im + isolatedWBRaw(p) + p.GetUnrealizedPnl()
 		}
-		return sum
 	}
+	if !hasCross && crossEquity == 0 && fw.GetInitialBalance() > 0 {
+		crossEquity = fw.GetInitialBalance()
+	}
+	return crossEquity + isolatedEquity
 }
 
 func isolatedWBRaw(p *portfoliov1.FuturesPosition) float64 {
@@ -181,22 +173,12 @@ func FuturesWalletBalanceAndAvailable(fw *portfoliov1.FuturesWallet) (wb, av flo
 	if fw == nil {
 		return 0, 0
 	}
-	mode := strings.ToLower(strings.TrimSpace(fw.GetMarginMode()))
-	if mode == "cross" {
-		v := fw.GetInitialBalance()
-		if v == 0 && len(fw.GetPositions()) == 0 {
-			return 0, 0
-		}
-		if v == 0 {
-			for _, p := range fw.GetPositions() {
-				v += p.GetInitialBalance()
-			}
-		}
-		return v, v
-	}
-	sum := 0.0
+	cross := fw.GetInitialBalance()
+	isolated := 0.0
 	for _, p := range fw.GetPositions() {
-		sum += p.GetInitialBalance()
+		if strings.EqualFold(strings.TrimSpace(p.GetMarginMode()), "isolated") {
+			isolated += p.GetInitialBalance()
+		}
 	}
-	return sum, sum
+	return cross + isolated, cross + isolated
 }

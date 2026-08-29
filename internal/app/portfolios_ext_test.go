@@ -21,6 +21,32 @@ type fakeWalletPortfoliosClient struct {
 	err  error
 }
 
+func TestProtoFuturesToJSONUsesOnlyCanonicalUnrealizedPnl(t *testing.T) {
+	body, err := protoFuturesToJSON(&portfoliov1.FuturesWallet{
+		PositionMode:  "one_way",
+		UnrealizedPnl: 0,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]any
+	if err := json.Unmarshal(encoded, &fields); err != nil {
+		t.Fatal(err)
+	}
+	if got, exists := fields["unrealized_pnl"]; !exists || got != float64(0) {
+		t.Fatalf("canonical unrealized_pnl=%v exists=%v", got, exists)
+	}
+	for _, alias := range []string{"margin_mode", "total_unrealized_pnl"} {
+		if _, exists := fields[alias]; exists {
+			t.Fatalf("obsolete JSON alias %q is still exposed: %s", alias, encoded)
+		}
+	}
+}
+
 type fakeSymbolCatalogClient struct {
 	portfoliov1.PortfolioServiceClient
 
@@ -390,14 +416,12 @@ func TestPortfolioSnapshotWalletIncludesMarginBalanceFields(t *testing.T) {
 						},
 					},
 					Futures: &portfoliov1.FuturesWallet{
-						MarginMode:                 "cross",
 						PositionMode:               "one_way",
 						WalletBalance:              10000,
 						MarginBalance:              10000,
 						TotalMarginBalance:         10000,
 						AvailableBalance:           9000,
 						UnrealizedPnl:              0,
-						TotalUnrealizedPnl:         0,
 						TotalCrossWalletBalance:    10000,
 						TotalCrossUnPnl:            0,
 						MultiAssetsMode:            false,
@@ -728,7 +752,6 @@ func TestPortfolioSnapshotWalletStructurallySeparatesCanonicalFromDisplay(t *tes
 					MetricsAuthoritative:  true,
 					Spot:                  &portfoliov1.SpotWallet{Assets: nil},
 					Futures: &portfoliov1.FuturesWallet{
-						MarginMode:              "cross",
 						PositionMode:            "one_way",
 						WalletBalance:           10000,
 						MarginBalance:           10000,
