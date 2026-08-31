@@ -42,7 +42,7 @@ func (s *scriptedAssistantOpenAI) CreateResponse(_ context.Context, request open
 func TestAssistantRunsDocsToolLoopAndBuildsCitationFromRetrievedHit(t *testing.T) {
 	client := &scriptedAssistantOpenAI{steps: []assistantStep{
 		{response: toolResponse("resp_1", "call_1", "search_docs", `{"query":"钱包","limit":5}`)},
-		{response: textResponse("resp_2", `{"answer":"钱包按本地账本计算。","citations":[{"hit_id":"doc:wallet","anchor":"wallet-balance"}]}`)},
+		{response: textResponse("resp_2", `{"answer":"钱包按本地账本计算。","citations":[{"kind":"document","title":"Wallet Balance","document_id":"wallet","anchor":"wallet-balance"}]}`)},
 	}}
 	assistant := newTestAssistant(t, client)
 	answer, err := assistant.Ask(context.Background(), 42, docsstore.ScopePublic, "conv_test", "钱包怎么算？", "wallet")
@@ -72,7 +72,7 @@ func TestAssistantRunsDocsToolLoopAndBuildsCitationFromRetrievedHit(t *testing.T
 func TestAssistantPrivilegedSourceCitationUsesExactIndexedCoordinates(t *testing.T) {
 	client := &scriptedAssistantOpenAI{steps: []assistantStep{
 		{response: toolResponse("resp_1", "call_1", "search_source", `{"query":"AvailableBalance","limit":3}`)},
-		{response: textResponse("resp_2", `{"answer":"实现位于 core-service。","citations":[{"hit_id":"`+strings.Repeat("1", 64)+`","anchor":""}]}`)},
+		{response: textResponse("resp_2", `{"answer":"实现位于 core-service。","citations":[{"kind":"source","repository":"core-service","path":"internal/wallet/available.go","commit":"`+strings.Repeat("a", 40)+`","start_line":120,"end_line":150}]}`)},
 	}}
 	assistant := newTestAssistant(t, client)
 	answer, err := assistant.Ask(context.Background(), 42, docsstore.ScopePrivileged, "conv_test", "源码在哪里？", "ops")
@@ -98,13 +98,13 @@ func TestAssistantRejectsUnretrievedInvalidAndUnboundedAnswers(t *testing.T) {
 		steps []assistantStep
 		want  error
 	}{
-		{name: "direct-answer", steps: []assistantStep{{response: textResponse("r", `{"answer":"guess","citations":[{"hit_id":"doc:wallet","anchor":"wallet-balance"}]}`)}}, want: ErrAnswerUnverified},
+		{name: "direct-answer", steps: []assistantStep{{response: textResponse("r", `{"answer":"guess","citations":[{"kind":"document","title":"Wallet Balance","document_id":"wallet","anchor":"wallet-balance"}]}`)}}, want: ErrAnswerUnverified},
 		{name: "unknown-tool", steps: []assistantStep{{response: toolResponse("r", "c", "shell", `{}`)}}, want: ErrAssistantProtocol},
 		{name: "public-source-tool", steps: []assistantStep{{response: toolResponse("r", "c", "search_source", `{"query":"wallet"}`)}}, want: ErrForbidden},
-		{name: "citation-outside-results", steps: []assistantStep{{response: toolResponse("r1", "c1", "search_docs", `{"query":"钱包"}`)}, {response: textResponse("r2", `{"answer":"bad","citations":[{"hit_id":"doc:other","anchor":"x"}]}`)}}, want: ErrAnswerUnverified},
+		{name: "citation-outside-results", steps: []assistantStep{{response: toolResponse("r1", "c1", "search_docs", `{"query":"钱包"}`)}, {response: textResponse("r2", `{"answer":"bad","citations":[{"kind":"document","title":"Other","document_id":"other","anchor":"x"}]}`)}}, want: ErrAnswerUnverified},
 		{name: "missing-citation", steps: []assistantStep{{response: toolResponse("r1", "c1", "search_docs", `{"query":"钱包"}`)}, {response: textResponse("r2", `{"answer":"bad","citations":[]}`)}}, want: ErrAnswerUnverified},
-		{name: "invalid-anchor", steps: []assistantStep{{response: toolResponse("r1", "c1", "search_docs", `{"query":"钱包"}`)}, {response: textResponse("r2", `{"answer":"bad","citations":[{"hit_id":"doc:wallet","anchor":"invented"}]}`)}}, want: ErrAnswerUnverified},
-		{name: "forged-fields", steps: []assistantStep{{response: toolResponse("r1", "c1", "search_docs", `{"query":"钱包"}`)}, {response: textResponse("r2", `{"answer":"bad","citations":[{"hit_id":"doc:wallet","anchor":"wallet-balance","commit":"`+strings.Repeat("b", 40)+`"}]}`)}}, want: ErrAnswerUnverified},
+		{name: "invalid-anchor", steps: []assistantStep{{response: toolResponse("r1", "c1", "search_docs", `{"query":"钱包"}`)}, {response: textResponse("r2", `{"answer":"bad","citations":[{"kind":"document","title":"Wallet Balance","document_id":"wallet","anchor":"invented"}]}`)}}, want: ErrAnswerUnverified},
+		{name: "forged-fields", steps: []assistantStep{{response: toolResponse("r1", "c1", "search_docs", `{"query":"钱包"}`)}, {response: textResponse("r2", `{"answer":"bad","citations":[{"kind":"document","title":"Wallet Balance","document_id":"wallet","anchor":"wallet-balance","commit":"`+strings.Repeat("b", 40)+`"}]}`)}}, want: ErrAnswerUnverified},
 		{name: "upstream", steps: []assistantStep{{err: upstream}}, want: upstream},
 	}
 	for _, test := range tests {

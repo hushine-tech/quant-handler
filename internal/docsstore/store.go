@@ -141,6 +141,18 @@ func (s *Store) RetrievalCorpus() (RetrievalCorpus, error) {
 	if err != nil {
 		return RetrievalCorpus{}, err
 	}
+	return retrievalCorpusFromSnapshot(snapshot)
+}
+
+func (s *Store) RetrievalCorpusAt(commit string) (RetrievalCorpus, error) {
+	snapshot, err := s.atCommit(commit)
+	if err != nil {
+		return RetrievalCorpus{}, err
+	}
+	return retrievalCorpusFromSnapshot(snapshot)
+}
+
+func retrievalCorpusFromSnapshot(snapshot *snapshot) (RetrievalCorpus, error) {
 	documents := make([]RetrievalDocument, 0, len(snapshot.search.Documents))
 	for _, document := range snapshot.search.Documents {
 		stored, ok := snapshot.documents[document.ID]

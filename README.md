@@ -14,6 +14,11 @@ HTTP BFF for the quant portal: JWT login, CORS for the React app, and gRPC fan-o
 | `AUTH_CORS_ORIGINS` | no | Comma-separated allowed `Origin` values (defaults to the local frontend at both `localhost:5173` and `127.0.0.1:5173`) |
 | `DOCS_ROOT` | no | Read-only path to the verified document package `current` symlink. When absent or invalid, only document endpoints return `DOCS_UNAVAILABLE`; health and business APIs remain available. |
 | `DOCS_PRIVILEGED_USER_IDS` | no | Comma-separated positive user IDs allowed to read privileged architecture and operations documents. Every other authenticated user receives only public documents. |
+| `DOCS_CHAT_ENABLED` | no | Enables the document assistant endpoints. Disabled by default; document reading and browser search remain available. |
+| `OPENAI_API_KEY` | when chat enabled | OpenAI API key for `quant-handler`. Environment-only; it is never accepted from YAML or sent to the browser. |
+| `OPENAI_BASE_URL` | no | Responses/Conversations API base URL (default `https://api.openai.com/v1`; override for deterministic testing or an explicitly compatible endpoint). |
+| `OPENAI_DOCS_MODEL` | when chat enabled | Model used by the document assistant. |
+| `DOCS_CHAT_REQUESTS_PER_MINUTE` | when chat enabled | Positive per-user question limit. Invalid, stale, or inaccessible-document requests do not consume a token. |
 
 ## Run locally
 
@@ -49,6 +54,16 @@ All document endpoints require the same Bearer JWT as the portal. Authorization 
 - `GET /api/docs/assets/{asset_path}` — a verified asset referenced by an authorized document.
 
 Responses include an `ETag` and honor `If-None-Match`. The browser never receives a filesystem path and cannot request files that are not registered in the verified package.
+
+### Document assistant
+
+The assistant uses one OpenAI Conversation locator per authenticated Hushine user. Conversation metadata is bound to the JWT user, exact document commit, and access scope before history is read or a question is appended.
+
+- `POST /api/docs/conversations` — create a Conversation for the current document release.
+- `GET /api/docs/conversations/{conversation_id}` — restore authorized display messages and verified citations.
+- `POST /api/docs/conversations/{conversation_id}/messages` — ask a question with `{"question":"...","current_document_id":"..."}`.
+
+The question route accepts at most 8,000 Unicode code points. It exposes only read-only document retrieval and, for privileged users, exact deployed-source retrieval. A stale locator returns `DOCS_CONVERSATION_STALE`; local or upstream limits return `DOCS_RATE_LIMITED` with `Retry-After`; a model answer whose citations do not match retrieved evidence returns `DOCS_ANSWER_UNVERIFIED`. These failures do not disable the Phase 1 document endpoints.
 
 ## Runtime And Market-Data Control Plane
 

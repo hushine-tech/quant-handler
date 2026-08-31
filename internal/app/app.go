@@ -109,6 +109,7 @@ func Run(cfg *config.Config) error {
 		}
 	}
 	var docsOpenAI openaiapi.Client
+	var docsRateLimit *docsRateLimiter
 	if cfg.DocsAssistant.Enabled {
 		docsOpenAI, err = openaiapi.NewClient(openaiapi.Options{
 			BaseURL: cfg.DocsAssistant.BaseURL,
@@ -117,19 +118,27 @@ func Run(cfg *config.Config) error {
 		if err != nil {
 			return fmt.Errorf("configure docs assistant: %w", err)
 		}
+		docsRateLimit = newDocsRateLimiter(
+			cfg.DocsAssistant.RequestsPerMinute,
+			docsRateLimiterMaxUsers,
+			docsRateLimiterIdleTTL,
+			time.Now,
+		)
 	}
 
 	s := &server{
-		portfolios:      cli,
-		orders:          orderCli,
-		controlPanel:    controlPanel,
-		cpRuntime:       cpRuntimeCli,
-		marketData:      marketDataCli,
-		downloadRunJobs: newDownloadRunJobStore(),
-		jwtSecret:       []byte(jwtSecret),
-		corsOrigins:     corsOrigins,
-		docs:            docsstore.New(cfg.Docs.Root),
-		docsOpenAI:      docsOpenAI,
+		portfolios:         cli,
+		orders:             orderCli,
+		controlPanel:       controlPanel,
+		cpRuntime:          cpRuntimeCli,
+		marketData:         marketDataCli,
+		downloadRunJobs:    newDownloadRunJobStore(),
+		jwtSecret:          []byte(jwtSecret),
+		corsOrigins:        corsOrigins,
+		docs:               docsstore.New(cfg.Docs.Root),
+		docsOpenAI:         docsOpenAI,
+		docsAssistantModel: strings.TrimSpace(cfg.DocsAssistant.Model),
+		docsRateLimiter:    docsRateLimit,
 		docsPrivilegedUIDs: func() map[int64]struct{} {
 			ids := make(map[int64]struct{}, len(cfg.Docs.PrivilegedUserIDs))
 			for _, id := range cfg.Docs.PrivilegedUserIDs {
@@ -248,6 +257,8 @@ type server struct {
 	corsOrigins        []string
 	docs               *docsstore.Store
 	docsOpenAI         openaiapi.Client
+	docsAssistantModel string
+	docsRateLimiter    *docsRateLimiter
 	docsPrivilegedUIDs map[int64]struct{}
 }
 

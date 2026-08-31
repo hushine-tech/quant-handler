@@ -21,8 +21,10 @@ var (
 const assistantInstructions = `You answer questions about the current Hushine deployment.
 You must retrieve evidence with the available search tools before making factual claims.
 Never invent a source, path, line number, document, or anchor. If retrieval returns no evidence, say so.
-Return only strict JSON: {"answer":"...","citations":[{"hit_id":"...","anchor":"..."}]}.
-Every factual answer must cite one or more hit_id values returned by tools. For source hits anchor must be empty.`
+Return only strict JSON using this public citation shape:
+{"answer":"...","citations":[{"kind":"document","title":"...","document_id":"...","anchor":"..."}]}
+or {"kind":"source","repository":"...","path":"...","commit":"...","start_line":1,"end_line":2}.
+Every citation must exactly copy a result returned by a search tool. Never include hit_id in the final answer.`
 
 type AssistantOptions struct {
 	OpenAI    openaiapi.Client
@@ -169,55 +171,51 @@ func (a *Assistant) executeTool(scope docsstore.AccessScope, call openaiapi.Item
 	}
 }
 
-type rawAnswer struct {
-	Answer    string        `json:"answer"`
-	Citations []rawCitation `json:"citations"`
-}
-
-type rawCitation struct {
-	HitID  string `json:"hit_id"`
-	Anchor string `json:"anchor"`
-}
-
 func verifiedAnswer(value string, retrieved map[string]SearchHit, scope docsstore.AccessScope) (Answer, error) {
 	decoder := json.NewDecoder(bytes.NewBufferString(value))
 	decoder.DisallowUnknownFields()
-	var raw rawAnswer
-	if err := decoder.Decode(&raw); err != nil || decoder.Decode(&struct{}{}) != io.EOF || strings.TrimSpace(raw.Answer) == "" || len(raw.Citations) == 0 {
+	var answer Answer
+	if err := decoder.Decode(&answer); err != nil || decoder.Decode(&struct{}{}) != io.EOF || strings.TrimSpace(answer.Answer) == "" || len(answer.Citations) == 0 {
 		return Answer{}, ErrAnswerUnverified
 	}
-	citations := make([]Citation, 0, len(raw.Citations))
-	seen := make(map[string]struct{}, len(raw.Citations))
-	for _, requested := range raw.Citations {
-		if _, duplicate := seen[requested.HitID]; duplicate {
+	seen := make(map[string]struct{}, len(answer.Citations))
+	for _, citation := range answer.Citations {
+		if validateCitation(citation) != nil {
 			return Answer{}, ErrAnswerUnverified
 		}
-		seen[requested.HitID] = struct{}{}
-		hit, ok := retrieved[requested.HitID]
-		if !ok {
+		key := citationKey(citation)
+		if _, duplicate := seen[key]; duplicate {
 			return Answer{}, ErrAnswerUnverified
 		}
-		switch hit.Kind {
-		case "document":
-			if !containsString(hit.Anchors, requested.Anchor) {
-				return Answer{}, ErrAnswerUnverified
-			}
-			citations = append(citations, Citation{
-				Kind: "document", Title: hit.Title, DocumentID: hit.DocumentID, Anchor: requested.Anchor,
-			})
-		case "source":
-			if scope != docsstore.ScopePrivileged || requested.Anchor != "" || !commitPattern.MatchString(hit.Commit) || hit.StartLine < 1 || hit.EndLine < hit.StartLine {
-				return Answer{}, ErrAnswerUnverified
-			}
-			citations = append(citations, Citation{
-				Kind: "source", Repository: hit.Repository, Path: hit.Path, Commit: hit.Commit,
-				StartLine: hit.StartLine, EndLine: hit.EndLine,
-			})
-		default:
+		seen[key] = struct{}{}
+		if !citationMatchesRetrieved(citation, retrieved, scope) {
 			return Answer{}, ErrAnswerUnverified
 		}
 	}
-	return Answer{Answer: strings.TrimSpace(raw.Answer), Citations: citations}, nil
+	answer.Answer = strings.TrimSpace(answer.Answer)
+	return answer, nil
+}
+
+func citationMatchesRetrieved(citation Citation, retrieved map[string]SearchHit, scope docsstore.AccessScope) bool {
+	for _, hit := range retrieved {
+		switch citation.Kind {
+		case "document":
+			if hit.Kind == "document" && hit.Title == citation.Title && hit.DocumentID == citation.DocumentID && containsString(hit.Anchors, citation.Anchor) {
+				return true
+			}
+		case "source":
+			if scope == docsstore.ScopePrivileged && hit.Kind == "source" && hit.Repository == citation.Repository && hit.Path == citation.Path &&
+				hit.Commit == citation.Commit && hit.StartLine == citation.StartLine && hit.EndLine == citation.EndLine {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func citationKey(citation Citation) string {
+	return fmt.Sprintf("%s\x00%s\x00%s\x00%s\x00%s\x00%d\x00%d", citation.Kind, citation.Title, citation.DocumentID,
+		citation.Anchor, citation.Repository+"/"+citation.Path+"@"+citation.Commit, citation.StartLine, citation.EndLine)
 }
 
 func containsString(values []string, value string) bool {
