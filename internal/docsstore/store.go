@@ -135,6 +135,18 @@ func (s *Store) Document(scope AccessScope, id string) (DocumentContent, error) 
 	if err != nil {
 		return DocumentContent{}, err
 	}
+	return documentFromSnapshot(snapshot, scope, id)
+}
+
+func (s *Store) DocumentAt(scope AccessScope, commit, id string) (DocumentContent, error) {
+	snapshot, err := s.atCommit(commit)
+	if err != nil {
+		return DocumentContent{}, err
+	}
+	return documentFromSnapshot(snapshot, scope, id)
+}
+
+func documentFromSnapshot(snapshot *snapshot, scope AccessScope, id string) (DocumentContent, error) {
 	document, ok := snapshot.documents[id]
 	if !ok || !authorized(scope, document.metadata.Visibility) {
 		return DocumentContent{}, ErrNotFound
@@ -151,6 +163,18 @@ func (s *Store) Asset(scope AccessScope, assetPath string) (Asset, error) {
 	if err != nil {
 		return Asset{}, err
 	}
+	return assetFromSnapshot(snapshot, scope, assetPath)
+}
+
+func (s *Store) AssetAt(scope AccessScope, commit, assetPath string) (Asset, error) {
+	snapshot, err := s.atCommit(commit)
+	if err != nil {
+		return Asset{}, err
+	}
+	return assetFromSnapshot(snapshot, scope, assetPath)
+}
+
+func assetFromSnapshot(snapshot *snapshot, scope AccessScope, assetPath string) (Asset, error) {
 	normalized, ok := normalizeLookupPath(assetPath, "assets")
 	if !ok {
 		return Asset{}, ErrNotFound
@@ -199,6 +223,35 @@ func (s *Store) current() (*snapshot, error) {
 	if err != nil || !info.IsDir() {
 		return nil, unavailable(fmt.Errorf("release root is not a directory"))
 	}
+	return s.loadRelease(release)
+}
+
+func (s *Store) atCommit(commit string) (*snapshot, error) {
+	if !commitPattern.MatchString(commit) {
+		return nil, ErrNotFound
+	}
+	s.mu.RLock()
+	for _, cached := range s.byID {
+		if cached.manifest.DocsCommit == commit {
+			s.mu.RUnlock()
+			return cached, nil
+		}
+	}
+	s.mu.RUnlock()
+
+	currentRelease, err := filepath.EvalSymlinks(s.root)
+	if err != nil {
+		return nil, unavailable(err)
+	}
+	currentRelease, err = filepath.Abs(currentRelease)
+	if err != nil {
+		return nil, unavailable(err)
+	}
+	release := filepath.Join(filepath.Dir(currentRelease), commit)
+	return s.loadRelease(release)
+}
+
+func (s *Store) loadRelease(release string) (*snapshot, error) {
 	s.mu.RLock()
 	cached := s.byID[release]
 	s.mu.RUnlock()

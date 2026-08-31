@@ -62,12 +62,17 @@ func TestDocsFilterManifestSearchDocumentsAndAssetsByUser(t *testing.T) {
 		t.Fatalf("public search documents = %+v", publicSearchBody.Documents)
 	}
 
-	hidden := docsRequest(t, handler, s, http.MethodGet, "/api/docs/documents/private", 1, "")
+	unpinned := docsRequest(t, handler, s, http.MethodGet, "/api/docs/documents/public", 1, "")
+	if unpinned.Code != http.StatusBadRequest {
+		t.Fatalf("unpinned document status = %d, want 400; body=%s", unpinned.Code, unpinned.Body.String())
+	}
+
+	hidden := docsRequest(t, handler, s, http.MethodGet, pinnedDocsTarget("/api/docs/documents/private"), 1, "")
 	if hidden.Code != http.StatusNotFound {
 		t.Fatalf("hidden document status = %d, want 404; body=%s", hidden.Code, hidden.Body.String())
 	}
 
-	document := docsRequest(t, handler, s, http.MethodGet, "/api/docs/documents/public", 1, "")
+	document := docsRequest(t, handler, s, http.MethodGet, pinnedDocsTarget("/api/docs/documents/public"), 1, "")
 	if document.Code != http.StatusOK {
 		t.Fatalf("document status = %d; body=%s", document.Code, document.Body.String())
 	}
@@ -80,13 +85,16 @@ func TestDocsFilterManifestSearchDocumentsAndAssetsByUser(t *testing.T) {
 	if document.Header().Get("ETag") == "" {
 		t.Fatal("document ETag is empty")
 	}
+	if got := document.Header().Get("X-Docs-Commit"); got != docsTestCommit {
+		t.Fatalf("document commit = %q, want %q", got, docsTestCommit)
+	}
 
-	notModified := docsRequest(t, handler, s, http.MethodGet, "/api/docs/documents/public", 1, document.Header().Get("ETag"))
+	notModified := docsRequest(t, handler, s, http.MethodGet, pinnedDocsTarget("/api/docs/documents/public"), 1, document.Header().Get("ETag"))
 	if notModified.Code != http.StatusNotModified || notModified.Body.Len() != 0 {
 		t.Fatalf("conditional document = status %d body %q", notModified.Code, notModified.Body.String())
 	}
 
-	asset := docsRequest(t, handler, s, http.MethodGet, "/api/docs/assets/public.svg", 1, "")
+	asset := docsRequest(t, handler, s, http.MethodGet, pinnedDocsTarget("/api/docs/assets/public.svg"), 1, "")
 	if asset.Code != http.StatusOK {
 		t.Fatalf("asset status = %d; body=%s", asset.Code, asset.Body.String())
 	}
@@ -96,7 +104,7 @@ func TestDocsFilterManifestSearchDocumentsAndAssetsByUser(t *testing.T) {
 	if asset.Header().Get("ETag") == "" || asset.Header().Get("Cache-Control") == "" {
 		t.Fatalf("asset cache headers = ETag %q, Cache-Control %q", asset.Header().Get("ETag"), asset.Header().Get("Cache-Control"))
 	}
-	privateAsset := docsRequest(t, handler, s, http.MethodGet, "/api/docs/assets/private.svg", 1, "")
+	privateAsset := docsRequest(t, handler, s, http.MethodGet, pinnedDocsTarget("/api/docs/assets/private.svg"), 1, "")
 	if privateAsset.Code != http.StatusNotFound {
 		t.Fatalf("hidden asset status = %d, want 404", privateAsset.Code)
 	}
@@ -158,6 +166,10 @@ func docsRequest(t *testing.T, handler http.Handler, s *server, method, target s
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, request)
 	return recorder
+}
+
+func pinnedDocsTarget(target string) string {
+	return target + "?docs_commit=" + docsTestCommit
 }
 
 func decodeDocsBody(t *testing.T, recorder *httptest.ResponseRecorder, target any) {

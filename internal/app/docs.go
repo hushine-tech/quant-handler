@@ -61,7 +61,12 @@ func (s *server) handleDocs(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusNotFound, "document not found")
 			return
 		}
-		document, err := s.docs.Document(scope, documentID)
+		commit, ok := docsCommit(r)
+		if !ok {
+			writeErr(w, http.StatusBadRequest, "docs_commit is required")
+			return
+		}
+		document, err := s.docs.DocumentAt(scope, commit, documentID)
 		if err != nil {
 			writeDocsStoreError(w, r, err)
 			return
@@ -69,6 +74,7 @@ func (s *server) handleDocs(w http.ResponseWriter, r *http.Request) {
 		if writeDocsNotModified(w, r, document.ETag) {
 			return
 		}
+		w.Header().Set("X-Docs-Commit", commit)
 		w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(document.Markdown))
@@ -78,7 +84,12 @@ func (s *server) handleDocs(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusNotFound, "asset not found")
 			return
 		}
-		asset, err := s.docs.Asset(scope, "assets/"+assetPath)
+		commit, ok := docsCommit(r)
+		if !ok {
+			writeErr(w, http.StatusBadRequest, "docs_commit is required")
+			return
+		}
+		asset, err := s.docs.AssetAt(scope, commit, "assets/"+assetPath)
 		if err != nil {
 			writeDocsStoreError(w, r, err)
 			return
@@ -86,6 +97,7 @@ func (s *server) handleDocs(w http.ResponseWriter, r *http.Request) {
 		if writeDocsNotModified(w, r, asset.ETag) {
 			return
 		}
+		w.Header().Set("X-Docs-Commit", commit)
 		w.Header().Set("Content-Type", asset.ContentType)
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.WriteHeader(http.StatusOK)
@@ -93,6 +105,19 @@ func (s *server) handleDocs(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeErr(w, http.StatusNotFound, "document endpoint not found")
 	}
+}
+
+func docsCommit(r *http.Request) (string, bool) {
+	values, ok := r.URL.Query()["docs_commit"]
+	if !ok || len(values) != 1 || len(values[0]) != 40 {
+		return "", false
+	}
+	for _, char := range values[0] {
+		if (char < '0' || char > '9') && (char < 'a' || char > 'f') {
+			return "", false
+		}
+	}
+	return values[0], true
 }
 
 func docsDocumentID(value string) (string, bool) {

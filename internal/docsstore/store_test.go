@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -225,6 +226,35 @@ func TestStoreLoadsOnlyCompleteAtomicCurrentTargets(t *testing.T) {
 	again, err := store.Document(ScopePublic, "public")
 	if err != nil || again.Markdown != second.Markdown {
 		t.Fatalf("cached complete target = %+v, %v", again, err)
+	}
+}
+
+func TestStoreServesContentPinnedToTheManifestCommitAfterCurrentSwitch(t *testing.T) {
+	root := t.TempDir()
+	writeRelease(t, root, commitA, "Version A.")
+	writeRelease(t, root, commitB, "Version B.")
+	current := switchCurrent(t, root, filepath.Join("releases", commitA))
+	store := New(current)
+
+	manifest, err := store.Manifest(ScopePublic)
+	if err != nil || manifest.DocsCommit != commitA {
+		t.Fatalf("manifest = %+v, %v", manifest, err)
+	}
+	switchCurrent(t, root, filepath.Join("releases", commitB))
+
+	pinned, err := store.DocumentAt(ScopePublic, commitA, "public")
+	if err != nil || !strings.Contains(pinned.Markdown, "Version A.") {
+		t.Fatalf("pinned document = %+v, %v", pinned, err)
+	}
+	currentDocument, err := store.Document(ScopePublic, "public")
+	if err != nil || !strings.Contains(currentDocument.Markdown, "Version B.") {
+		t.Fatalf("current document = %+v, %v", currentDocument, err)
+	}
+	if _, err := store.AssetAt(ScopePublic, commitA, "assets/public.svg"); err != nil {
+		t.Fatalf("pinned asset: %v", err)
+	}
+	if _, err := store.DocumentAt(ScopePublic, "../../etc/passwd", "public"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("invalid commit error = %v, want ErrNotFound", err)
 	}
 }
 

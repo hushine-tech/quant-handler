@@ -55,11 +55,11 @@ func TestDocsPortalSmokeFromRelease(t *testing.T) {
 	}
 
 	publicDocument := publicManifest.Documents[0]
-	publicContent := docsRequest(t, mux, s, http.MethodGet, "/api/docs/documents/"+publicDocument.ID, 1, "")
+	publicContent := docsRequest(t, mux, s, http.MethodGet, "/api/docs/documents/"+publicDocument.ID+"?docs_commit="+publicManifest.DocsCommit, 1, "")
 	if publicContent.Code != http.StatusOK || publicContent.Header().Get("Content-Type") != "text/markdown; charset=utf-8" || publicContent.Body.Len() == 0 {
 		t.Fatalf("public content = status %d type %q bytes %d", publicContent.Code, publicContent.Header().Get("Content-Type"), publicContent.Body.Len())
 	}
-	publicNotModified := docsRequest(t, mux, s, http.MethodGet, "/api/docs/documents/"+publicDocument.ID, 1, publicContent.Header().Get("ETag"))
+	publicNotModified := docsRequest(t, mux, s, http.MethodGet, "/api/docs/documents/"+publicDocument.ID+"?docs_commit="+publicManifest.DocsCommit, 1, publicContent.Header().Get("ETag"))
 	if publicNotModified.Code != http.StatusNotModified || publicNotModified.Body.Len() != 0 {
 		t.Fatalf("conditional content = status %d bytes %d", publicNotModified.Code, publicNotModified.Body.Len())
 	}
