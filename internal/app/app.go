@@ -27,6 +27,7 @@ import (
 	"github.com/hushine-tech/quant-handler/internal/controlpanel"
 	"github.com/hushine-tech/quant-handler/internal/docsstore"
 	"github.com/hushine-tech/quant-handler/internal/logger"
+	openaiapi "github.com/hushine-tech/quant-handler/internal/openai"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -107,6 +108,16 @@ func Run(cfg *config.Config) error {
 			"http://127.0.0.1:5173",
 		}
 	}
+	var docsOpenAI openaiapi.Client
+	if cfg.DocsAssistant.Enabled {
+		docsOpenAI, err = openaiapi.NewClient(openaiapi.Options{
+			BaseURL: cfg.DocsAssistant.BaseURL,
+			APIKey:  cfg.DocsAssistant.APIKey,
+		})
+		if err != nil {
+			return fmt.Errorf("configure docs assistant: %w", err)
+		}
+	}
 
 	s := &server{
 		portfolios:      cli,
@@ -118,6 +129,7 @@ func Run(cfg *config.Config) error {
 		jwtSecret:       []byte(jwtSecret),
 		corsOrigins:     corsOrigins,
 		docs:            docsstore.New(cfg.Docs.Root),
+		docsOpenAI:      docsOpenAI,
 		docsPrivilegedUIDs: func() map[int64]struct{} {
 			ids := make(map[int64]struct{}, len(cfg.Docs.PrivilegedUserIDs))
 			for _, id := range cfg.Docs.PrivilegedUserIDs {
@@ -188,6 +200,8 @@ func newHTTPMux(s *server) *http.ServeMux {
 	// Phase D3: runtime credentials (settings → keypair issue / list / revoke)
 	mux.HandleFunc("/api/runtime-credentials", s.cors(s.auth(http.HandlerFunc(s.handleRuntimeCredentialsCollection))).ServeHTTP)
 	mux.HandleFunc("/api/runtime-credentials/", s.cors(s.auth(http.HandlerFunc(s.handleRuntimeCredentialsByID))).ServeHTTP)
+	mux.HandleFunc("/api/docs/conversations", s.cors(s.auth(http.HandlerFunc(s.handleDocsConversations))).ServeHTTP)
+	mux.HandleFunc("/api/docs/conversations/", s.cors(s.auth(http.HandlerFunc(s.handleDocsConversation))).ServeHTTP)
 	mux.HandleFunc("/api/docs/", s.cors(s.auth(http.HandlerFunc(s.handleDocs))).ServeHTTP)
 	return mux
 }
@@ -233,6 +247,7 @@ type server struct {
 	jwtSecret          []byte
 	corsOrigins        []string
 	docs               *docsstore.Store
+	docsOpenAI         openaiapi.Client
 	docsPrivilegedUIDs map[int64]struct{}
 }
 
