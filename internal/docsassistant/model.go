@@ -86,7 +86,10 @@ func RestoreMessages(items []openaiapi.Item) ([]Message, error) {
 	return messages, nil
 }
 
-func ValidateRestoredMessages(messages []Message, scope docsstore.AccessScope, manifest docsstore.Manifest) error {
+func ValidateRestoredMessages(messages []Message, scope docsstore.AccessScope, manifest docsstore.Manifest, corpus docsstore.RetrievalCorpus) error {
+	if corpus.DocsCommit != manifest.DocsCommit {
+		return ErrMalformedHistory
+	}
 	documents := make(map[string]string, len(manifest.Documents))
 	for _, document := range manifest.Documents {
 		documents[document.ID] = document.Title
@@ -95,6 +98,18 @@ func ValidateRestoredMessages(messages []Message, scope docsstore.AccessScope, m
 	for _, repository := range manifest.Deployment.Repositories {
 		repositories[repository.Name] = repository.Commit
 	}
+	documentAnchors := make(map[string]map[string]struct{}, len(corpus.Documents))
+	for _, document := range corpus.Documents {
+		anchors := make(map[string]struct{}, len(document.Anchors))
+		for _, anchor := range document.Anchors {
+			anchors[anchor] = struct{}{}
+		}
+		documentAnchors[document.ID] = anchors
+	}
+	sources := make(map[string]struct{}, len(corpus.Sources))
+	for _, source := range corpus.Sources {
+		sources[sourceCitationKey(source.Repository, source.Path, source.Commit, source.StartLine, source.EndLine)] = struct{}{}
+	}
 	for _, message := range messages {
 		for _, citation := range message.Citations {
 			switch citation.Kind {
@@ -102,8 +117,14 @@ func ValidateRestoredMessages(messages []Message, scope docsstore.AccessScope, m
 				if documents[citation.DocumentID] != citation.Title {
 					return ErrMalformedHistory
 				}
+				if _, ok := documentAnchors[citation.DocumentID][citation.Anchor]; !ok {
+					return ErrMalformedHistory
+				}
 			case "source":
 				if scope != docsstore.ScopePrivileged || repositories[citation.Repository] != citation.Commit {
+					return ErrMalformedHistory
+				}
+				if _, ok := sources[sourceCitationKey(citation.Repository, citation.Path, citation.Commit, citation.StartLine, citation.EndLine)]; !ok {
 					return ErrMalformedHistory
 				}
 			default:
@@ -112,6 +133,10 @@ func ValidateRestoredMessages(messages []Message, scope docsstore.AccessScope, m
 		}
 	}
 	return nil
+}
+
+func sourceCitationKey(repository, path, commit string, startLine, endLine int) string {
+	return fmt.Sprintf("%s\x00%s\x00%s\x00%d\x00%d", repository, path, commit, startLine, endLine)
 }
 
 func messageText(content []openaiapi.Content, expectedType string) (string, error) {

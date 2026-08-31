@@ -59,6 +59,12 @@ func TestAssistantRunsDocsToolLoopAndBuildsCitationFromRetrievedHit(t *testing.T
 	if len(client.requests) != 2 || len(client.requests[1].ToolOutputs) != 1 || !strings.Contains(client.requests[1].ToolOutputs[0].Output, `"id":"doc:wallet"`) {
 		t.Fatalf("requests = %+v", client.requests)
 	}
+	if got := client.requests[0].Input[0].Content[0].Text; got != "钱包怎么算？" {
+		t.Fatalf("persisted user message = %q", got)
+	}
+	if !strings.Contains(client.requests[0].Instructions, "Current document ID: wallet") {
+		t.Fatalf("instructions = %q", client.requests[0].Instructions)
+	}
 	for _, request := range client.requests {
 		if request.ConversationID != "conv_test" || len(request.ContextManagement) != 1 || request.ContextManagement[0].Type != "compaction" {
 			t.Fatalf("conversation/context management = %+v", request)

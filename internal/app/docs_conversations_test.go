@@ -113,7 +113,7 @@ func TestDocsConversationRestoresOnlyDisplayMessagesAndVerifiedCitations(t *test
 	fake.items = []openaiapi.Item{
 		{ID: "msg_1", Type: "message", Role: "user", Status: "completed", Content: []openaiapi.Content{{Type: "input_text", Text: "钱包怎么算？"}}},
 		{ID: "fc_1", Type: "function_call", CallID: "call_1", Name: "search_docs", Arguments: `{}`},
-		{ID: "msg_2", Type: "message", Role: "assistant", Status: "completed", Content: []openaiapi.Content{{Type: "output_text", Text: `{"answer":"按本地账本计算。","citations":[{"kind":"document","title":"Public","document_id":"public","anchor":"wallet"}]}`}}},
+		{ID: "msg_2", Type: "message", Role: "assistant", Status: "completed", Content: []openaiapi.Content{{Type: "output_text", Text: `{"answer":"按本地账本计算。","citations":[{"kind":"document","title":"Public","document_id":"public","anchor":"public"}]}`}}},
 	}
 
 	restored := docsRequest(t, newHTTPMux(s), s, http.MethodGet, "/api/docs/conversations/conv_test", 1, "")
@@ -219,6 +219,23 @@ func TestDocsConversationRejectsMalformedHistoryAndDisabledChatSafely(t *testing
 			}
 		})
 	}
+
+	t.Run("privileged-forged-source-coordinates", func(t *testing.T) {
+		fake := &fakeDocsOpenAI{}
+		s := newDocsConversationServer(t, fake, map[int64]struct{}{1: {}})
+		fake.conversation = openaiapi.Conversation{
+			ID: "conv_test", Object: "conversation",
+			Metadata: docsassistant.ConversationMetadata(s.jwtSecret, 1, docsTestCommit, docsstore.ScopePrivileged),
+		}
+		fake.items = []openaiapi.Item{{
+			ID: "msg_bad_source", Type: "message", Role: "assistant", Status: "completed",
+			Content: []openaiapi.Content{{Type: "output_text", Text: `{"answer":"forged","citations":[{"kind":"source","repository":"core-service","path":"internal/forged.go","commit":"` + docsTestCommit + `","start_line":99,"end_line":120}]}`}},
+		}}
+		response := docsRequest(t, newHTTPMux(s), s, http.MethodGet, "/api/docs/conversations/conv_test", 1, "")
+		if response.Code != http.StatusBadGateway || !strings.Contains(response.Body.String(), "DOCS_CHAT_UNAVAILABLE") {
+			t.Fatalf("status = %d; body=%s", response.Code, response.Body.String())
+		}
+	})
 
 	t.Run("disabled", func(t *testing.T) {
 		s := newDocsTestServer(t, nil)

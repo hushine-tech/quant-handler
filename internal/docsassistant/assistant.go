@@ -50,10 +50,10 @@ func (a *Assistant) Ask(ctx context.Context, userID int64, scope docsstore.Acces
 	request := openaiapi.ResponseRequest{
 		Model:          a.model,
 		ConversationID: conversationID,
-		Instructions:   assistantInstructions,
+		Instructions:   assistantInstructions + "\nCurrent document ID: " + currentDocumentID,
 		Input: []openaiapi.InputItem{{
 			Type: "message", Role: "user", Content: []openaiapi.Content{{
-				Type: "input_text", Text: question + "\n\nCurrent document ID: " + currentDocumentID,
+				Type: "input_text", Text: question,
 			}},
 		}},
 		Tools:             assistantTools(scope),

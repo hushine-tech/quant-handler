@@ -96,7 +96,12 @@ func (s *server) handleDocsConversation(w http.ResponseWriter, r *http.Request) 
 		writeErr(w, http.StatusBadGateway, "DOCS_CHAT_UNAVAILABLE")
 		return
 	}
-	if err := docsassistant.ValidateRestoredMessages(messages, scope, manifest); err != nil {
+	corpus, err := s.docs.RetrievalCorpusAt(manifest.DocsCommit)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, "DOCS_CHAT_UNAVAILABLE")
+		return
+	}
+	if err := docsassistant.ValidateRestoredMessages(messages, scope, manifest, corpus); err != nil {
 		writeErr(w, http.StatusBadGateway, "DOCS_CHAT_UNAVAILABLE")
 		return
 	}
