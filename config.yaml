@@ -22,6 +22,14 @@ docs:
   root: ""
   privileged_user_ids: []
 
+docs_assistant:
+  enabled: false
+  # OPENAI_BASE_URL can override this only for tests or an explicitly compatible endpoint.
+  base_url: "https://api.openai.com/v1"
+  # Set OPENAI_DOCS_MODEL and OPENAI_API_KEY in the process environment before enabling.
+  model: ""
+  requests_per_minute: 6
+
 log:
   output_dir: "./logs"
   local_file:
