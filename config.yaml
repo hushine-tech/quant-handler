@@ -17,6 +17,11 @@ auth:
     - "http://localhost:5173"
     - "http://127.0.0.1:5173"
 
+docs:
+  # Empty keeps the business API healthy while document endpoints report unavailable.
+  root: ""
+  privileged_user_ids: []
+
 log:
   output_dir: "./logs"
   local_file:

@@ -26,7 +26,9 @@ func main() {
 			log.Fatalf("load config: %v", err)
 		}
 	}
-	cfg.ApplyEnvOverrides()
+	if err := cfg.ApplyEnvOverrides(); err != nil {
+		log.Fatalf("apply environment configuration: %v", err)
+	}
 
 	if err := logger.InitWithConfig(&cfg.Log); err != nil {
 		log.Fatalf("init logger: %v", err)
