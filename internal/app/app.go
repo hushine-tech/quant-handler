@@ -25,6 +25,7 @@ import (
 	errorcodes "github.com/hushine-tech/golang-lib/pkg/errors/codes"
 	"github.com/hushine-tech/quant-handler/internal/config"
 	"github.com/hushine-tech/quant-handler/internal/controlpanel"
+	"github.com/hushine-tech/quant-handler/internal/docsstore"
 	"github.com/hushine-tech/quant-handler/internal/logger"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -116,8 +117,42 @@ func Run(cfg *config.Config) error {
 		downloadRunJobs: newDownloadRunJobStore(),
 		jwtSecret:       []byte(jwtSecret),
 		corsOrigins:     corsOrigins,
+		docs:            docsstore.New(cfg.Docs.Root),
+		docsPrivilegedUIDs: func() map[int64]struct{} {
+			ids := make(map[int64]struct{}, len(cfg.Docs.PrivilegedUserIDs))
+			for _, id := range cfg.Docs.PrivilegedUserIDs {
+				ids[id] = struct{}{}
+			}
+			return ids
+		}(),
 	}
 
+	mux := newHTTPMux(s)
+
+	// Wrap mux with golang-lib httpserver middleware (outermost layer)
+	// Provides: access log, session_id generation, panic recovery
+	handler := httpmw.Middleware(logInstance)(mux)
+
+	listener, err := net.Listen("tcp", httpAddr)
+	if err != nil {
+		return fmt.Errorf("listen on %s: %w", httpAddr, err)
+	}
+	shutdownContext, stop := signal.NotifyContext(
+		context.Background(),
+		os.Interrupt,
+		syscall.SIGTERM,
+	)
+	defer stop()
+	logger.Info(ctx, "system", fmt.Sprintf("quant-handler http server listening on %s", httpAddr))
+	return serveHTTP(
+		shutdownContext,
+		&http.Server{Addr: httpAddr, Handler: handler},
+		listener,
+		httpShutdownTimeout,
+	)
+}
+
+func newHTTPMux(s *server) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -153,28 +188,8 @@ func Run(cfg *config.Config) error {
 	// Phase D3: runtime credentials (settings → keypair issue / list / revoke)
 	mux.HandleFunc("/api/runtime-credentials", s.cors(s.auth(http.HandlerFunc(s.handleRuntimeCredentialsCollection))).ServeHTTP)
 	mux.HandleFunc("/api/runtime-credentials/", s.cors(s.auth(http.HandlerFunc(s.handleRuntimeCredentialsByID))).ServeHTTP)
-
-	// Wrap mux with golang-lib httpserver middleware (outermost layer)
-	// Provides: access log, session_id generation, panic recovery
-	handler := httpmw.Middleware(logInstance)(mux)
-
-	listener, err := net.Listen("tcp", httpAddr)
-	if err != nil {
-		return fmt.Errorf("listen on %s: %w", httpAddr, err)
-	}
-	shutdownContext, stop := signal.NotifyContext(
-		context.Background(),
-		os.Interrupt,
-		syscall.SIGTERM,
-	)
-	defer stop()
-	logger.Info(ctx, "system", fmt.Sprintf("quant-handler http server listening on %s", httpAddr))
-	return serveHTTP(
-		shutdownContext,
-		&http.Server{Addr: httpAddr, Handler: handler},
-		listener,
-		httpShutdownTimeout,
-	)
+	mux.HandleFunc("/api/docs/", s.cors(s.auth(http.HandlerFunc(s.handleDocs))).ServeHTTP)
+	return mux
 }
 
 func serveHTTP(ctx context.Context, server *http.Server, listener net.Listener, shutdownTimeout time.Duration) error {
@@ -209,14 +224,16 @@ func serveHTTP(ctx context.Context, server *http.Server, listener net.Listener, 
 }
 
 type server struct {
-	portfolios      portfoliov1.PortfolioServiceClient
-	orders          orderv1.OrderServiceClient // nil if not configured
-	controlPanel    controlpanel.Resolver
-	cpRuntime       controlpanelv1.ControlPanelServiceClient // Phase D3: direct gRPC client for credential RPCs; nil if CP not configured
-	marketData      mdv1.MarketDataControlPlaneServiceClient // Phase D2: market-data control plane on control-panel-service
-	downloadRunJobs *downloadRunJobStore
-	jwtSecret       []byte
-	corsOrigins     []string
+	portfolios         portfoliov1.PortfolioServiceClient
+	orders             orderv1.OrderServiceClient // nil if not configured
+	controlPanel       controlpanel.Resolver
+	cpRuntime          controlpanelv1.ControlPanelServiceClient // Phase D3: direct gRPC client for credential RPCs; nil if CP not configured
+	marketData         mdv1.MarketDataControlPlaneServiceClient // Phase D2: market-data control plane on control-panel-service
+	downloadRunJobs    *downloadRunJobStore
+	jwtSecret          []byte
+	corsOrigins        []string
+	docs               *docsstore.Store
+	docsPrivilegedUIDs map[int64]struct{}
 }
 
 type authContextKey string

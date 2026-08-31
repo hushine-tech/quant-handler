@@ -12,6 +12,8 @@ HTTP BFF for the quant portal: JWT login, CORS for the React app, and gRPC fan-o
 | `AUTH_JWT_SECRET` | yes | HMAC secret for signing portal JWTs |
 | `SERVER_HTTP_ADDR` | no | Listen address (default `:8090`) |
 | `AUTH_CORS_ORIGINS` | no | Comma-separated allowed `Origin` values (defaults to the local frontend at both `localhost:5173` and `127.0.0.1:5173`) |
+| `DOCS_ROOT` | no | Read-only path to the verified document package `current` symlink. When absent or invalid, only document endpoints return `DOCS_UNAVAILABLE`; health and business APIs remain available. |
+| `DOCS_PRIVILEGED_USER_IDS` | no | Comma-separated positive user IDs allowed to read privileged architecture and operations documents. Every other authenticated user receives only public documents. |
 
 ## Run locally
 
@@ -36,6 +38,17 @@ go run ./cmd/quant-handler -config ./config.yaml
 - `GET /api/portfolios/{id}` — Bearer JWT → registry JSON.
 - `GET /api/portfolios/{id}/portfolio-snapshot` — Bearer JWT → portfolio aggregate plus venue snapshots from `GetPortfolioSnapshot`.
 - `GET /api/symbols?market=spot|usdm_futures&q=&limit=` — Bearer JWT → `{ "symbols": [], "stale": bool }`. **`market` is required** (returns `400` if omitted).
+
+### Read-only documents
+
+All document endpoints require the same Bearer JWT as the portal. Authorization is enforced independently for the manifest, search index, Markdown content, and referenced assets; a hidden document or asset returns `404`.
+
+- `GET /api/docs/manifest` — the ordered manifest filtered for the current user.
+- `GET /api/docs/search-index` — the browser search index filtered for the current user.
+- `GET /api/docs/documents/{document_id}` — verified Markdown with `Content-Type: text/markdown`.
+- `GET /api/docs/assets/{asset_path}` — a verified asset referenced by an authorized document.
+
+Responses include an `ETag` and honor `If-None-Match`. The browser never receives a filesystem path and cannot request files that are not registered in the verified package.
 
 ## Runtime And Market-Data Control Plane
 
