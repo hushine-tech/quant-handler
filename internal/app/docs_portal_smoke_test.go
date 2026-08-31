@@ -74,11 +74,11 @@ func TestDocsPortalSmokeFromRelease(t *testing.T) {
 	if privilegedOnly.ID == "" {
 		t.Fatal("release contains no privileged document")
 	}
-	hidden := docsRequest(t, mux, s, http.MethodGet, "/api/docs/documents/"+privilegedOnly.ID, 1, "")
+	hidden := docsRequest(t, mux, s, http.MethodGet, "/api/docs/documents/"+privilegedOnly.ID+"?docs_commit="+publicManifest.DocsCommit, 1, "")
 	if hidden.Code != http.StatusNotFound {
 		t.Fatalf("public hidden-document status = %d, want 404", hidden.Code)
 	}
-	privilegedContent := docsRequest(t, mux, s, http.MethodGet, "/api/docs/documents/"+privilegedOnly.ID, 9, "")
+	privilegedContent := docsRequest(t, mux, s, http.MethodGet, "/api/docs/documents/"+privilegedOnly.ID+"?docs_commit="+privilegedManifest.DocsCommit, 9, "")
 	if privilegedContent.Code != http.StatusOK || privilegedContent.Body.Len() == 0 {
 		t.Fatalf("privileged content = status %d bytes %d", privilegedContent.Code, privilegedContent.Body.Len())
 	}
