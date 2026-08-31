@@ -58,6 +58,7 @@ func (a *Assistant) Ask(ctx context.Context, userID int64, scope docsstore.Acces
 		}},
 		Tools:             assistantTools(scope),
 		ContextManagement: []openaiapi.ContextManagement{{Type: "compaction", CompactThreshold: 100000}},
+		TextFormat:        docsAnswerTextFormat(),
 	}
 	seenCalls := make(map[string]struct{})
 	retrieved := make(map[string]SearchHit)
@@ -107,6 +108,45 @@ func (a *Assistant) Ask(ctx context.Context, userID int64, scope docsstore.Acces
 		toolRounds++
 		request.Input = nil
 		request.ToolOutputs = outputs
+	}
+}
+
+func docsAnswerTextFormat() *openaiapi.TextFormat {
+	documentCitation := map[string]any{
+		"type": "object", "additionalProperties": false,
+		"properties": map[string]any{
+			"kind":        map[string]any{"type": "string", "enum": []string{"document"}},
+			"title":       map[string]any{"type": "string", "minLength": 1},
+			"document_id": map[string]any{"type": "string", "minLength": 1},
+			"anchor":      map[string]any{"type": "string", "minLength": 1},
+		},
+		"required": []string{"kind", "title", "document_id", "anchor"},
+	}
+	sourceCitation := map[string]any{
+		"type": "object", "additionalProperties": false,
+		"properties": map[string]any{
+			"kind":       map[string]any{"type": "string", "enum": []string{"source"}},
+			"repository": map[string]any{"type": "string", "minLength": 1},
+			"path":       map[string]any{"type": "string", "minLength": 1},
+			"commit":     map[string]any{"type": "string", "pattern": "^[a-f0-9]{40}$"},
+			"start_line": map[string]any{"type": "integer", "minimum": 1},
+			"end_line":   map[string]any{"type": "integer", "minimum": 1},
+		},
+		"required": []string{"kind", "repository", "path", "commit", "start_line", "end_line"},
+	}
+	return &openaiapi.TextFormat{
+		Type: "json_schema", Name: "hushine_docs_answer", Strict: true,
+		Schema: map[string]any{
+			"type": "object", "additionalProperties": false,
+			"properties": map[string]any{
+				"answer": map[string]any{"type": "string", "minLength": 1},
+				"citations": map[string]any{
+					"type": "array", "minItems": 1,
+					"items": map[string]any{"anyOf": []any{documentCitation, sourceCitation}},
+				},
+			},
+			"required": []string{"answer", "citations"},
+		},
 	}
 }
 

@@ -83,6 +83,13 @@ type ContextManagement struct {
 	CompactThreshold int    `json:"compact_threshold,omitempty"`
 }
 
+type TextFormat struct {
+	Type   string         `json:"type"`
+	Name   string         `json:"name,omitempty"`
+	Strict bool           `json:"strict,omitempty"`
+	Schema map[string]any `json:"schema,omitempty"`
+}
+
 type ResponseRequest struct {
 	Model             string
 	ConversationID    string
@@ -91,6 +98,7 @@ type ResponseRequest struct {
 	Tools             []Tool
 	ToolOutputs       []ToolOutput
 	ContextManagement []ContextManagement
+	TextFormat        *TextFormat
 }
 
 type Response struct {
@@ -238,10 +246,18 @@ func (c *httpClient) CreateResponse(ctx context.Context, request ResponseRequest
 		Tools             []Tool              `json:"tools,omitempty"`
 		ParallelToolCalls bool                `json:"parallel_tool_calls"`
 		ContextManagement []ContextManagement `json:"context_management,omitempty"`
+		Text              *struct {
+			Format TextFormat `json:"format"`
+		} `json:"text,omitempty"`
 	}{
 		Model: request.Model, Conversation: request.ConversationID,
 		Instructions: request.Instructions, Input: input, Tools: request.Tools,
 		ParallelToolCalls: false, ContextManagement: request.ContextManagement,
+	}
+	if request.TextFormat != nil {
+		payload.Text = &struct {
+			Format TextFormat `json:"format"`
+		}{Format: *request.TextFormat}
 	}
 	var response Response
 	if err := c.doJSON(ctx, http.MethodPost, "/responses", payload, &response); err != nil {

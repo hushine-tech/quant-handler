@@ -85,6 +85,15 @@ func TestClientUsesExactConversationAndResponseContracts(t *testing.T) {
 			if len(management) != 1 || management[0].(map[string]any)["type"] != "compaction" {
 				t.Fatalf("context_management = %#v", management)
 			}
+			text, _ := body["text"].(map[string]any)
+			format, _ := text["format"].(map[string]any)
+			if format["type"] != "json_schema" || format["name"] != "hushine_docs_answer" || format["strict"] != true {
+				t.Fatalf("structured output = %#v", text)
+			}
+			schema, _ := format["schema"].(map[string]any)
+			if schema["type"] != "object" || schema["additionalProperties"] != false {
+				t.Fatalf("structured output schema = %#v", schema)
+			}
 			writeJSON(t, w, map[string]any{
 				"id": "resp_1", "object": "response", "status": "completed", "output_text": "答案",
 				"conversation": map[string]string{"id": "conv_123"},
@@ -130,6 +139,10 @@ func TestClientUsesExactConversationAndResponseContracts(t *testing.T) {
 		}},
 		ToolOutputs:       []ToolOutput{{CallID: "call_1", Output: `{"hits":[]}`}},
 		ContextManagement: []ContextManagement{{Type: "compaction", CompactThreshold: 20000}},
+		TextFormat: &TextFormat{
+			Type: "json_schema", Name: "hushine_docs_answer", Strict: true,
+			Schema: map[string]any{"type": "object", "additionalProperties": false},
+		},
 	})
 	if err != nil || response.ID != "resp_1" || response.OutputText != "答案" {
 		t.Fatalf("CreateResponse = %+v, %v", response, err)

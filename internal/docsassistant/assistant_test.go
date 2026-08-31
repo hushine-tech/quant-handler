@@ -69,6 +69,9 @@ func TestAssistantRunsDocsToolLoopAndBuildsCitationFromRetrievedHit(t *testing.T
 		if request.ConversationID != "conv_test" || len(request.ContextManagement) != 1 || request.ContextManagement[0].Type != "compaction" {
 			t.Fatalf("conversation/context management = %+v", request)
 		}
+		if request.TextFormat == nil || request.TextFormat.Type != "json_schema" || request.TextFormat.Name != "hushine_docs_answer" || !request.TextFormat.Strict {
+			t.Fatalf("structured answer format = %+v", request.TextFormat)
+		}
 	}
 	if len(client.requests[0].Tools) != 1 || client.requests[0].Tools[0].Name != "search_docs" {
 		t.Fatalf("public tools = %+v", client.requests[0].Tools)
