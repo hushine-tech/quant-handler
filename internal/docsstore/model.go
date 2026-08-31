@@ -47,14 +47,16 @@ type AssetDescriptor struct {
 }
 
 type Manifest struct {
-	SchemaVersion     int               `json:"schema_version"`
-	DocsCommit        string            `json:"docs_commit"`
-	GeneratedAt       string            `json:"generated_at"`
-	Deployment        Deployment        `json:"deployment"`
-	Sections          []Section         `json:"sections"`
-	Documents         []Document        `json:"documents"`
-	Assets            []AssetDescriptor `json:"assets"`
-	SearchIndexSHA256 string            `json:"search_index_sha256"`
+	SchemaVersion            int               `json:"schema_version"`
+	DocsCommit               string            `json:"docs_commit"`
+	GeneratedAt              string            `json:"generated_at"`
+	Deployment               Deployment        `json:"deployment"`
+	Sections                 []Section         `json:"sections"`
+	Documents                []Document        `json:"documents"`
+	Assets                   []AssetDescriptor `json:"assets"`
+	SearchIndexSHA256        string            `json:"search_index_sha256"`
+	SourceIndexSchemaVersion int               `json:"source_index_schema_version,omitempty"`
+	SourceIndexSHA256        string            `json:"source_index_sha256,omitempty"`
 }
 
 type SearchDocument struct {
@@ -72,6 +74,41 @@ type SearchIndex struct {
 	SchemaVersion int              `json:"schema_version"`
 	DocsCommit    string           `json:"docs_commit"`
 	Documents     []SearchDocument `json:"documents"`
+}
+
+type SourceChunk struct {
+	ID         string   `json:"id"`
+	Repository string   `json:"repository"`
+	Commit     string   `json:"commit"`
+	Path       string   `json:"path"`
+	StartLine  int      `json:"start_line"`
+	EndLine    int      `json:"end_line"`
+	Language   string   `json:"language"`
+	Symbols    []string `json:"symbols"`
+	Text       string   `json:"text"`
+	SHA256     string   `json:"sha256"`
+}
+
+type SourceIndex struct {
+	SchemaVersion    int           `json:"schema_version"`
+	DeploymentDigest string        `json:"deployment_digest"`
+	Chunks           []SourceChunk `json:"chunks"`
+}
+
+type RetrievalDocument struct {
+	ID         string
+	Slug       string
+	Title      string
+	Visibility string
+	Keywords   []string
+	Text       string
+	Anchors    []string
+}
+
+type RetrievalCorpus struct {
+	DocsCommit string
+	Documents  []RetrievalDocument
+	Sources    []SourceChunk
 }
 
 type DocumentContent struct {

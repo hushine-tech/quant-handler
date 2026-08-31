@@ -68,11 +68,25 @@ func writeRelease(t *testing.T, root, commit, publicText string) string {
 		},
 	}
 	searchData := writeJSON(t, filepath.Join(release, "search-index.json"), search)
+	sourceText := "package wallet\n\nfunc AvailableBalance() string { return \"100\" }"
+	source := map[string]any{
+		"schema_version":    1,
+		"deployment_digest": strings.Repeat("d", 64),
+		"chunks": []map[string]any{{
+			"id": strings.Repeat("1", 64), "repository": "core-service", "commit": commitA,
+			"path": "internal/wallet/balance.go", "start_line": 1, "end_line": 3,
+			"language": "go", "symbols": []string{"AvailableBalance"}, "text": sourceText,
+			"sha256": checksum([]byte(sourceText)),
+		}},
+	}
+	sourceData := writeJSON(t, filepath.Join(release, "source-index.json"), source)
 	manifest := map[string]any{
-		"schema_version":      1,
-		"docs_commit":         commit,
-		"generated_at":        "2024-01-01T00:00:00.000Z",
-		"search_index_sha256": checksum(searchData),
+		"schema_version":              1,
+		"docs_commit":                 commit,
+		"generated_at":                "2024-01-01T00:00:00.000Z",
+		"search_index_sha256":         checksum(searchData),
+		"source_index_schema_version": 1,
+		"source_index_sha256":         checksum(sourceData),
 		"deployment": map[string]any{
 			"schema_version": 1,
 			"repositories":   []map[string]string{{"name": "core-service", "commit": commitA}},
@@ -93,6 +107,74 @@ func writeRelease(t *testing.T, root, commit, publicText string) string {
 	}
 	writeJSON(t, filepath.Join(release, "manifest.json"), manifest)
 	return release
+}
+
+func TestIndexCorpusLoadsVerifiedDocumentAndSourceFacts(t *testing.T) {
+	root := t.TempDir()
+	writeRelease(t, root, commitA, "钱包余额说明。")
+	store := New(switchCurrent(t, root, filepath.Join("releases", commitA)))
+
+	corpus, err := store.RetrievalCorpus()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if corpus.DocsCommit != commitA || len(corpus.Documents) != 2 || len(corpus.Sources) != 1 {
+		t.Fatalf("corpus = %+v", corpus)
+	}
+	source := corpus.Sources[0]
+	if source.Repository != "core-service" || source.Commit != commitA || source.Path != "internal/wallet/balance.go" || source.StartLine != 1 || source.EndLine != 3 {
+		t.Fatalf("source = %+v", source)
+	}
+	if len(source.Symbols) != 1 || source.Symbols[0] != "AvailableBalance" {
+		t.Fatalf("symbols = %+v", source.Symbols)
+	}
+}
+
+func TestIndexCorpusRejectsMalformedSourceIndexAfterChecksumVerification(t *testing.T) {
+	root := t.TempDir()
+	release := writeRelease(t, root, commitA, "Original.")
+	sourcePath := filepath.Join(release, "source-index.json")
+	var source map[string]any
+	data, err := os.ReadFile(sourcePath)
+	if err != nil || json.Unmarshal(data, &source) != nil {
+		t.Fatalf("read source index: %v", err)
+	}
+	chunks := source["chunks"].([]any)
+	chunks[0].(map[string]any)["path"] = "../secret.go"
+	sourceData := writeJSON(t, sourcePath, source)
+	manifestPath := filepath.Join(release, "manifest.json")
+	var manifest map[string]any
+	manifestData, err := os.ReadFile(manifestPath)
+	if err != nil || json.Unmarshal(manifestData, &manifest) != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	manifest["source_index_sha256"] = checksum(sourceData)
+	writeJSON(t, manifestPath, manifest)
+
+	store := New(switchCurrent(t, root, filepath.Join("releases", commitA)))
+	if _, err := store.RetrievalCorpus(); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("RetrievalCorpus error = %v, want ErrUnavailable", err)
+	}
+}
+
+func TestIndexSourceFailureDoesNotDisablePhaseOneReadingAndSearch(t *testing.T) {
+	root := t.TempDir()
+	release := writeRelease(t, root, commitA, "Still readable.")
+	if err := os.WriteFile(filepath.Join(release, "source-index.json"), []byte("corrupt"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	store := New(switchCurrent(t, root, filepath.Join("releases", commitA)))
+	manifest, err := store.Manifest(ScopePublic)
+	if err != nil || len(manifest.Documents) != 1 {
+		t.Fatalf("Manifest = %+v, %v", manifest, err)
+	}
+	search, err := store.SearchIndex(ScopePublic)
+	if err != nil || len(search.Documents) != 1 {
+		t.Fatalf("SearchIndex = %+v, %v", search, err)
+	}
+	if _, err := store.RetrievalCorpus(); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("RetrievalCorpus error = %v, want ErrUnavailable", err)
+	}
 }
 
 func switchCurrent(t *testing.T, root, target string) string {

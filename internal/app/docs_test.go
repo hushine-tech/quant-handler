@@ -213,11 +213,25 @@ func writeDocsTestRelease(t *testing.T) string {
 		},
 	}
 	searchData := docsTestWriteJSON(t, filepath.Join(release, "search-index.json"), search)
+	sourceText := "package wallet\n\nfunc AvailableBalance() string { return \"100\" }"
+	source := map[string]any{
+		"schema_version":    1,
+		"deployment_digest": strings.Repeat("d", 64),
+		"chunks": []map[string]any{{
+			"id": strings.Repeat("1", 64), "repository": "core-service", "commit": docsTestCommit,
+			"path": "internal/wallet/balance.go", "start_line": 1, "end_line": 3,
+			"language": "go", "symbols": []string{"AvailableBalance"}, "text": sourceText,
+			"sha256": docsTestChecksum([]byte(sourceText)),
+		}},
+	}
+	sourceData := docsTestWriteJSON(t, filepath.Join(release, "source-index.json"), source)
 	manifest := map[string]any{
-		"schema_version":      1,
-		"docs_commit":         docsTestCommit,
-		"generated_at":        "2024-01-01T00:00:00.000Z",
-		"search_index_sha256": docsTestChecksum(searchData),
+		"schema_version":              1,
+		"docs_commit":                 docsTestCommit,
+		"generated_at":                "2024-01-01T00:00:00.000Z",
+		"search_index_sha256":         docsTestChecksum(searchData),
+		"source_index_schema_version": 1,
+		"source_index_sha256":         docsTestChecksum(sourceData),
 		"deployment": map[string]any{
 			"schema_version": 1,
 			"repositories":   []map[string]string{{"name": "core-service", "commit": docsTestCommit}},

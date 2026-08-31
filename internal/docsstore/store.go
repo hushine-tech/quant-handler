@@ -17,6 +17,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 )
 
 var (
@@ -25,10 +26,11 @@ var (
 )
 
 const (
-	maxManifestBytes = 8 << 20
-	maxIndexBytes    = 64 << 20
-	maxDocumentBytes = 16 << 20
-	maxAssetBytes    = 64 << 20
+	maxManifestBytes    = 8 << 20
+	maxIndexBytes       = 64 << 20
+	maxSourceIndexBytes = 256 << 20
+	maxDocumentBytes    = 16 << 20
+	maxAssetBytes       = 64 << 20
 )
 
 var (
@@ -48,8 +50,12 @@ type storedAsset struct {
 }
 
 type snapshot struct {
+	root           string
 	manifest       Manifest
 	search         SearchIndex
+	sourceOnce     sync.Once
+	source         SourceIndex
+	sourceErr      error
 	documents      map[string]storedDocument
 	assets         map[string]storedAsset
 	assetDocuments map[string]map[string]struct{}
@@ -128,6 +134,59 @@ func (s *Store) SearchIndex(scope AccessScope) (SearchIndex, error) {
 		DocsCommit:    snapshot.search.DocsCommit,
 		Documents:     documents,
 	}, nil
+}
+
+func (s *Store) RetrievalCorpus() (RetrievalCorpus, error) {
+	snapshot, err := s.current()
+	if err != nil {
+		return RetrievalCorpus{}, err
+	}
+	documents := make([]RetrievalDocument, 0, len(snapshot.search.Documents))
+	for _, document := range snapshot.search.Documents {
+		stored, ok := snapshot.documents[document.ID]
+		if !ok {
+			return RetrievalCorpus{}, unavailable(fmt.Errorf("retrieval document is missing: %s", document.ID))
+		}
+		documents = append(documents, RetrievalDocument{
+			ID: document.ID, Slug: document.Slug, Title: document.Title,
+			Visibility: document.Visibility, Keywords: append([]string(nil), document.Keywords...),
+			Text: document.Text, Anchors: markdownAnchors(stored.markdown),
+		})
+	}
+	source, err := snapshot.retrievalSource()
+	if err != nil {
+		return RetrievalCorpus{}, unavailable(err)
+	}
+	sources := make([]SourceChunk, len(source.Chunks))
+	for index, chunk := range source.Chunks {
+		sources[index] = chunk
+		sources[index].Symbols = append([]string(nil), chunk.Symbols...)
+	}
+	return RetrievalCorpus{DocsCommit: snapshot.manifest.DocsCommit, Documents: documents, Sources: sources}, nil
+}
+
+func (s *snapshot) retrievalSource() (SourceIndex, error) {
+	s.sourceOnce.Do(func() {
+		if s.manifest.SourceIndexSchemaVersion != 1 || !sha256Pattern.MatchString(s.manifest.SourceIndexSHA256) {
+			s.sourceErr = fmt.Errorf("source index is not available")
+			return
+		}
+		data, err := readSafeFile(s.root, "source-index.json", maxSourceIndexBytes)
+		if err != nil {
+			s.sourceErr = err
+			return
+		}
+		if actual := sha256Hex(data); actual != s.manifest.SourceIndexSHA256 {
+			s.sourceErr = fmt.Errorf("source index checksum mismatch")
+			return
+		}
+		if err := decodeStrict(data, &s.source); err != nil {
+			s.sourceErr = fmt.Errorf("decode source index: %w", err)
+			return
+		}
+		s.sourceErr = validateSourceIndex(s.source, s.manifest)
+	})
+	return s.source, s.sourceErr
 }
 
 func (s *Store) Document(scope AccessScope, id string) (DocumentContent, error) {
@@ -298,7 +357,6 @@ func loadSnapshot(root string) (*snapshot, error) {
 	if index.SchemaVersion != 1 || index.DocsCommit != manifest.DocsCommit {
 		return nil, fmt.Errorf("search index identity mismatch")
 	}
-
 	documents := make(map[string]storedDocument, len(manifest.Documents))
 	metadataByID := make(map[string]Document, len(manifest.Documents))
 	for _, document := range manifest.Documents {
@@ -353,6 +411,7 @@ func loadSnapshot(root string) (*snapshot, error) {
 		}
 	}
 	return &snapshot{
+		root:           root,
 		manifest:       manifest,
 		search:         index,
 		documents:      documents,
@@ -370,6 +429,10 @@ func validateManifest(root string, manifest Manifest) error {
 	}
 	if manifest.Deployment.SchemaVersion != 1 || !sha256Pattern.MatchString(manifest.SearchIndexSHA256) {
 		return fmt.Errorf("invalid manifest deployment or search checksum")
+	}
+	if (manifest.SourceIndexSchemaVersion == 0) != (manifest.SourceIndexSHA256 == "") ||
+		(manifest.SourceIndexSchemaVersion != 0 && (manifest.SourceIndexSchemaVersion != 1 || !sha256Pattern.MatchString(manifest.SourceIndexSHA256))) {
+		return fmt.Errorf("invalid manifest source index metadata")
 	}
 	if filepath.Base(root) != manifest.DocsCommit {
 		return fmt.Errorf("release directory does not match docs commit")
@@ -422,6 +485,91 @@ func validateManifest(root string, manifest Manifest) error {
 		assetPaths[asset.Path] = struct{}{}
 	}
 	return nil
+}
+
+func validateSourceIndex(index SourceIndex, manifest Manifest) error {
+	if index.SchemaVersion != manifest.SourceIndexSchemaVersion || !sha256Pattern.MatchString(index.DeploymentDigest) {
+		return fmt.Errorf("source index identity mismatch")
+	}
+	repositories := make(map[string]string, len(manifest.Deployment.Repositories))
+	for _, repository := range manifest.Deployment.Repositories {
+		repositories[repository.Name] = repository.Commit
+	}
+	seen := make(map[string]struct{}, len(index.Chunks))
+	previous := ""
+	for _, chunk := range index.Chunks {
+		orderKey := fmt.Sprintf("%s\x00%s\x00%010d", chunk.Repository, chunk.Path, chunk.StartLine)
+		if previous != "" && orderKey < previous {
+			return fmt.Errorf("source index chunks are not sorted")
+		}
+		previous = orderKey
+		if !sha256Pattern.MatchString(chunk.ID) || !sha256Pattern.MatchString(chunk.SHA256) ||
+			repositories[chunk.Repository] != chunk.Commit || !validSourcePath(chunk.Path) ||
+			chunk.StartLine < 1 || chunk.EndLine < chunk.StartLine || chunk.Text == "" ||
+			strings.Count(chunk.Text, "\n")+1 != chunk.EndLine-chunk.StartLine+1 ||
+			sha256Hex([]byte(chunk.Text)) != chunk.SHA256 || !validSourceLanguage(chunk.Language) {
+			return fmt.Errorf("invalid source chunk: %s", chunk.ID)
+		}
+		if _, duplicate := seen[chunk.ID]; duplicate {
+			return fmt.Errorf("duplicate source chunk: %s", chunk.ID)
+		}
+		seen[chunk.ID] = struct{}{}
+		for _, symbol := range chunk.Symbols {
+			if strings.TrimSpace(symbol) == "" {
+				return fmt.Errorf("invalid source symbol: %s", chunk.ID)
+			}
+		}
+	}
+	return nil
+}
+
+func validSourcePath(value string) bool {
+	return value != "" && !strings.Contains(value, "\\") && !path.IsAbs(value) && path.Clean(value) == value && value != "." && value != ".." && !strings.HasPrefix(value, "../")
+}
+
+func validSourceLanguage(value string) bool {
+	switch value {
+	case "go", "proto", "python", "typescript", "sql", "yaml", "markdown":
+		return true
+	default:
+		return false
+	}
+}
+
+func markdownAnchors(markdown string) []string {
+	seen := make(map[string]int)
+	anchors := make([]string, 0)
+	for _, line := range strings.Split(markdown, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		level := 0
+		for level < len(trimmed) && trimmed[level] == '#' {
+			level++
+		}
+		if level == 0 || level > 6 || level >= len(trimmed) || trimmed[level] != ' ' {
+			continue
+		}
+		title := strings.TrimSpace(strings.TrimRight(strings.TrimSpace(trimmed[level+1:]), "#"))
+		var builder strings.Builder
+		for _, character := range strings.ToLower(title) {
+			switch {
+			case unicode.IsLetter(character), unicode.IsNumber(character), unicode.IsMark(character), character == '_', character == '-':
+				builder.WriteRune(character)
+			case unicode.IsSpace(character):
+				builder.WriteRune('-')
+			}
+		}
+		base := builder.String()
+		anchor := base
+		if count := seen[base]; count > 0 {
+			anchor = fmt.Sprintf("%s-%d", base, count)
+		}
+		seen[base]++
+		anchors = append(anchors, anchor)
+	}
+	return anchors
 }
 
 func readSafeFile(root, relative string, limit int64) ([]byte, error) {
