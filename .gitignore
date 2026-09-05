@@ -2,6 +2,7 @@
 /dist/
 /logs
 /.run.pid
+/.docs-chat/
 /quant-handler
 /quant-handler.out
 config.local.yaml

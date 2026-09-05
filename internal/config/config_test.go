@@ -99,13 +99,15 @@ func TestDefaultAllowsBothDocumentedLocalFrontendOrigins(t *testing.T) {
 	}
 }
 
-func TestDocsAssistantConfigurationIsEnvironmentBoundAndValidated(t *testing.T) {
+func TestDocsAssistantCLIConfigurationIsEnvironmentBoundAndValidated(t *testing.T) {
 	directory := t.TempDir()
 	configFile := filepath.Join(directory, "config.yaml")
 	if err := os.WriteFile(configFile, []byte(`
 docs_assistant:
   enabled: false
-  base_url: "https://api.openai.com/v1"
+  binary: "codex"
+  state_dir: "./.docs-chat"
+  timeout_seconds: 180
   model: ""
   requests_per_minute: 6
 `), 0o600); err != nil {
@@ -115,27 +117,24 @@ docs_assistant:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.DocsAssistant.APIKey != "" {
-		t.Fatal("API key must not be loaded from YAML")
-	}
-
 	t.Setenv("DOCS_CHAT_ENABLED", "true")
-	t.Setenv("OPENAI_API_KEY", "sk-env-only")
-	t.Setenv("OPENAI_BASE_URL", "http://127.0.0.1:19090/v1")
-	t.Setenv("OPENAI_DOCS_MODEL", "gpt-docs-test")
+	t.Setenv("DOCS_CODEX_BINARY", "/usr/local/bin/codex")
+	t.Setenv("DOCS_CHAT_STATE_DIR", "/tmp/docs-state")
+	t.Setenv("DOCS_CHAT_TIMEOUT_SECONDS", "90")
+	t.Setenv("DOCS_CODEX_MODEL", "gpt-docs-test")
 	t.Setenv("DOCS_CHAT_REQUESTS_PER_MINUTE", "9")
 	if err := cfg.ApplyEnvOverrides(); err != nil {
 		t.Fatal(err)
 	}
-	if !cfg.DocsAssistant.Enabled || cfg.DocsAssistant.APIKey != "sk-env-only" {
-		t.Fatalf("assistant enabled/key = %t/%q", cfg.DocsAssistant.Enabled, cfg.DocsAssistant.APIKey)
+	if !cfg.DocsAssistant.Enabled || cfg.DocsAssistant.Binary != "/usr/local/bin/codex" || cfg.DocsAssistant.StateDir != "/tmp/docs-state" {
+		t.Fatalf("assistant config = %+v", cfg.DocsAssistant)
 	}
-	if cfg.DocsAssistant.BaseURL != "http://127.0.0.1:19090/v1" || cfg.DocsAssistant.Model != "gpt-docs-test" || cfg.DocsAssistant.RequestsPerMinute != 9 {
+	if cfg.DocsAssistant.TimeoutSeconds != 90 || cfg.DocsAssistant.Model != "gpt-docs-test" || cfg.DocsAssistant.RequestsPerMinute != 9 {
 		t.Fatalf("assistant config = %+v", cfg.DocsAssistant)
 	}
 }
 
-func TestDocsAssistantDisabledDoesNotRequireOpenAICredentials(t *testing.T) {
+func TestDocsAssistantDisabledDoesNotRequireCLI(t *testing.T) {
 	cfg := Default()
 	cfg.DocsAssistant.RequestsPerMinute = 0
 	if err := cfg.ApplyEnvOverrides(); err != nil {
@@ -146,15 +145,16 @@ func TestDocsAssistantDisabledDoesNotRequireOpenAICredentials(t *testing.T) {
 	}
 }
 
-func TestDocsAssistantEnabledRequiresKeyModelBaseURLAndPositiveRate(t *testing.T) {
+func TestDocsAssistantEnabledRequiresCLIPathsTimeoutAndPositiveRate(t *testing.T) {
 	for _, test := range []struct {
 		name    string
 		environ map[string]string
 	}{
-		{name: "missing-key", environ: map[string]string{"DOCS_CHAT_ENABLED": "true", "OPENAI_DOCS_MODEL": "gpt-test"}},
-		{name: "missing-model", environ: map[string]string{"DOCS_CHAT_ENABLED": "true", "OPENAI_API_KEY": "key"}},
-		{name: "zero-rate", environ: map[string]string{"DOCS_CHAT_ENABLED": "true", "OPENAI_API_KEY": "key", "OPENAI_DOCS_MODEL": "gpt-test", "DOCS_CHAT_REQUESTS_PER_MINUTE": "0"}},
-		{name: "invalid-base-url", environ: map[string]string{"DOCS_CHAT_ENABLED": "true", "OPENAI_API_KEY": "key", "OPENAI_DOCS_MODEL": "gpt-test", "OPENAI_BASE_URL": "file:///tmp/openai", "DOCS_CHAT_REQUESTS_PER_MINUTE": "1"}},
+		{name: "missing-binary", environ: map[string]string{"DOCS_CHAT_ENABLED": "true", "DOCS_CODEX_BINARY": ""}},
+		{name: "missing-state", environ: map[string]string{"DOCS_CHAT_ENABLED": "true", "DOCS_CHAT_STATE_DIR": ""}},
+		{name: "zero-rate", environ: map[string]string{"DOCS_CHAT_ENABLED": "true", "DOCS_CHAT_REQUESTS_PER_MINUTE": "0"}},
+		{name: "zero-timeout", environ: map[string]string{"DOCS_CHAT_ENABLED": "true", "DOCS_CHAT_TIMEOUT_SECONDS": "0"}},
+		{name: "unbounded-timeout", environ: map[string]string{"DOCS_CHAT_ENABLED": "true", "DOCS_CHAT_TIMEOUT_SECONDS": "601"}},
 		{name: "invalid-enabled", environ: map[string]string{"DOCS_CHAT_ENABLED": "sometimes"}},
 		{name: "invalid-rate", environ: map[string]string{"DOCS_CHAT_REQUESTS_PER_MINUTE": "many"}},
 	} {

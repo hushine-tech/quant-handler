@@ -6,33 +6,41 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hushine-tech/quant-handler/internal/codexcli"
 	"github.com/hushine-tech/quant-handler/internal/docsstore"
-	openaiapi "github.com/hushine-tech/quant-handler/internal/openai"
 )
 
 type assistantStep struct {
-	response openaiapi.Response
+	response codexcli.Response
 	err      error
 }
 
-type scriptedAssistantOpenAI struct {
-	steps    []assistantStep
-	requests []openaiapi.ResponseRequest
+type scriptedAssistantCLI struct {
+	steps         []assistantStep
+	requests      []codexcli.ResponseRequest
+	savedQuestion string
+	savedAnswer   string
 }
 
-func (s *scriptedAssistantOpenAI) CreateConversation(context.Context, map[string]string) (openaiapi.Conversation, error) {
-	return openaiapi.Conversation{}, errors.New("unexpected CreateConversation")
+func (s *scriptedAssistantCLI) AcquireConversation(string) (func(), error) { return func() {}, nil }
+func (s *scriptedAssistantCLI) SaveAnswer(_ context.Context, _ string, question, answer string) error {
+	s.savedQuestion, s.savedAnswer = question, answer
+	return nil
 }
-func (s *scriptedAssistantOpenAI) RetrieveConversation(context.Context, string) (openaiapi.Conversation, error) {
-	return openaiapi.Conversation{}, errors.New("unexpected RetrieveConversation")
+
+func (s *scriptedAssistantCLI) CreateConversation(context.Context, map[string]string) (codexcli.Conversation, error) {
+	return codexcli.Conversation{}, errors.New("unexpected CreateConversation")
 }
-func (s *scriptedAssistantOpenAI) ListConversationItems(context.Context, string) ([]openaiapi.Item, error) {
+func (s *scriptedAssistantCLI) RetrieveConversation(context.Context, string) (codexcli.Conversation, error) {
+	return codexcli.Conversation{}, errors.New("unexpected RetrieveConversation")
+}
+func (s *scriptedAssistantCLI) ListConversationItems(context.Context, string) ([]codexcli.Item, error) {
 	return nil, errors.New("unexpected ListConversationItems")
 }
-func (s *scriptedAssistantOpenAI) CreateResponse(_ context.Context, request openaiapi.ResponseRequest) (openaiapi.Response, error) {
+func (s *scriptedAssistantCLI) CreateResponse(_ context.Context, request codexcli.ResponseRequest) (codexcli.Response, error) {
 	s.requests = append(s.requests, request)
 	if len(s.steps) == 0 {
-		return openaiapi.Response{}, errors.New("unexpected CreateResponse")
+		return codexcli.Response{}, errors.New("unexpected CreateResponse")
 	}
 	step := s.steps[0]
 	s.steps = s.steps[1:]
@@ -40,7 +48,7 @@ func (s *scriptedAssistantOpenAI) CreateResponse(_ context.Context, request open
 }
 
 func TestAssistantRunsDocsToolLoopAndBuildsCitationFromRetrievedHit(t *testing.T) {
-	client := &scriptedAssistantOpenAI{steps: []assistantStep{
+	client := &scriptedAssistantCLI{steps: []assistantStep{
 		{response: toolResponse("resp_1", "call_1", "search_docs", `{"query":"钱包","limit":5}`)},
 		{response: textResponse("resp_2", `{"answer":"钱包按本地账本计算。","citations":[{"kind":"document","title":"Wallet Balance","document_id":"wallet","anchor":"wallet-balance"}]}`)},
 	}}
@@ -51,6 +59,9 @@ func TestAssistantRunsDocsToolLoopAndBuildsCitationFromRetrievedHit(t *testing.T
 	}
 	if answer.Answer != "钱包按本地账本计算。" || len(answer.Citations) != 1 {
 		t.Fatalf("answer = %+v", answer)
+	}
+	if client.savedQuestion != "钱包怎么算？" || !strings.Contains(client.savedAnswer, "钱包按本地账本计算") {
+		t.Fatal("verified exchange was not persisted")
 	}
 	citation := answer.Citations[0]
 	if citation.Kind != "document" || citation.DocumentID != "wallet" || citation.Title != "Wallet Balance" || citation.Anchor != "wallet-balance" {
@@ -66,8 +77,8 @@ func TestAssistantRunsDocsToolLoopAndBuildsCitationFromRetrievedHit(t *testing.T
 		t.Fatalf("instructions = %q", client.requests[0].Instructions)
 	}
 	for _, request := range client.requests {
-		if request.ConversationID != "conv_test" || len(request.ContextManagement) != 1 || request.ContextManagement[0].Type != "compaction" {
-			t.Fatalf("conversation/context management = %+v", request)
+		if request.ConversationID != "conv_test" {
+			t.Fatalf("conversation = %+v", request)
 		}
 		if request.TextFormat == nil || request.TextFormat.Type != "json_schema" || request.TextFormat.Name != "hushine_docs_answer" || !request.TextFormat.Strict {
 			t.Fatalf("structured answer format = %+v", request.TextFormat)
@@ -79,7 +90,7 @@ func TestAssistantRunsDocsToolLoopAndBuildsCitationFromRetrievedHit(t *testing.T
 }
 
 func TestAssistantPrivilegedSourceCitationUsesExactIndexedCoordinates(t *testing.T) {
-	client := &scriptedAssistantOpenAI{steps: []assistantStep{
+	client := &scriptedAssistantCLI{steps: []assistantStep{
 		{response: toolResponse("resp_1", "call_1", "search_source", `{"query":"AvailableBalance","limit":3}`)},
 		{response: textResponse("resp_2", `{"answer":"实现位于 core-service。","citations":[{"kind":"source","repository":"core-service","path":"internal/wallet/available.go","commit":"`+strings.Repeat("a", 40)+`","start_line":120,"end_line":150}]}`)},
 	}}
@@ -118,7 +129,7 @@ func TestAssistantRejectsUnretrievedInvalidAndUnboundedAnswers(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			client := &scriptedAssistantOpenAI{steps: append([]assistantStep(nil), test.steps...)}
+			client := &scriptedAssistantCLI{steps: append([]assistantStep(nil), test.steps...)}
 			assistant := newTestAssistant(t, client)
 			_, err := assistant.Ask(context.Background(), 42, docsstore.ScopePublic, "conv_test", "question", "wallet")
 			if !errors.Is(err, test.want) {
@@ -130,7 +141,7 @@ func TestAssistantRejectsUnretrievedInvalidAndUnboundedAnswers(t *testing.T) {
 
 func TestAssistantRejectsRepeatedCallsAndMoreThanFourToolRounds(t *testing.T) {
 	t.Run("repeated-call-id", func(t *testing.T) {
-		client := &scriptedAssistantOpenAI{steps: []assistantStep{
+		client := &scriptedAssistantCLI{steps: []assistantStep{
 			{response: toolResponse("r1", "same", "search_docs", `{"query":"钱包"}`)},
 			{response: toolResponse("r2", "same", "search_docs", `{"query":"钱包"}`)},
 		}}
@@ -145,7 +156,7 @@ func TestAssistantRejectsRepeatedCallsAndMoreThanFourToolRounds(t *testing.T) {
 		for index := range steps {
 			steps[index].response = toolResponse("r", "call_"+string(rune('a'+index)), "search_docs", `{"query":"钱包"}`)
 		}
-		client := &scriptedAssistantOpenAI{steps: steps}
+		client := &scriptedAssistantCLI{steps: steps}
 		_, err := newTestAssistant(t, client).Ask(context.Background(), 1, docsstore.ScopePublic, "conv_test", "q", "wallet")
 		if !errors.Is(err, ErrAssistantProtocol) || len(client.requests) != 5 {
 			t.Fatalf("error = %v requests=%d", err, len(client.requests))
@@ -153,24 +164,24 @@ func TestAssistantRejectsRepeatedCallsAndMoreThanFourToolRounds(t *testing.T) {
 	})
 }
 
-func newTestAssistant(t *testing.T, client openaiapi.Client) *Assistant {
+func newTestAssistant(t *testing.T, client codexcli.Client) *Assistant {
 	t.Helper()
 	index := newRetrievalTestIndex(t)
-	assistant, err := NewAssistant(AssistantOptions{OpenAI: client, Retriever: index, Model: "gpt-test"})
+	assistant, err := NewAssistant(AssistantOptions{CLI: client, Retriever: index, Model: "gpt-test"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return assistant
 }
 
-func toolResponse(id, callID, name, arguments string) openaiapi.Response {
-	return openaiapi.Response{ID: id, Object: "response", Status: "completed", Output: []openaiapi.Item{{
+func toolResponse(id, callID, name, arguments string) codexcli.Response {
+	return codexcli.Response{ID: id, Status: "completed", Output: []codexcli.Item{{
 		ID: id + "_tool", Type: "function_call", CallID: callID, Name: name, Arguments: arguments, Status: "completed",
 	}}}
 }
 
-func textResponse(id, output string) openaiapi.Response {
-	return openaiapi.Response{ID: id, Object: "response", Status: "completed", OutputText: output, Output: []openaiapi.Item{{
-		ID: id + "_message", Type: "message", Role: "assistant", Status: "completed", Content: []openaiapi.Content{{Type: "output_text", Text: output}},
+func textResponse(id, output string) codexcli.Response {
+	return codexcli.Response{ID: id, Status: "completed", OutputText: output, Output: []codexcli.Item{{
+		ID: id + "_message", Type: "message", Role: "assistant", Status: "completed", Content: []codexcli.Content{{Type: "output_text", Text: output}},
 	}}}
 }

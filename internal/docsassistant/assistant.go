@@ -9,8 +9,8 @@ import (
 	"io"
 	"strings"
 
+	"github.com/hushine-tech/quant-handler/internal/codexcli"
 	"github.com/hushine-tech/quant-handler/internal/docsstore"
-	openaiapi "github.com/hushine-tech/quant-handler/internal/openai"
 )
 
 var (
@@ -27,45 +27,49 @@ or {"kind":"source","repository":"...","path":"...","commit":"...","start_line":
 Every citation must exactly copy a result returned by a search tool. Never include hit_id in the final answer.`
 
 type AssistantOptions struct {
-	OpenAI    openaiapi.Client
+	CLI       codexcli.Client
 	Retriever Retriever
 	Model     string
 }
 
 type Assistant struct {
-	openAI    openaiapi.Client
+	cli       codexcli.Client
 	retriever Retriever
 	model     string
 }
 
 func NewAssistant(options AssistantOptions) (*Assistant, error) {
-	if options.OpenAI == nil || options.Retriever == nil || strings.TrimSpace(options.Model) == "" {
-		return nil, errors.New("docs assistant requires OpenAI, retriever, and model")
+	if options.CLI == nil || options.Retriever == nil {
+		return nil, errors.New("docs assistant requires CLI and retriever")
 	}
-	return &Assistant{openAI: options.OpenAI, retriever: options.Retriever, model: strings.TrimSpace(options.Model)}, nil
+	return &Assistant{cli: options.CLI, retriever: options.Retriever, model: strings.TrimSpace(options.Model)}, nil
 }
 
 func (a *Assistant) Ask(ctx context.Context, userID int64, scope docsstore.AccessScope, conversationID, question, currentDocumentID string) (Answer, error) {
 	_ = userID
-	request := openaiapi.ResponseRequest{
+	release, err := a.cli.AcquireConversation(conversationID)
+	if err != nil {
+		return Answer{}, err
+	}
+	defer release()
+	request := codexcli.ResponseRequest{
 		Model:          a.model,
 		ConversationID: conversationID,
 		Instructions:   assistantInstructions + "\nCurrent document ID: " + currentDocumentID,
-		Input: []openaiapi.InputItem{{
-			Type: "message", Role: "user", Content: []openaiapi.Content{{
+		Input: []codexcli.InputItem{{
+			Type: "message", Role: "user", Content: []codexcli.Content{{
 				Type: "input_text", Text: question,
 			}},
 		}},
-		Tools:             assistantTools(scope),
-		ContextManagement: []openaiapi.ContextManagement{{Type: "compaction", CompactThreshold: 100000}},
-		TextFormat:        docsAnswerTextFormat(),
+		Tools:      assistantTools(scope),
+		TextFormat: docsAnswerTextFormat(),
 	}
 	seenCalls := make(map[string]struct{})
 	retrieved := make(map[string]SearchHit)
 	totalCalls := 0
 	toolRounds := 0
 	for {
-		response, err := a.openAI.CreateResponse(ctx, request)
+		response, err := a.cli.CreateResponse(ctx, request)
 		if err != nil {
 			return Answer{}, fmt.Errorf("create docs response: %w", err)
 		}
@@ -77,12 +81,19 @@ func (a *Assistant) Ask(ctx context.Context, userID int64, scope docsstore.Acces
 			if len(retrieved) == 0 {
 				return Answer{}, ErrAnswerUnverified
 			}
-			return verifiedAnswer(response.OutputText, retrieved, scope)
+			answer, err := verifiedAnswer(response.OutputText, retrieved, scope)
+			if err != nil {
+				return Answer{}, err
+			}
+			if err := a.cli.SaveAnswer(ctx, conversationID, question, response.OutputText); err != nil {
+				return Answer{}, err
+			}
+			return answer, nil
 		}
 		if toolRounds >= 4 || totalCalls+len(calls) > 8 {
 			return Answer{}, ErrAssistantProtocol
 		}
-		outputs := make([]openaiapi.ToolOutput, 0, len(calls))
+		outputs := make([]codexcli.ToolOutput, 0, len(calls))
 		for _, call := range calls {
 			if call.CallID == "" {
 				return Answer{}, ErrAssistantProtocol
@@ -102,7 +113,7 @@ func (a *Assistant) Ask(ctx context.Context, userID int64, scope docsstore.Acces
 			if err != nil {
 				return Answer{}, ErrAssistantProtocol
 			}
-			outputs = append(outputs, openaiapi.ToolOutput{CallID: call.CallID, Output: string(encoded)})
+			outputs = append(outputs, codexcli.ToolOutput{CallID: call.CallID, Output: string(encoded)})
 		}
 		totalCalls += len(calls)
 		toolRounds++
@@ -111,7 +122,7 @@ func (a *Assistant) Ask(ctx context.Context, userID int64, scope docsstore.Acces
 	}
 }
 
-func docsAnswerTextFormat() *openaiapi.TextFormat {
+func docsAnswerTextFormat() *codexcli.TextFormat {
 	documentCitation := map[string]any{
 		"type": "object", "additionalProperties": false,
 		"properties": map[string]any{
@@ -134,7 +145,7 @@ func docsAnswerTextFormat() *openaiapi.TextFormat {
 		},
 		"required": []string{"kind", "repository", "path", "commit", "start_line", "end_line"},
 	}
-	return &openaiapi.TextFormat{
+	return &codexcli.TextFormat{
 		Type: "json_schema", Name: "hushine_docs_answer", Strict: true,
 		Schema: map[string]any{
 			"type": "object", "additionalProperties": false,
@@ -150,7 +161,7 @@ func docsAnswerTextFormat() *openaiapi.TextFormat {
 	}
 }
 
-func assistantTools(scope docsstore.AccessScope) []openaiapi.Tool {
+func assistantTools(scope docsstore.AccessScope) []codexcli.Tool {
 	querySchema := map[string]any{
 		"type": "object", "additionalProperties": false,
 		"properties": map[string]any{
@@ -159,12 +170,12 @@ func assistantTools(scope docsstore.AccessScope) []openaiapi.Tool {
 		},
 		"required": []string{"query"},
 	}
-	tools := []openaiapi.Tool{{
+	tools := []codexcli.Tool{{
 		Type: "function", Name: "search_docs", Description: "Search authorized Hushine documentation.",
 		Parameters: querySchema, Strict: true,
 	}}
 	if scope == docsstore.ScopePrivileged {
-		tools = append(tools, openaiapi.Tool{
+		tools = append(tools, codexcli.Tool{
 			Type: "function", Name: "search_source", Description: "Search exact deployed source code with commit and line coordinates.",
 			Parameters: querySchema, Strict: true,
 		})
@@ -172,8 +183,8 @@ func assistantTools(scope docsstore.AccessScope) []openaiapi.Tool {
 	return tools
 }
 
-func functionCalls(output []openaiapi.Item) []openaiapi.Item {
-	calls := make([]openaiapi.Item, 0)
+func functionCalls(output []codexcli.Item) []codexcli.Item {
+	calls := make([]codexcli.Item, 0)
 	for _, item := range output {
 		if item.Type == "function_call" {
 			calls = append(calls, item)
@@ -182,7 +193,7 @@ func functionCalls(output []openaiapi.Item) []openaiapi.Item {
 	return calls
 }
 
-func (a *Assistant) executeTool(scope docsstore.AccessScope, call openaiapi.Item) ([]SearchHit, error) {
+func (a *Assistant) executeTool(scope docsstore.AccessScope, call codexcli.Item) ([]SearchHit, error) {
 	var arguments struct {
 		Query string `json:"query"`
 		Limit int    `json:"limit,omitempty"`

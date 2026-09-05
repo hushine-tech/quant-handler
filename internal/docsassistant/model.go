@@ -9,8 +9,8 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/hushine-tech/quant-handler/internal/codexcli"
 	"github.com/hushine-tech/quant-handler/internal/docsstore"
-	openaiapi "github.com/hushine-tech/quant-handler/internal/openai"
 )
 
 var (
@@ -51,7 +51,7 @@ type ConversationHistory struct {
 	AccessScope    docsstore.AccessScope `json:"access_scope"`
 }
 
-func RestoreMessages(items []openaiapi.Item) ([]Message, error) {
+func RestoreMessages(items []codexcli.Item) ([]Message, error) {
 	messages := make([]Message, 0, len(items))
 	for _, item := range items {
 		if item.Type != "message" {
@@ -139,7 +139,7 @@ func sourceCitationKey(repository, path, commit string, startLine, endLine int) 
 	return fmt.Sprintf("%s\x00%s\x00%s\x00%d\x00%d", repository, path, commit, startLine, endLine)
 }
 
-func messageText(content []openaiapi.Content, expectedType string) (string, error) {
+func messageText(content []codexcli.Content, expectedType string) (string, error) {
 	parts := make([]string, 0, len(content))
 	for _, part := range content {
 		if part.Type == expectedType && strings.TrimSpace(part.Text) != "" {

@@ -23,11 +23,11 @@ import (
 	httpmw "github.com/hushine-tech/golang-lib/middleware/httpserver"
 	cerrors "github.com/hushine-tech/golang-lib/pkg/errors"
 	errorcodes "github.com/hushine-tech/golang-lib/pkg/errors/codes"
+	"github.com/hushine-tech/quant-handler/internal/codexcli"
 	"github.com/hushine-tech/quant-handler/internal/config"
 	"github.com/hushine-tech/quant-handler/internal/controlpanel"
 	"github.com/hushine-tech/quant-handler/internal/docsstore"
 	"github.com/hushine-tech/quant-handler/internal/logger"
-	openaiapi "github.com/hushine-tech/quant-handler/internal/openai"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -108,15 +108,16 @@ func Run(cfg *config.Config) error {
 			"http://127.0.0.1:5173",
 		}
 	}
-	var docsOpenAI openaiapi.Client
+	var docsCLI codexcli.Client
 	var docsRateLimit *docsRateLimiter
 	if cfg.DocsAssistant.Enabled {
-		docsOpenAI, err = openaiapi.NewClient(openaiapi.Options{
-			BaseURL: cfg.DocsAssistant.BaseURL,
-			APIKey:  cfg.DocsAssistant.APIKey,
+		docsCLI, err = codexcli.NewClient(codexcli.Options{
+			Binary:   cfg.DocsAssistant.Binary,
+			StateDir: cfg.DocsAssistant.StateDir,
+			Timeout:  time.Duration(cfg.DocsAssistant.TimeoutSeconds) * time.Second,
 		})
 		if err != nil {
-			return fmt.Errorf("configure docs assistant: %w", err)
+			logger.Info(ctx, "system", fmt.Sprintf("docs assistant unavailable: %v (document reading remains enabled)", err))
 		}
 		docsRateLimit = newDocsRateLimiter(
 			cfg.DocsAssistant.RequestsPerMinute,
@@ -136,7 +137,7 @@ func Run(cfg *config.Config) error {
 		jwtSecret:          []byte(jwtSecret),
 		corsOrigins:        corsOrigins,
 		docs:               docsstore.New(cfg.Docs.Root),
-		docsOpenAI:         docsOpenAI,
+		docsCLI:            docsCLI,
 		docsAssistantModel: strings.TrimSpace(cfg.DocsAssistant.Model),
 		docsRateLimiter:    docsRateLimit,
 		docsPrivilegedUIDs: func() map[int64]struct{} {
@@ -256,7 +257,7 @@ type server struct {
 	jwtSecret          []byte
 	corsOrigins        []string
 	docs               *docsstore.Store
-	docsOpenAI         openaiapi.Client
+	docsCLI            codexcli.Client
 	docsAssistantModel string
 	docsRateLimiter    *docsRateLimiter
 	docsPrivilegedUIDs map[int64]struct{}

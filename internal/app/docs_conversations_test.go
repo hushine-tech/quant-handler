@@ -12,15 +12,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hushine-tech/quant-handler/internal/codexcli"
 	"github.com/hushine-tech/quant-handler/internal/docsassistant"
 	"github.com/hushine-tech/quant-handler/internal/docsstore"
-	openaiapi "github.com/hushine-tech/quant-handler/internal/openai"
 )
 
-type fakeDocsOpenAI struct {
+type fakeDocsCLI struct {
 	createdMetadata  map[string]string
-	conversation     openaiapi.Conversation
-	items            []openaiapi.Item
+	conversation     codexcli.Conversation
+	items            []codexcli.Item
 	retrieveErr      error
 	listErr          error
 	responseSteps    []fakeDocsResponseStep
@@ -28,46 +28,49 @@ type fakeDocsOpenAI struct {
 	retrieveCalls    int
 	listCalls        int
 	responseCalls    int
-	responseRequests []openaiapi.ResponseRequest
+	responseRequests []codexcli.ResponseRequest
 }
 
 type fakeDocsResponseStep struct {
-	response openaiapi.Response
+	response codexcli.Response
 	err      error
 }
 
-func (f *fakeDocsOpenAI) CreateConversation(_ context.Context, metadata map[string]string) (openaiapi.Conversation, error) {
+func (f *fakeDocsCLI) AcquireConversation(string) (func(), error)               { return func() {}, nil }
+func (f *fakeDocsCLI) SaveAnswer(context.Context, string, string, string) error { return nil }
+
+func (f *fakeDocsCLI) CreateConversation(_ context.Context, metadata map[string]string) (codexcli.Conversation, error) {
 	f.createCalls++
 	f.createdMetadata = cloneStringMap(metadata)
 	if f.conversation.ID == "" {
-		f.conversation = openaiapi.Conversation{
-			ID: "conv_test", Object: "conversation", CreatedAt: 123, Metadata: cloneStringMap(metadata),
+		f.conversation = codexcli.Conversation{
+			ID: "conv_test", Metadata: cloneStringMap(metadata),
 		}
 	}
 	return f.conversation, nil
 }
 
-func (f *fakeDocsOpenAI) RetrieveConversation(_ context.Context, _ string) (openaiapi.Conversation, error) {
+func (f *fakeDocsCLI) RetrieveConversation(_ context.Context, _ string) (codexcli.Conversation, error) {
 	f.retrieveCalls++
 	if f.retrieveErr != nil {
-		return openaiapi.Conversation{}, f.retrieveErr
+		return codexcli.Conversation{}, f.retrieveErr
 	}
 	return f.conversation, nil
 }
 
-func (f *fakeDocsOpenAI) ListConversationItems(_ context.Context, _ string) ([]openaiapi.Item, error) {
+func (f *fakeDocsCLI) ListConversationItems(_ context.Context, _ string) ([]codexcli.Item, error) {
 	f.listCalls++
 	if f.listErr != nil {
 		return nil, f.listErr
 	}
-	return append([]openaiapi.Item(nil), f.items...), nil
+	return append([]codexcli.Item(nil), f.items...), nil
 }
 
-func (f *fakeDocsOpenAI) CreateResponse(_ context.Context, request openaiapi.ResponseRequest) (openaiapi.Response, error) {
+func (f *fakeDocsCLI) CreateResponse(_ context.Context, request codexcli.ResponseRequest) (codexcli.Response, error) {
 	f.responseCalls++
 	f.responseRequests = append(f.responseRequests, request)
 	if len(f.responseSteps) == 0 {
-		return openaiapi.Response{}, errors.New("unexpected CreateResponse")
+		return codexcli.Response{}, errors.New("unexpected CreateResponse")
 	}
 	step := f.responseSteps[0]
 	f.responseSteps = f.responseSteps[1:]
@@ -75,7 +78,7 @@ func (f *fakeDocsOpenAI) CreateResponse(_ context.Context, request openaiapi.Res
 }
 
 func TestDocsConversationCreateBindsCurrentUserCommitAndScope(t *testing.T) {
-	fake := &fakeDocsOpenAI{}
+	fake := &fakeDocsCLI{}
 	s := newDocsConversationServer(t, fake, map[int64]struct{}{9: {}})
 	mux := newHTTPMux(s)
 
@@ -103,17 +106,29 @@ func TestDocsConversationCreateBindsCurrentUserCommitAndScope(t *testing.T) {
 	}
 }
 
+func TestDocsConversationCreationIsRateLimitedBeforeAllocatingFiles(t *testing.T) {
+	fake := &fakeDocsCLI{}
+	s := newDocsConversationServer(t, fake, nil)
+	s.docsRateLimiter = newDocsRateLimiter(1, 16, time.Hour, time.Now)
+	mux := newHTTPMux(s)
+	first := docsRequest(t, mux, s, http.MethodPost, "/api/docs/conversations", 1, "")
+	second := docsRequest(t, mux, s, http.MethodPost, "/api/docs/conversations", 1, "")
+	if first.Code != http.StatusCreated || second.Code != http.StatusTooManyRequests || fake.createCalls != 1 {
+		t.Fatalf("creation rate limit: first=%d second=%d allocations=%d", first.Code, second.Code, fake.createCalls)
+	}
+}
+
 func TestDocsConversationRestoresOnlyDisplayMessagesAndVerifiedCitations(t *testing.T) {
-	fake := &fakeDocsOpenAI{}
+	fake := &fakeDocsCLI{}
 	s := newDocsConversationServer(t, fake, map[int64]struct{}{})
-	fake.conversation = openaiapi.Conversation{
-		ID: "conv_test", Object: "conversation", CreatedAt: 123,
+	fake.conversation = codexcli.Conversation{
+		ID:       "conv_test",
 		Metadata: docsassistant.ConversationMetadata(s.jwtSecret, 1, docsTestCommit, docsstore.ScopePublic),
 	}
-	fake.items = []openaiapi.Item{
-		{ID: "msg_1", Type: "message", Role: "user", Status: "completed", Content: []openaiapi.Content{{Type: "input_text", Text: "钱包怎么算？"}}},
+	fake.items = []codexcli.Item{
+		{ID: "msg_1", Type: "message", Role: "user", Status: "completed", Content: []codexcli.Content{{Type: "input_text", Text: "钱包怎么算？"}}},
 		{ID: "fc_1", Type: "function_call", CallID: "call_1", Name: "search_docs", Arguments: `{}`},
-		{ID: "msg_2", Type: "message", Role: "assistant", Status: "completed", Content: []openaiapi.Content{{Type: "output_text", Text: `{"answer":"按本地账本计算。","citations":[{"kind":"document","title":"Public","document_id":"public","anchor":"public"}]}`}}},
+		{ID: "msg_2", Type: "message", Role: "assistant", Status: "completed", Content: []codexcli.Content{{Type: "output_text", Text: `{"answer":"按本地账本计算。","citations":[{"kind":"document","title":"Public","document_id":"public","anchor":"public"}]}`}}},
 	}
 
 	restored := docsRequest(t, newHTTPMux(s), s, http.MethodGet, "/api/docs/conversations/conv_test", 1, "")
@@ -155,16 +170,16 @@ func TestDocsConversationRejectsStaleOrMissingBeforeListing(t *testing.T) {
 		{name: "stale-commit", uid: 1, metadata: func(s *server) map[string]string {
 			return docsassistant.ConversationMetadata(s.jwtSecret, 1, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", docsstore.ScopePublic)
 		}},
-		{name: "upstream-not-found", uid: 1, retrieveErr: openaiapi.ErrNotFound},
+		{name: "upstream-not-found", uid: 1, retrieveErr: codexcli.ErrNotFound},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			fake := &fakeDocsOpenAI{retrieveErr: test.retrieveErr}
+			fake := &fakeDocsCLI{retrieveErr: test.retrieveErr}
 			s := newDocsConversationServer(t, fake, test.privileged)
 			metadata := docsassistant.ConversationMetadata(s.jwtSecret, 1, docsTestCommit, docsstore.ScopePublic)
 			if test.metadata != nil {
 				metadata = test.metadata(s)
 			}
-			fake.conversation = openaiapi.Conversation{ID: "conv_test", Object: "conversation", Metadata: metadata}
+			fake.conversation = codexcli.Conversation{ID: "conv_test", Metadata: metadata}
 
 			response := docsRequest(t, newHTTPMux(s), s, http.MethodGet, "/api/docs/conversations/conv_test", test.uid, "")
 			if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "DOCS_CONVERSATION_STALE") {
@@ -179,15 +194,15 @@ func TestDocsConversationRejectsStaleOrMissingBeforeListing(t *testing.T) {
 
 func TestDocsConversationRejectsMalformedHistoryAndDisabledChatSafely(t *testing.T) {
 	t.Run("malformed-assistant-message", func(t *testing.T) {
-		fake := &fakeDocsOpenAI{}
+		fake := &fakeDocsCLI{}
 		s := newDocsConversationServer(t, fake, nil)
-		fake.conversation = openaiapi.Conversation{
-			ID: "conv_test", Object: "conversation",
+		fake.conversation = codexcli.Conversation{
+			ID:       "conv_test",
 			Metadata: docsassistant.ConversationMetadata(s.jwtSecret, 1, docsTestCommit, docsstore.ScopePublic),
 		}
-		fake.items = []openaiapi.Item{{
+		fake.items = []codexcli.Item{{
 			ID: "msg_bad", Type: "message", Role: "assistant", Status: "completed",
-			Content: []openaiapi.Content{{Type: "output_text", Text: `{"answer":"missing citations"}`}},
+			Content: []codexcli.Content{{Type: "output_text", Text: `{"answer":"missing citations"}`}},
 		}}
 		response := docsRequest(t, newHTTPMux(s), s, http.MethodGet, "/api/docs/conversations/conv_test", 1, "")
 		if response.Code != http.StatusBadGateway || !strings.Contains(response.Body.String(), "DOCS_CHAT_UNAVAILABLE") {
@@ -203,15 +218,15 @@ func TestDocsConversationRejectsMalformedHistoryAndDisabledChatSafely(t *testing
 		{name: "hidden-document-citation", citation: `{"kind":"document","title":"Operations","document_id":"private","anchor":"internal"}`},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			fake := &fakeDocsOpenAI{}
+			fake := &fakeDocsCLI{}
 			s := newDocsConversationServer(t, fake, nil)
-			fake.conversation = openaiapi.Conversation{
-				ID: "conv_test", Object: "conversation",
+			fake.conversation = codexcli.Conversation{
+				ID:       "conv_test",
 				Metadata: docsassistant.ConversationMetadata(s.jwtSecret, 1, docsTestCommit, docsstore.ScopePublic),
 			}
-			fake.items = []openaiapi.Item{{
+			fake.items = []codexcli.Item{{
 				ID: "msg_bad", Type: "message", Role: "assistant", Status: "completed",
-				Content: []openaiapi.Content{{Type: "output_text", Text: `{"answer":"not authorized","citations":[` + test.citation + `]}`}},
+				Content: []codexcli.Content{{Type: "output_text", Text: `{"answer":"not authorized","citations":[` + test.citation + `]}`}},
 			}}
 			response := docsRequest(t, newHTTPMux(s), s, http.MethodGet, "/api/docs/conversations/conv_test", 1, "")
 			if response.Code != http.StatusBadGateway || !strings.Contains(response.Body.String(), "DOCS_CHAT_UNAVAILABLE") {
@@ -221,15 +236,15 @@ func TestDocsConversationRejectsMalformedHistoryAndDisabledChatSafely(t *testing
 	}
 
 	t.Run("privileged-forged-source-coordinates", func(t *testing.T) {
-		fake := &fakeDocsOpenAI{}
+		fake := &fakeDocsCLI{}
 		s := newDocsConversationServer(t, fake, map[int64]struct{}{1: {}})
-		fake.conversation = openaiapi.Conversation{
-			ID: "conv_test", Object: "conversation",
+		fake.conversation = codexcli.Conversation{
+			ID:       "conv_test",
 			Metadata: docsassistant.ConversationMetadata(s.jwtSecret, 1, docsTestCommit, docsstore.ScopePrivileged),
 		}
-		fake.items = []openaiapi.Item{{
+		fake.items = []codexcli.Item{{
 			ID: "msg_bad_source", Type: "message", Role: "assistant", Status: "completed",
-			Content: []openaiapi.Content{{Type: "output_text", Text: `{"answer":"forged","citations":[{"kind":"source","repository":"core-service","path":"internal/forged.go","commit":"` + docsTestCommit + `","start_line":99,"end_line":120}]}`}},
+			Content: []codexcli.Content{{Type: "output_text", Text: `{"answer":"forged","citations":[{"kind":"source","repository":"core-service","path":"internal/forged.go","commit":"` + docsTestCommit + `","start_line":99,"end_line":120}]}`}},
 		}}
 		response := docsRequest(t, newHTTPMux(s), s, http.MethodGet, "/api/docs/conversations/conv_test", 1, "")
 		if response.Code != http.StatusBadGateway || !strings.Contains(response.Body.String(), "DOCS_CHAT_UNAVAILABLE") {
@@ -263,7 +278,7 @@ func TestDocsAskValidatesIdentityInputAndDocumentBeforeResponseOrRateToken(t *te
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			fake := &fakeDocsOpenAI{}
+			fake := &fakeDocsCLI{}
 			s := newDocsConversationServer(t, fake, nil)
 			s.docsAssistantModel = "gpt-test"
 			s.docsRateLimiter = newDocsRateLimiter(1, 16, time.Hour, func() time.Time { return time.Unix(100, 0) })
@@ -271,7 +286,7 @@ func TestDocsAskValidatesIdentityInputAndDocumentBeforeResponseOrRateToken(t *te
 			if test.metadata != nil {
 				metadata = test.metadata(s)
 			}
-			fake.conversation = openaiapi.Conversation{ID: "conv_test", Object: "conversation", Metadata: metadata}
+			fake.conversation = codexcli.Conversation{ID: "conv_test", Metadata: metadata}
 
 			response := docsJSONRequest(t, newHTTPMux(s), s, http.MethodPost, "/api/docs/conversations/conv_test/messages", 1, test.body)
 			if response.Code != test.wantStatus || !strings.Contains(response.Body.String(), test.wantError) {
@@ -288,15 +303,15 @@ func TestDocsAskValidatesIdentityInputAndDocumentBeforeResponseOrRateToken(t *te
 }
 
 func TestDocsAskReturnsVerifiedAnswerAndDoesNotRetryUpstream(t *testing.T) {
-	fake := &fakeDocsOpenAI{responseSteps: []fakeDocsResponseStep{
+	fake := &fakeDocsCLI{responseSteps: []fakeDocsResponseStep{
 		{response: docsToolResponse("resp_1", "call_1", "search_docs", `{"query":"wallet","limit":5}`)},
 		{response: docsTextResponse("resp_2", `{"answer":"钱包按本地账本计算。","citations":[{"kind":"document","title":"Public","document_id":"public","anchor":"public"}]}`)},
 	}}
 	s := newDocsConversationServer(t, fake, nil)
 	s.docsAssistantModel = "gpt-test"
 	s.docsRateLimiter = newDocsRateLimiter(6, 16, time.Hour, time.Now)
-	fake.conversation = openaiapi.Conversation{
-		ID: "conv_test", Object: "conversation",
+	fake.conversation = codexcli.Conversation{
+		ID:       "conv_test",
 		Metadata: docsassistant.ConversationMetadata(s.jwtSecret, 1, docsTestCommit, docsstore.ScopePublic),
 	}
 
@@ -318,16 +333,16 @@ func TestDocsAskReturnsVerifiedAnswerAndDoesNotRetryUpstream(t *testing.T) {
 	if fake.responseCalls != 2 || len(fake.responseRequests) != 2 || fake.responseRequests[0].ConversationID != "conv_test" {
 		t.Fatalf("response calls/requests = %d/%+v", fake.responseCalls, fake.responseRequests)
 	}
-	fake.items = []openaiapi.Item{
-		{ID: "msg_user", Type: "message", Role: "user", Status: "completed", Content: []openaiapi.Content{{Type: "input_text", Text: "钱包怎么算？"}}},
-		{ID: "msg_answer", Type: "message", Role: "assistant", Status: "completed", Content: []openaiapi.Content{{Type: "output_text", Text: `{"answer":"钱包按本地账本计算。","citations":[{"kind":"document","title":"Public","document_id":"public","anchor":"public"}]}`}}},
+	fake.items = []codexcli.Item{
+		{ID: "msg_user", Type: "message", Role: "user", Status: "completed", Content: []codexcli.Content{{Type: "input_text", Text: "钱包怎么算？"}}},
+		{ID: "msg_answer", Type: "message", Role: "assistant", Status: "completed", Content: []codexcli.Content{{Type: "output_text", Text: `{"answer":"钱包按本地账本计算。","citations":[{"kind":"document","title":"Public","document_id":"public","anchor":"public"}]}`}}},
 	}
 	restored := docsRequest(t, newHTTPMux(s), s, http.MethodGet, "/api/docs/conversations/conv_test", 1, "")
 	if restored.Code != http.StatusOK || !strings.Contains(restored.Body.String(), "钱包按本地账本计算") {
 		t.Fatalf("restored status=%d body=%s", restored.Code, restored.Body.String())
 	}
 
-	upstream := &fakeDocsOpenAI{responseSteps: []fakeDocsResponseStep{{err: context.DeadlineExceeded}}}
+	upstream := &fakeDocsCLI{responseSteps: []fakeDocsResponseStep{{err: context.DeadlineExceeded}}}
 	s = newDocsConversationServer(t, upstream, nil)
 	s.docsAssistantModel = "gpt-test"
 	s.docsRateLimiter = newDocsRateLimiter(6, 16, time.Hour, time.Now)
@@ -341,14 +356,14 @@ func TestDocsAskReturnsVerifiedAnswerAndDoesNotRetryUpstream(t *testing.T) {
 
 func TestDocsAskMapsRateLimitsAndUnverifiedAnswersWithoutBreakingPhaseOne(t *testing.T) {
 	now := time.Unix(100, 0)
-	fake := &fakeDocsOpenAI{responseSteps: []fakeDocsResponseStep{{
+	fake := &fakeDocsCLI{responseSteps: []fakeDocsResponseStep{{
 		response: docsTextResponse("resp_direct", `{"answer":"guess","citations":[{"kind":"document","title":"Public","document_id":"public","anchor":"public"}]}`),
 	}}}
 	s := newDocsConversationServer(t, fake, nil)
 	s.docsAssistantModel = "gpt-test"
 	s.docsRateLimiter = newDocsRateLimiter(1, 16, time.Hour, func() time.Time { return now })
-	fake.conversation = openaiapi.Conversation{
-		ID: "conv_test", Object: "conversation",
+	fake.conversation = codexcli.Conversation{
+		ID:       "conv_test",
 		Metadata: docsassistant.ConversationMetadata(s.jwtSecret, 1, docsTestCommit, docsstore.ScopePublic),
 	}
 	mux := newHTTPMux(s)
@@ -368,7 +383,7 @@ func TestDocsAskMapsRateLimitsAndUnverifiedAnswersWithoutBreakingPhaseOne(t *tes
 		t.Fatalf("phase-one manifest status=%d body=%s", manifest.Code, manifest.Body.String())
 	}
 
-	upstream := &fakeDocsOpenAI{responseSteps: []fakeDocsResponseStep{{err: &openaiapi.RateLimitError{RetryAfter: 1500 * time.Millisecond}}}}
+	upstream := &fakeDocsCLI{responseSteps: []fakeDocsResponseStep{{err: codexcli.ErrBusy}}}
 	s = newDocsConversationServer(t, upstream, nil)
 	s.docsAssistantModel = "gpt-test"
 	s.docsRateLimiter = newDocsRateLimiter(6, 16, time.Hour, time.Now)
@@ -390,22 +405,22 @@ func docsJSONRequest(t *testing.T, handler http.Handler, s *server, method, targ
 	return recorder
 }
 
-func docsToolResponse(id, callID, name, arguments string) openaiapi.Response {
-	return openaiapi.Response{ID: id, Object: "response", Status: "completed", Output: []openaiapi.Item{{
+func docsToolResponse(id, callID, name, arguments string) codexcli.Response {
+	return codexcli.Response{ID: id, Status: "completed", Output: []codexcli.Item{{
 		ID: id + "_tool", Type: "function_call", CallID: callID, Name: name, Arguments: arguments, Status: "completed",
 	}}}
 }
 
-func docsTextResponse(id, output string) openaiapi.Response {
-	return openaiapi.Response{ID: id, Object: "response", Status: "completed", OutputText: output, Output: []openaiapi.Item{{
-		ID: id + "_message", Type: "message", Role: "assistant", Status: "completed", Content: []openaiapi.Content{{Type: "output_text", Text: output}},
+func docsTextResponse(id, output string) codexcli.Response {
+	return codexcli.Response{ID: id, Status: "completed", OutputText: output, Output: []codexcli.Item{{
+		ID: id + "_message", Type: "message", Role: "assistant", Status: "completed", Content: []codexcli.Content{{Type: "output_text", Text: output}},
 	}}}
 }
 
-func newDocsConversationServer(t *testing.T, client openaiapi.Client, privileged map[int64]struct{}) *server {
+func newDocsConversationServer(t *testing.T, client codexcli.Client, privileged map[int64]struct{}) *server {
 	t.Helper()
 	s := newDocsTestServer(t, privileged)
-	s.docsOpenAI = client
+	s.docsCLI = client
 	return s
 }
 

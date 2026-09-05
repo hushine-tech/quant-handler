@@ -12,9 +12,9 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/hushine-tech/quant-handler/internal/codexcli"
 	"github.com/hushine-tech/quant-handler/internal/docsassistant"
 	"github.com/hushine-tech/quant-handler/internal/docsstore"
-	openaiapi "github.com/hushine-tech/quant-handler/internal/openai"
 )
 
 var docsConversationIDPattern = regexp.MustCompile(`^conv_[A-Za-z0-9_-]+$`)
@@ -32,8 +32,14 @@ func (s *server) handleDocsConversations(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
+	if s.docsRateLimiter != nil {
+		if allowed, retryAfter := s.docsRateLimiter.Allow(uid); !allowed {
+			writeDocsRateLimited(w, retryAfter)
+			return
+		}
+	}
 	metadata := docsassistant.ConversationMetadata(s.jwtSecret, uid, manifest.DocsCommit, scope)
-	conversation, err := s.docsOpenAI.CreateConversation(r.Context(), metadata)
+	conversation, err := s.docsCLI.CreateConversation(r.Context(), metadata)
 	if err != nil {
 		writeDocsConversationUpstreamError(w, err, false)
 		return
@@ -75,7 +81,7 @@ func (s *server) handleDocsConversation(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
-	conversation, err := s.docsOpenAI.RetrieveConversation(r.Context(), id)
+	conversation, err := s.docsCLI.RetrieveConversation(r.Context(), id)
 	if err != nil {
 		writeDocsConversationUpstreamError(w, err, true)
 		return
@@ -86,7 +92,7 @@ func (s *server) handleDocsConversation(w http.ResponseWriter, r *http.Request) 
 		writeErr(w, http.StatusConflict, "DOCS_CONVERSATION_STALE")
 		return
 	}
-	items, err := s.docsOpenAI.ListConversationItems(r.Context(), id)
+	items, err := s.docsCLI.ListConversationItems(r.Context(), id)
 	if err != nil {
 		writeDocsConversationUpstreamError(w, err, true)
 		return
@@ -119,7 +125,7 @@ func (s *server) handleDocsConversationMessage(w http.ResponseWriter, r *http.Re
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if s.docsAssistantModel == "" || s.docsRateLimiter == nil {
+	if s.docsRateLimiter == nil {
 		writeErr(w, http.StatusServiceUnavailable, "DOCS_CHAT_UNAVAILABLE")
 		return
 	}
@@ -145,7 +151,7 @@ func (s *server) handleDocsConversationMessage(w http.ResponseWriter, r *http.Re
 	if !ok {
 		return
 	}
-	conversation, err := s.docsOpenAI.RetrieveConversation(r.Context(), id)
+	conversation, err := s.docsCLI.RetrieveConversation(r.Context(), id)
 	if err != nil {
 		writeDocsConversationUpstreamError(w, err, true)
 		return
@@ -171,7 +177,7 @@ func (s *server) handleDocsConversationMessage(w http.ResponseWriter, r *http.Re
 		return
 	}
 	assistant, err := docsassistant.NewAssistant(docsassistant.AssistantOptions{
-		OpenAI: s.docsOpenAI, Retriever: retriever, Model: s.docsAssistantModel,
+		CLI: s.docsCLI, Retriever: retriever, Model: s.docsAssistantModel,
 	})
 	if err != nil {
 		writeErr(w, http.StatusServiceUnavailable, "DOCS_CHAT_UNAVAILABLE")
@@ -206,7 +212,7 @@ func (s *server) docsConversationRequest(w http.ResponseWriter, r *http.Request)
 		writeErr(w, http.StatusUnauthorized, "missing authenticated user")
 		return 0, "", docsstore.Manifest{}, false
 	}
-	if s.docsOpenAI == nil {
+	if s.docsCLI == nil {
 		writeErr(w, http.StatusServiceUnavailable, "DOCS_CHAT_UNAVAILABLE")
 		return 0, "", docsstore.Manifest{}, false
 	}
@@ -224,13 +230,12 @@ func (s *server) docsConversationRequest(w http.ResponseWriter, r *http.Request)
 }
 
 func writeDocsConversationUpstreamError(w http.ResponseWriter, err error, notFoundIsStale bool) {
-	if notFoundIsStale && errors.Is(err, openaiapi.ErrNotFound) {
+	if notFoundIsStale && errors.Is(err, codexcli.ErrNotFound) {
 		writeErr(w, http.StatusConflict, "DOCS_CONVERSATION_STALE")
 		return
 	}
-	var rateLimit *openaiapi.RateLimitError
-	if errors.As(err, &rateLimit) {
-		writeDocsRateLimited(w, rateLimit.RetryAfter)
+	if errors.Is(err, codexcli.ErrBusy) {
+		writeDocsRateLimited(w, 2*time.Second)
 		return
 	}
 	writeErr(w, http.StatusBadGateway, "DOCS_CHAT_UNAVAILABLE")

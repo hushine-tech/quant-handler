@@ -24,9 +24,11 @@ docs:
 
 docs_assistant:
   enabled: false
-  # OPENAI_BASE_URL can override this only for tests or an explicitly compatible endpoint.
-  base_url: "https://api.openai.com/v1"
-  # Set OPENAI_DOCS_MODEL and OPENAI_API_KEY in the process environment before enabling.
+  # Run codex login as the OS user running quant-handler; no API key is used.
+  binary: "codex"
+  state_dir: "./.docs-chat"
+  timeout_seconds: 180
+  # Empty uses the CLI default model, independent of personal config/plugins.
   model: ""
   requests_per_minute: 6
 

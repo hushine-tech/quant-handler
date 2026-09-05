@@ -15,9 +15,10 @@ HTTP BFF for the quant portal: JWT login, CORS for the React app, and gRPC fan-o
 | `DOCS_ROOT` | no | Read-only path to the verified document package `current` symlink. When absent or invalid, only document endpoints return `DOCS_UNAVAILABLE`; health and business APIs remain available. |
 | `DOCS_PRIVILEGED_USER_IDS` | no | Comma-separated positive user IDs allowed to read privileged architecture and operations documents. Every other authenticated user receives only public documents. |
 | `DOCS_CHAT_ENABLED` | no | Enables the document assistant endpoints. Disabled by default; document reading and browser search remain available. |
-| `OPENAI_API_KEY` | when chat enabled | OpenAI API key for `quant-handler`. Environment-only; it is never accepted from YAML or sent to the browser. |
-| `OPENAI_BASE_URL` | no | Responses/Conversations API base URL (default `https://api.openai.com/v1`; override for deterministic testing or an explicitly compatible endpoint). |
-| `OPENAI_DOCS_MODEL` | when chat enabled | Model used by the document assistant. |
+| `DOCS_CODEX_BINARY` | no | Codex CLI executable (default `codex`); run `codex login` using ChatGPT as the OS user running this service. No API key is used. |
+| `DOCS_CHAT_STATE_DIR` | no | Persistent, private conversation metadata and verified display history (default `./.docs-chat`). Keep this directory and the CLI's own session storage across service restarts. |
+| `DOCS_CODEX_MODEL` | no | Optional CLI model override; empty uses the CLI default. Personal config, plugins and hooks are not loaded. |
+| `DOCS_CHAT_TIMEOUT_SECONDS` | no | Per-CLI invocation timeout, default 180 seconds (1–600). |
 | `DOCS_CHAT_REQUESTS_PER_MINUTE` | when chat enabled | Positive per-user question limit. Invalid, stale, or inaccessible-document requests do not consume a token. |
 
 ## Run locally
@@ -57,7 +58,13 @@ Responses include an `ETag` and honor `If-None-Match`. The browser never receive
 
 ### Document assistant
 
-The assistant uses one OpenAI Conversation locator per authenticated Hushine user. Conversation metadata is bound to the JWT user, exact document commit, and access scope before history is read or a question is appended.
+The assistant invokes the locally installed Codex CLI with its saved ChatGPT login. A server-generated conversation locator is bound to the JWT user, exact document commit, and access scope before history is read or a question is appended. The first model turn runs `codex exec`; follow-ups run `codex exec resume` with that conversation's exact CLI thread ID, never `--last`. The browser stores only the opaque locator; verified messages and the thread mapping are private local files, not an extra database table.
+
+Only application-controlled `search_docs` / `search_source` results reach the model. CLI shell, browser, apps, plugins, hooks, subagents and image/file tools are disabled, with read-only sandbox and no approval prompts. The subprocess receives an allowlisted OS/proxy environment, not service or exchange credentials. API-key configuration and the former HTTP model client have been removed.
+
+Run `codex login status` as the service OS user before enabling `DOCS_CHAT_ENABLED=true`. CLI failure affects only Ask Codex, not document reading or trading APIs. Same-conversation requests cannot overlap; at most two CLI invocations run concurrently. `DOCS_CHAT_STATE_DIR` must be private, durable and owned by a single handler instance. Do not share this file-backed state between handler replicas. Clicking “开始新会话” creates a new locator and does not delete past CLI session files.
+
+Verification: `go test ./...`; explicitly opt into real account usage with `DOCS_REAL_CLI_TEST=1 go test ./internal/docsassistant -run TestRealCodexCLIConversation -v -count=1 -timeout 8m`.
 
 - `POST /api/docs/conversations` — create a Conversation for the current document release.
 - `GET /api/docs/conversations/{conversation_id}` — restore authorized display messages and verified citations.

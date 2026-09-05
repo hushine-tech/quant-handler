@@ -3,7 +3,6 @@ package config
 import (
 	"bytes"
 	"fmt"
-	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -43,8 +42,9 @@ type DocsConfig struct {
 
 type DocsAssistantConfig struct {
 	Enabled           bool   `yaml:"enabled"`
-	APIKey            string `yaml:"-"`
-	BaseURL           string `yaml:"base_url"`
+	Binary            string `yaml:"binary"`
+	StateDir          string `yaml:"state_dir"`
+	TimeoutSeconds    int    `yaml:"timeout_seconds"`
 	Model             string `yaml:"model"`
 	RequestsPerMinute int    `yaml:"requests_per_minute"`
 }
@@ -76,7 +76,9 @@ func Default() *Config {
 			},
 		},
 		DocsAssistant: DocsAssistantConfig{
-			BaseURL:           "https://api.openai.com/v1",
+			Binary:            "codex",
+			StateDir:          "./.docs-chat",
+			TimeoutSeconds:    180,
 			RequestsPerMinute: 6,
 		},
 		Log: *logCfg,
@@ -135,14 +137,21 @@ func (c *Config) ApplyEnvOverrides() error {
 		}
 		c.DocsAssistant.Enabled = value
 	}
-	if raw, present := os.LookupEnv("OPENAI_API_KEY"); present {
-		c.DocsAssistant.APIKey = strings.TrimSpace(raw)
+	if raw, present := os.LookupEnv("DOCS_CODEX_BINARY"); present {
+		c.DocsAssistant.Binary = strings.TrimSpace(raw)
 	}
-	if raw, present := os.LookupEnv("OPENAI_BASE_URL"); present {
-		c.DocsAssistant.BaseURL = strings.TrimSpace(raw)
+	if raw, present := os.LookupEnv("DOCS_CHAT_STATE_DIR"); present {
+		c.DocsAssistant.StateDir = strings.TrimSpace(raw)
 	}
-	if raw, present := os.LookupEnv("OPENAI_DOCS_MODEL"); present {
+	if raw, present := os.LookupEnv("DOCS_CODEX_MODEL"); present {
 		c.DocsAssistant.Model = strings.TrimSpace(raw)
+	}
+	if raw, present := os.LookupEnv("DOCS_CHAT_TIMEOUT_SECONDS"); present {
+		value, err := strconv.Atoi(strings.TrimSpace(raw))
+		if err != nil {
+			return fmt.Errorf("DOCS_CHAT_TIMEOUT_SECONDS must be an integer")
+		}
+		c.DocsAssistant.TimeoutSeconds = value
 	}
 	if raw, present := os.LookupEnv("DOCS_CHAT_REQUESTS_PER_MINUTE"); present {
 		value, err := strconv.Atoi(strings.TrimSpace(raw))
@@ -161,18 +170,14 @@ func (c *Config) ApplyEnvOverrides() error {
 }
 
 func validateDocsAssistant(config DocsAssistantConfig) error {
-	baseURL, err := url.Parse(strings.TrimSpace(config.BaseURL))
-	if err != nil || (baseURL.Scheme != "http" && baseURL.Scheme != "https") || baseURL.Host == "" || baseURL.RawQuery != "" || baseURL.Fragment != "" {
-		return fmt.Errorf("OPENAI_BASE_URL must be an absolute HTTP(S) URL")
-	}
 	if !config.Enabled {
 		return nil
 	}
-	if strings.TrimSpace(config.APIKey) == "" {
-		return fmt.Errorf("OPENAI_API_KEY is required when docs chat is enabled")
+	if strings.TrimSpace(config.Binary) == "" || strings.TrimSpace(config.StateDir) == "" {
+		return fmt.Errorf("DOCS_CODEX_BINARY and DOCS_CHAT_STATE_DIR must not be empty")
 	}
-	if strings.TrimSpace(config.Model) == "" {
-		return fmt.Errorf("OPENAI_DOCS_MODEL is required when docs chat is enabled")
+	if config.TimeoutSeconds <= 0 || config.TimeoutSeconds > 600 {
+		return fmt.Errorf("DOCS_CHAT_TIMEOUT_SECONDS must be between 1 and 600")
 	}
 	if config.RequestsPerMinute <= 0 {
 		return fmt.Errorf("DOCS_CHAT_REQUESTS_PER_MINUTE must be positive when docs chat is enabled")
