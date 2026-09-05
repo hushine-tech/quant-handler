@@ -37,6 +37,13 @@ func TestDocsPortalSmokeFromRelease(t *testing.T) {
 	if len(publicManifest.Documents) == 0 || len(privilegedManifest.Documents) <= len(publicManifest.Documents) {
 		t.Fatalf("document counts public=%d privileged=%d", len(publicManifest.Documents), len(privilegedManifest.Documents))
 	}
+	corpus, err := s.docs.RetrievalCorpusAt(privilegedManifest.DocsCommit)
+	if err != nil {
+		t.Fatalf("published retrieval corpus: %v", err)
+	}
+	if len(corpus.Documents) == 0 || len(corpus.Sources) == 0 {
+		t.Fatal("published docs/source retrieval corpus is empty")
+	}
 	for _, document := range publicManifest.Documents {
 		if document.Visibility != string(docsstore.ScopePublic) {
 			t.Fatalf("public manifest leaked %s document %s", document.Visibility, document.ID)
